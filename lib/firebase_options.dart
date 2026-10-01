@@ -41,46 +41,46 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBu6LbooXICYNrNYHbcEbPXfqVUhl1KZWw',
-    appId: '1:1089966321176:web:43c137160fb8496dd3dd6d',
-    messagingSenderId: '1089966321176',
-    projectId: 'skill-bridge-57253',
-    authDomain: 'skill-bridge-57253.firebaseapp.com',
-    storageBucket: 'skill-bridge-57253.firebasestorage.app',
-    measurementId: 'G-GK1KWVXHB9',
+    apiKey: 'AIzaSyDqC9KNiR-rX12pUcotO-OSZa_gocdzRAY',
+    appId: '1:980367306545:web:911d7553b9aaca984c8a10',
+    messagingSenderId: '980367306545',
+    projectId: 'skill-bridge-e8366',
+    authDomain: 'skill-bridge-e8366.firebaseapp.com',
+    storageBucket: 'skill-bridge-e8366.firebasestorage.app',
+    measurementId: 'G-GZZXFLXY45',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDuoMCKBB3cPhGkp76_6gF0urA6nGCwSbs',
-    appId: '1:1089966321176:android:e8f87bf932688d0bd3dd6d',
-    messagingSenderId: '1089966321176',
-    projectId: 'skill-bridge-57253',
-    storageBucket: 'skill-bridge-57253.firebasestorage.app',
+    apiKey: 'AIzaSyB_MAAYO97zEuyd6szgUZmUYCbwU-mdno8',
+    appId: '1:980367306545:android:b25056de240afa374c8a10',
+    messagingSenderId: '980367306545',
+    projectId: 'skill-bridge-e8366',
+    storageBucket: 'skill-bridge-e8366.firebasestorage.app',
   );
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBc2O1lacfwId_AF628QaRJpZtWQr88Ekw',
-    appId: '1:1089966321176:ios:f6a94a66b28f4503d3dd6d',
-    messagingSenderId: '1089966321176',
-    projectId: 'skill-bridge-57253',
-    storageBucket: 'skill-bridge-57253.firebasestorage.app',
+    apiKey: 'AIzaSyDTI_kpMN8II47QpMrLDxFaY-Xh90IqoHk',
+    appId: '1:980367306545:ios:6caf8c414a9f467e4c8a10',
+    messagingSenderId: '980367306545',
+    projectId: 'skill-bridge-e8366',
+    storageBucket: 'skill-bridge-e8366.firebasestorage.app',
     iosBundleId: 'com.example.skillBridge',
   );
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBc2O1lacfwId_AF628QaRJpZtWQr88Ekw',
-    appId: '1:1089966321176:ios:f6a94a66b28f4503d3dd6d',
-    messagingSenderId: '1089966321176',
-    projectId: 'skill-bridge-57253',
-    storageBucket: 'skill-bridge-57253.firebasestorage.app',
+    apiKey: 'AIzaSyDTI_kpMN8II47QpMrLDxFaY-Xh90IqoHk',
+    appId: '1:980367306545:ios:6caf8c414a9f467e4c8a10',
+    messagingSenderId: '980367306545',
+    projectId: 'skill-bridge-e8366',
+    storageBucket: 'skill-bridge-e8366.firebasestorage.app',
     iosBundleId: 'com.example.skillBridge',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyBu6LbooXICYNrNYHbcEbPXfqVUhl1KZWw',
-    appId: '1:1089966321176:web:31501277ba2fef27d3dd6d',
-    messagingSenderId: '1089966321176',
-    projectId: 'skill-bridge-57253',
-    authDomain: 'skill-bridge-57253.firebaseapp.com',
-    storageBucket: 'skill-bridge-57253.firebasestorage.app',
-    measurementId: 'G-YNEVB7WMSG',
+    apiKey: 'AIzaSyDqC9KNiR-rX12pUcotO-OSZa_gocdzRAY',
+    appId: '1:980367306545:web:a3343dda49e154434c8a10',
+    messagingSenderId: '980367306545',
+    projectId: 'skill-bridge-e8366',
+    authDomain: 'skill-bridge-e8366.firebaseapp.com',
+    storageBucket: 'skill-bridge-e8366.firebasestorage.app',
+    measurementId: 'G-Z2DVZE8WPD',
   );
 }

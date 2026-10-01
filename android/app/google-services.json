@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "1089966321176",
-    "project_id": "skill-bridge-57253",
-    "storage_bucket": "skill-bridge-57253.firebasestorage.app"
+    "project_number": "980367306545",
+    "project_id": "skill-bridge-e8366",
+    "storage_bucket": "skill-bridge-e8366.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1089966321176:android:e8f87bf932688d0bd3dd6d",
+        "mobilesdk_app_id": "1:980367306545:android:b25056de240afa374c8a10",
         "android_client_info": {
           "package_name": "com.example.skill_bridge"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDuoMCKBB3cPhGkp76_6gF0urA6nGCwSbs"
+          "current_key": "AIzaSyB_MAAYO97zEuyd6szgUZmUYCbwU-mdno8"
         }
       ],
       "services": {
