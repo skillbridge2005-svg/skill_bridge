@@ -8,156 +8,39 @@ class ClientProfileScreen extends StatelessWidget {
   const ClientProfileScreen({super.key});
 
   Future<void> _editName(BuildContext context, String currentName) async {
-    final controller = TextEditingController(text: currentName);
-
-    final formKey = GlobalKey<FormState>();
-
     final newName = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(22),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEEF2FF),
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: const Icon(
-                          Icons.edit_rounded,
-                          color: Color(0xFF4F46E5),
-                          size: 21,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Edit Name',
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF111827),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: controller,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'Full Name',
-                      hintText: 'Enter your full name',
-                      prefixIcon: const Icon(
-                        Icons.person_outline_rounded,
-                        color: Color(0xFF6B7280),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: const BorderSide(color: Color(0xFF818CF8)),
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Enter your name';
-                      }
-
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF6B7280),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                        ),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () {
-                          if (!formKey.currentState!.validate()) {
-                            return;
-                          }
-
-                          Navigator.pop(dialogContext, controller.text.trim());
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF4F46E5),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(13),
-                          ),
-                        ),
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+      barrierDismissible: false,
+      builder: (_) => _EditNameDialog(initialName: currentName),
     );
 
-    controller.dispose();
-
-    if (newName == null || newName.isEmpty) {
+    if (!context.mounted || newName == null || newName.trim().isEmpty) {
       return;
     }
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
       return;
     }
 
-    try {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
-        {'name': newName},
-      );
+    final updatedName = newName.trim();
 
-      await user.updateDisplayName(newName);
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'name': updatedName,
+      }, SetOptions(merge: true));
+
+      await user.updateDisplayName(updatedName);
 
       if (!context.mounted) return;
 
@@ -179,6 +62,15 @@ class ClientProfileScreen extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Something went wrong.\n$e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -187,10 +79,9 @@ class ClientProfileScreen extends StatelessWidget {
       return 'Client';
     }
 
-    return role.trim().replaceFirst(
-      role.trim()[0],
-      role.trim()[0].toUpperCase(),
-    );
+    final value = role.trim();
+
+    return value.replaceFirst(value[0], value[0].toUpperCase());
   }
 
   String _initial(String name) {
@@ -766,5 +657,176 @@ class _ProfileAmbientPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ProfileAmbientPainter oldDelegate) {
     return false;
+  }
+}
+
+class _EditNameDialog extends StatefulWidget {
+  final String initialName;
+
+  const _EditNameDialog({required this.initialName});
+
+  @override
+  State<_EditNameDialog> createState() => _EditNameDialogState();
+}
+
+class _EditNameDialogState extends State<_EditNameDialog> {
+  String _name = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _name = widget.initialName;
+  }
+
+  void _save() {
+    final name = _name.trim();
+
+    if (name.isEmpty) {
+      return;
+    }
+
+    if (name.length < 2) {
+      return;
+    }
+
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 450),
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Icon(
+                      Icons.edit_rounded,
+                      color: Color(0xFF4F46E5),
+                      size: 21,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Edit Profile',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Color(0xFF667085),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                initialValue: widget.initialName,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                onChanged: (value) {
+                  _name = value;
+                },
+                onFieldSubmitted: (_) {
+                  _save();
+                },
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  hintText: 'Enter your full name',
+                  prefixIcon: const Icon(
+                    Icons.person_outline_rounded,
+                    color: Color(0xFF4F46E5),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 16,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF4F46E5),
+                      width: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: Color(0xFF667085),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                    ),
+                    child: const Text(
+                      'Save Changes',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

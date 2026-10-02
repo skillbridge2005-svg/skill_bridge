@@ -41,9 +41,21 @@ class ClientPaymentsScreen extends StatelessWidget {
           ),
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    tooltip: 'Back',
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Color(0xFF111827),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   Container(
                     width: 44,
                     height: 44,
@@ -99,7 +111,7 @@ class ClientPaymentsScreen extends StatelessWidget {
           ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
-                .collectionGroup('payments')
+                .collection('payments')
                 .where('clientId', isEqualTo: user.uid)
                 .snapshots(),
             builder: (context, snapshot) {
@@ -112,13 +124,25 @@ class ClientPaymentsScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _PaymentsErrorCard(
-                      message: 'Unable to load payments.\n${snapshot.error}',
+                      message:
+                          'Unable to load payments.\n'
+                          '${snapshot.error}',
                     ),
                   ),
                 );
               }
 
               final payments = snapshot.data?.docs ?? [];
+
+              final pendingPayments = payments.where((document) {
+                final status = document.data()['status']?.toString() ?? '';
+                return status == 'pending';
+              }).toList();
+
+              final paymentHistory = payments.where((document) {
+                final status = document.data()['status']?.toString() ?? '';
+                return status != 'pending';
+              }).toList();
 
               if (payments.isEmpty) {
                 return const _EmptyPayments();
@@ -134,19 +158,54 @@ class ClientPaymentsScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const _PaymentsSectionHeading(),
-                        const SizedBox(height: 18),
-                        Column(
-                          children: payments
-                              .map(
-                                (paymentDocument) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _PaymentCard(
-                                    payment: paymentDocument.data(),
-                                  ),
+
+                        if (pendingPayments.isNotEmpty) ...[
+                          const SizedBox(height: 26),
+                          const _PaymentSectionTitle(
+                            eyebrow: 'ACTION NEEDED',
+                            title: 'Pending Payments',
+                            subtitle:
+                                'Payments that are waiting for your action.',
+                            color: Color(0xFFD97706),
+                          ),
+                          const SizedBox(height: 14),
+                          Column(
+                            children: pendingPayments.map((paymentDocument) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _PaymentCard(
+                                  payment: paymentDocument.data(),
+                                  isPending: true,
                                 ),
-                              )
-                              .toList(),
-                        ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+
+                        if (paymentHistory.isNotEmpty) ...[
+                          SizedBox(
+                            height: pendingPayments.isNotEmpty ? 18 : 26,
+                          ),
+                          const _PaymentSectionTitle(
+                            eyebrow: 'HISTORY',
+                            title: 'Payment History',
+                            subtitle:
+                                'Your completed and previous payment records.',
+                            color: Color(0xFF4F46E5),
+                          ),
+                          const SizedBox(height: 14),
+                          Column(
+                            children: paymentHistory.map((paymentDocument) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _PaymentCard(
+                                  payment: paymentDocument.data(),
+                                  isPending: false,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -179,7 +238,7 @@ class _PaymentsSectionHeading extends StatelessWidget {
         ),
         SizedBox(height: 4),
         Text(
-          'Payment history',
+          'Payments',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
@@ -189,8 +248,58 @@ class _PaymentsSectionHeading extends StatelessWidget {
         ),
         SizedBox(height: 4),
         Text(
-          'Track your project payments and transaction status.',
+          'Track pending payments and your payment history.',
           style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentSectionTitle extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+  final Color color;
+
+  const _PaymentSectionTitle({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.25,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF111827),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 11.5,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
     );
@@ -199,8 +308,9 @@ class _PaymentsSectionHeading extends StatelessWidget {
 
 class _PaymentCard extends StatelessWidget {
   final Map<String, dynamic> payment;
+  final bool isPending;
 
-  const _PaymentCard({required this.payment});
+  const _PaymentCard({required this.payment, required this.isPending});
 
   String _formatStatus(String status) {
     switch (status) {
@@ -284,12 +394,16 @@ class _PaymentCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: const [
+        border: Border.all(
+          color: isPending ? const Color(0xFFFDE3B0) : const Color(0xFFE5E7EB),
+        ),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x060F172A),
+            color: isPending
+                ? const Color(0x0FD97706)
+                : const Color(0x060F172A),
             blurRadius: 17,
-            offset: Offset(0, 6),
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -310,9 +424,11 @@ class _PaymentCard extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.all(Radius.circular(16)),
                 ),
-                child: const Icon(
-                  Icons.currency_rupee_rounded,
-                  color: Color(0xFF4F46E5),
+                child: Icon(
+                  isPending
+                      ? Icons.pending_actions_rounded
+                      : Icons.currency_rupee_rounded,
+                  color: const Color(0xFF4F46E5),
                   size: 24,
                 ),
               ),
@@ -418,6 +534,38 @@ class _PaymentCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+          if (isPending) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7E8),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 17,
+                    color: Color(0xFFD97706),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Payment is waiting for completion.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF92400E),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ],
