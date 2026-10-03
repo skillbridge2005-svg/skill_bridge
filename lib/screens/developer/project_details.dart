@@ -1,8 +1,11 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'apply_project.dart';
 
 import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
@@ -102,15 +105,13 @@ class _ProjectDetailsState extends State<ProjectDetails>
       curve: Curves.easeOutCubic,
     );
 
-    _headerSlide = Tween<Offset>(
-      begin: const Offset(0, 0.08),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _headerController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _headerSlide = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _headerController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
 
     _contentFade = CurvedAnimation(
       parent: _contentController,
@@ -121,14 +122,11 @@ class _ProjectDetailsState extends State<ProjectDetails>
 
     _headerController.forward();
 
-    Future<void>.delayed(
-      const Duration(milliseconds: 180),
-      () {
-        if (mounted) {
-          _contentController.forward();
-        }
-      },
-    );
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (mounted) {
+        _contentController.forward();
+      }
+    });
 
     _loadDeveloperProfile();
     _listenToSavedProjects();
@@ -179,9 +177,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       final uid = FirebaseAuth.instance.currentUser?.uid;
 
       if (uid == null || uid.trim().isEmpty) {
-        throw Exception(
-          'No authenticated developer account was found.',
-        );
+        throw Exception('No authenticated developer account was found.');
       }
 
       final profileSnapshot = await FirebaseFirestore.instance
@@ -194,34 +190,28 @@ class _ProjectDetailsState extends State<ProjectDetails>
           .doc(uid)
           .get();
 
-      final profileData =
-          profileSnapshot.data() ?? <String, dynamic>{};
+      final profileData = profileSnapshot.data() ?? <String, dynamic>{};
 
-      final userData =
-          userSnapshot.data() ?? <String, dynamic>{};
+      final userData = userSnapshot.data() ?? <String, dynamic>{};
 
       if (!mounted) return;
 
       setState(() {
-        _developerSkills = _readStringList(
-          profileData['skills'],
-        );
+        _developerSkills = _readStringList(profileData['skills']);
 
-        _developerTechnologies = _readStringList(
-          profileData['technologies'],
-        );
+        _developerTechnologies = _readStringList(profileData['technologies']);
 
         _developerProjectType =
             _readString(profileData['projectType']) ??
-                _readString(userData['projectType']);
+            _readString(userData['projectType']);
 
         _developerWorkMode =
             _readString(profileData['workMode']) ??
-                _readString(userData['workMode']);
+            _readString(userData['workMode']);
 
         _developerDuration =
             _readString(profileData['projectDuration']) ??
-                _readString(profileData['duration']);
+            _readString(profileData['duration']);
 
         _isProfileLoading = false;
       });
@@ -238,8 +228,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
   }
 
   void _listenToSavedProjects() {
-    _savedProjectsSubscription =
-        _projectService.watchSavedProjectIds().listen(
+    _savedProjectsSubscription = _projectService.watchSavedProjectIds().listen(
       (ids) {
         if (!mounted) return;
 
@@ -313,9 +302,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
     try {
       await _loadDeveloperProfile();
 
-      await Future<void>.delayed(
-        const Duration(milliseconds: 300),
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
 
       if (mounted) {
         _showSnackBar(
@@ -350,33 +337,11 @@ class _ProjectDetailsState extends State<ProjectDetails>
       return;
     }
 
-    if (widget.onApply != null) {
-      widget.onApply!();
-      return;
-    }
-
-    _showApplicationComingSoon();
-  }
-
-  void _showApplicationComingSoon() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return _ActionInfoSheet(
-          icon: Icons.send_rounded,
-          title: 'Application flow',
-          description:
-              'The project details page is ready. '
-              'The application form will be connected in the next module '
-              'through the application service.',
-          primaryLabel: 'Got it',
-          onPrimary: () {
-            Navigator.of(sheetContext).pop();
-          },
-        );
-      },
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ApplyProject(projectId: project.id, initialProject: project),
+      ),
     );
   }
 
@@ -387,10 +352,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
         'Project ID: ${project.id}';
 
     try {
-      await _copyToClipboard(
-        shareText,
-        message: 'Project information copied.',
-      );
+      await _copyToClipboard(shareText, message: 'Project information copied.');
     } catch (_) {
       if (mounted) {
         _showSnackBar(
@@ -406,16 +368,11 @@ class _ProjectDetailsState extends State<ProjectDetails>
     String value, {
     String message = 'Copied.',
   }) async {
-    await Clipboard.setData(
-      ClipboardData(text: value),
-    );
+    await Clipboard.setData(ClipboardData(text: value));
 
     if (!mounted) return;
 
-    _showSnackBar(
-      message,
-      icon: Icons.content_copy_rounded,
-    );
+    _showSnackBar(message, icon: Icons.content_copy_rounded);
   }
 
   // ===========================================================================
@@ -426,24 +383,31 @@ class _ProjectDetailsState extends State<ProjectDetails>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _background,
+      floatingActionButton: FloatingActionButton.small(
+    heroTag: 'project-details-back',
+    backgroundColor: Colors.white,
+    foregroundColor: _textPrimary,
+    elevation: 4,
+    onPressed: () {
+      Navigator.of(context).maybePop();
+    },
+    child: const Icon(
+      Icons.arrow_back_rounded,
+    ),
+  ),
       body: SafeArea(
         bottom: false,
         child: StreamBuilder<ProjectModel?>(
-          stream: _projectService.watchProject(
-            widget.projectId,
-          ),
+          stream: _projectService.watchProject(widget.projectId),
           initialData: _initialProject,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return _buildErrorState(
-                snapshot.error.toString(),
-              );
+              return _buildErrorState(snapshot.error.toString());
             }
 
             final project = snapshot.data;
 
-            if (snapshot.connectionState ==
-                    ConnectionState.waiting &&
+            if (snapshot.connectionState == ConnectionState.waiting &&
                 project == null) {
               return _buildLoadingState();
             }
@@ -459,9 +423,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
         ),
       ),
       bottomNavigationBar: StreamBuilder<ProjectModel?>(
-        stream: _projectService.watchProject(
-          widget.projectId,
-        ),
+        stream: _projectService.watchProject(widget.projectId),
         initialData: _initialProject,
         builder: (context, snapshot) {
           final project = snapshot.data;
@@ -496,9 +458,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
             backgroundColor: _surface,
             surfaceTintColor: Colors.transparent,
             leading: Padding(
-              padding: const EdgeInsets.only(
-                left: 10,
-              ),
+              padding: const EdgeInsets.only(left: 10),
               child: _CircleIconButton(
                 icon: Icons.arrow_back_rounded,
                 tooltip: 'Back',
@@ -534,9 +494,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                 icon: isSaved
                     ? Icons.bookmark_rounded
                     : Icons.bookmark_border_rounded,
-                tooltip: isSaved
-                    ? 'Remove saved project'
-                    : 'Save project',
+                tooltip: isSaved ? 'Remove saved project' : 'Save project',
                 color: isSaved ? _primary : _textPrimary,
                 onPressed: _isSaving
                     ? null
@@ -550,30 +508,13 @@ class _ProjectDetailsState extends State<ProjectDetails>
           SliverToBoxAdapter(
             child: SlideTransition(
               position: _headerSlide,
-              child: FadeTransition(
-                opacity: _headerFade,
-                child: _buildHeroSection(
-                  project,
-                  matchPercentage,
-                  isSaved,
-                ),
-              ),
+              child: _buildHeroSection(project, matchPercentage, isSaved),
             ),
           ),
           SliverToBoxAdapter(
-            child: FadeTransition(
-              opacity: _contentFade,
-              child: _buildMainContent(
-                project,
-                matchPercentage,
-              ),
-            ),
+            child: _buildMainContent(project, matchPercentage),
           ),
-          const SliverPadding(
-            padding: EdgeInsets.only(
-              bottom: 130,
-            ),
-          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 130)),
         ],
       ),
     );
@@ -590,43 +531,28 @@ class _ProjectDetailsState extends State<ProjectDetails>
   ) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-        20,
-        24,
-        20,
-        28,
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFF0F1FF),
-            Color(0xFFF8F9FF),
-            Color(0xFFFFFFFF),
-          ],
+          colors: [Color(0xFFF0F1FF), Color(0xFFF8F9FF), Color(0xFFFFFFFF)],
         ),
       ),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: 1180,
-          ),
+          constraints: const BoxConstraints(maxWidth: 1180),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxWidth < 760;
 
               if (compact) {
                 return Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildProjectIcon(project),
                     const SizedBox(height: 18),
-                    _buildHeroText(
-                      project,
-                      matchPercentage,
-                    ),
+                    _buildHeroText(project, matchPercentage),
                     const SizedBox(height: 20),
                     _buildHeroMeta(project),
                   ],
@@ -634,17 +560,11 @@ class _ProjectDetailsState extends State<ProjectDetails>
               }
 
               return Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildProjectIcon(project),
                   const SizedBox(width: 22),
-                  Expanded(
-                    child: _buildHeroText(
-                      project,
-                      matchPercentage,
-                    ),
-                  ),
+                  Expanded(child: _buildHeroText(project, matchPercentage)),
                   const SizedBox(width: 24),
                   _buildHeroMeta(project),
                 ],
@@ -662,13 +582,9 @@ class _ProjectDetailsState extends State<ProjectDetails>
       child: AnimatedBuilder(
         animation: _pulseController,
         builder: (context, child) {
-          final scale = 1 +
-              (_pulseController.value * 0.015);
+          final scale = 1 + (_pulseController.value * 0.015);
 
-          return Transform.scale(
-            scale: scale,
-            child: child,
-          );
+          return Transform.scale(scale: scale, child: child);
         },
         child: Container(
           width: 78,
@@ -677,17 +593,12 @@ class _ProjectDetailsState extends State<ProjectDetails>
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                _primary,
-                _primaryLight,
-              ],
+              colors: [_primary, _primaryLight],
             ),
             borderRadius: BorderRadius.circular(22),
             boxShadow: [
               BoxShadow(
-                color: _primary.withValues(
-                  alpha: 0.22,
-                ),
+                color: _primary.withValues(alpha: 0.22),
                 blurRadius: 28,
                 offset: const Offset(0, 12),
               ),
@@ -703,31 +614,20 @@ class _ProjectDetailsState extends State<ProjectDetails>
     );
   }
 
-  Widget _buildHeroText(
-    ProjectModel project,
-    int matchPercentage,
-  ) {
+  Widget _buildHeroText(ProjectModel project, int matchPercentage) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            _StatusBadge(
-              status: project.status,
-            ),
+            _StatusBadge(status: project.status),
             const SizedBox(width: 8),
-            if (matchPercentage > 0)
-              _MatchBadge(
-                percentage: matchPercentage,
-              ),
+            if (matchPercentage > 0) _MatchBadge(percentage: matchPercentage),
           ],
         ),
         const SizedBox(height: 14),
         Text(
-          project.title.isEmpty
-              ? 'Untitled Project'
-              : project.title,
+          project.title.isEmpty ? 'Untitled Project' : project.title,
           style: const TextStyle(
             color: _textPrimary,
             fontSize: 30,
@@ -775,18 +675,12 @@ class _ProjectDetailsState extends State<ProjectDetails>
         _HeroInfoCard(
           icon: Icons.schedule_rounded,
           label: 'Duration',
-          value: _displayValue(
-            project.duration,
-            fallback: 'Flexible',
-          ),
+          value: _displayValue(project.duration, fallback: 'Flexible'),
         ),
         _HeroInfoCard(
           icon: Icons.public_rounded,
           label: 'Work mode',
-          value: _displayValue(
-            project.workMode,
-            fallback: 'Flexible',
-          ),
+          value: _displayValue(project.workMode, fallback: 'Flexible'),
         ),
       ],
     );
@@ -796,48 +690,31 @@ class _ProjectDetailsState extends State<ProjectDetails>
   // MAIN CONTENT
   // ===========================================================================
 
-  Widget _buildMainContent(
-    ProjectModel project,
-    int matchPercentage,
-  ) {
+  Widget _buildMainContent(ProjectModel project, int matchPercentage) {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: 1180,
-        ),
+        constraints: const BoxConstraints(maxWidth: 1180),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            24,
-            20,
-            30,
-          ),
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 30),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
 
               if (wide) {
                 return Row(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       flex: 7,
                       child: Column(
                         children: [
-                          _buildDescriptionCard(
-                            project,
-                          ),
+                          _buildDescriptionCard(project),
                           const SizedBox(height: 18),
                           _buildSkillsCard(project),
                           const SizedBox(height: 18),
-                          _buildTechnologiesCard(
-                            project,
-                          ),
+                          _buildTechnologiesCard(project),
                           const SizedBox(height: 18),
-                          _buildProjectDetailsCard(
-                            project,
-                          ),
+                          _buildProjectDetailsCard(project),
                         ],
                       ),
                     ),
@@ -846,10 +723,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                       flex: 4,
                       child: Column(
                         children: [
-                          _buildMatchCard(
-                            project,
-                            matchPercentage,
-                          ),
+                          _buildMatchCard(project, matchPercentage),
                           const SizedBox(height: 18),
                           _buildClientCard(project),
                           const SizedBox(height: 18),
@@ -863,10 +737,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
 
               return Column(
                 children: [
-                  _buildMatchCard(
-                    project,
-                    matchPercentage,
-                  ),
+                  _buildMatchCard(project, matchPercentage),
                   const SizedBox(height: 18),
                   _buildDescriptionCard(project),
                   const SizedBox(height: 18),
@@ -894,8 +765,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return _AnimatedSection(
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.description_outlined,
@@ -923,8 +793,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       return _buildEmptySectionCard(
         icon: Icons.psychology_outlined,
         title: 'Required skills',
-        message:
-            'No specific skills have been listed.',
+        message: 'No specific skills have been listed.',
       );
     }
 
@@ -932,8 +801,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       delay: const Duration(milliseconds: 80),
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.psychology_outlined,
@@ -944,15 +812,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
               spacing: 9,
               runSpacing: 9,
               children: project.skills
-                  .where(
-                    (skill) =>
-                        skill.trim().isNotEmpty,
-                  )
-                  .map(
-                    (skill) => _SkillChip(
-                      label: skill,
-                    ),
-                  )
+                  .where((skill) => skill.trim().isNotEmpty)
+                  .map((skill) => _SkillChip(label: skill))
                   .toList(),
             ),
           ],
@@ -966,8 +827,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       return _buildEmptySectionCard(
         icon: Icons.code_rounded,
         title: 'Technologies',
-        message:
-            'No specific technologies have been listed.',
+        message: 'No specific technologies have been listed.',
       );
     }
 
@@ -975,8 +835,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       delay: const Duration(milliseconds: 120),
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.code_rounded,
@@ -987,16 +846,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
               spacing: 9,
               runSpacing: 9,
               children: project.technologies
-                  .where(
-                    (technology) =>
-                        technology.trim().isNotEmpty,
-                  )
-                  .map(
-                    (technology) =>
-                        _TechnologyChip(
-                      label: technology,
-                    ),
-                  )
+                  .where((technology) => technology.trim().isNotEmpty)
+                  .map((technology) => _TechnologyChip(label: technology))
                   .toList(),
             ),
           ],
@@ -1010,8 +861,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       delay: const Duration(milliseconds: 160),
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.info_outline_rounded,
@@ -1020,8 +870,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
             const SizedBox(height: 18),
             LayoutBuilder(
               builder: (context, constraints) {
-                final compact =
-                    constraints.maxWidth < 520;
+                final compact = constraints.maxWidth < 520;
 
                 final items = [
                   _InfoTileData(
@@ -1056,16 +905,12 @@ class _ProjectDetailsState extends State<ProjectDetails>
                   _InfoTileData(
                     icon: Icons.people_alt_outlined,
                     label: 'Applications',
-                    value: project
-                        .applicationsCount
-                        .toString(),
+                    value: project.applicationsCount.toString(),
                   ),
                   _InfoTileData(
                     icon: Icons.flag_outlined,
                     label: 'Status',
-                    value: _capitalize(
-                      project.status,
-                    ),
+                    value: _capitalize(project.status),
                   ),
                 ];
 
@@ -1074,12 +919,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
                     children: items
                         .map(
                           (item) => Padding(
-                            padding:
-                                const EdgeInsets.only(
-                              bottom: 10,
-                            ),
-                            child:
-                                _InfoTile(data: item),
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _InfoTile(data: item),
                           ),
                         )
                         .toList(),
@@ -1088,20 +929,16 @@ class _ProjectDetailsState extends State<ProjectDetails>
 
                 return GridView.builder(
                   shrinkWrap: true,
-                  physics:
-                      const NeverScrollableScrollPhysics(),
+                  physics: const NeverScrollableScrollPhysics(),
                   itemCount: items.length,
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                     childAspectRatio: 2.9,
                   ),
                   itemBuilder: (context, index) {
-                    return _InfoTile(
-                      data: items[index],
-                    );
+                    return _InfoTile(data: items[index]);
                   },
                 );
               },
@@ -1112,24 +949,20 @@ class _ProjectDetailsState extends State<ProjectDetails>
     );
   }
 
-  Widget _buildMatchCard(
-    ProjectModel project,
-    int percentage,
-  ) {
+  Widget _buildMatchCard(ProjectModel project, int percentage) {
     final hasProfileData =
         _developerSkills.isNotEmpty ||
-            _developerTechnologies.isNotEmpty ||
-            _developerProjectType != null ||
-            _developerWorkMode != null ||
-            _developerDuration != null;
+        _developerTechnologies.isNotEmpty ||
+        _developerProjectType != null ||
+        _developerWorkMode != null ||
+        _developerDuration != null;
 
     return _AnimatedSection(
       delay: const Duration(milliseconds: 40),
       child: _SurfaceCard(
         padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1137,11 +970,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: _primary.withValues(
-                      alpha: 0.10,
-                    ),
-                    borderRadius:
-                        BorderRadius.circular(12),
+                    color: _primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(
                     Icons.auto_awesome_rounded,
@@ -1163,11 +993,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
               ],
             ),
             const SizedBox(height: 22),
-            Center(
-              child: _MatchCircle(
-                percentage: percentage,
-              ),
-            ),
+            Center(child: _MatchCircle(percentage: percentage)),
             const SizedBox(height: 18),
             Center(
               child: Text(
@@ -1212,8 +1038,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       delay: const Duration(milliseconds: 200),
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.business_center_outlined,
@@ -1227,13 +1052,9 @@ class _ProjectDetailsState extends State<ProjectDetails>
                   height: 52,
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFEEF2FF),
-                        Color(0xFFE0E7FF),
-                      ],
+                      colors: [Color(0xFFEEF2FF), Color(0xFFE0E7FF)],
                     ),
-                    borderRadius:
-                        BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Icon(
                     Icons.business_rounded,
@@ -1244,16 +1065,12 @@ class _ProjectDetailsState extends State<ProjectDetails>
                 const SizedBox(width: 13),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        clientName.isEmpty
-                            ? 'Client'
-                            : clientName,
+                        clientName.isEmpty ? 'Client' : clientName,
                         maxLines: 2,
-                        overflow:
-                            TextOverflow.ellipsis,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _textPrimary,
                           fontWeight: FontWeight.w800,
@@ -1281,11 +1098,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
               padding: const EdgeInsets.all(13),
               decoration: BoxDecoration(
                 color: const Color(0xFFF9FAFB),
-                borderRadius:
-                    BorderRadius.circular(13),
-                border: Border.all(
-                  color: _border,
-                ),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: _border),
               ),
               child: Row(
                 children: [
@@ -1319,8 +1133,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
       delay: const Duration(milliseconds: 240),
       child: _SurfaceCard(
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _SectionHeader(
               icon: Icons.timeline_rounded,
@@ -1363,20 +1176,13 @@ class _ProjectDetailsState extends State<ProjectDetails>
   }) {
     return _SurfaceCard(
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader(
-            icon: icon,
-            title: title,
-          ),
+          _SectionHeader(icon: icon, title: title),
           const SizedBox(height: 15),
           Text(
             message,
-            style: const TextStyle(
-              color: _textSecondary,
-              fontSize: 13.5,
-            ),
+            style: const TextStyle(color: _textSecondary, fontSize: 13.5),
           ),
         ],
       ),
@@ -1387,11 +1193,8 @@ class _ProjectDetailsState extends State<ProjectDetails>
   // BOTTOM ACTION BAR
   // ===========================================================================
 
-  Widget _buildBottomActionBar(
-    ProjectModel project,
-  ) {
-    final isSaved =
-        _savedProjectIds.contains(project.id);
+  Widget _buildBottomActionBar(ProjectModel project) {
+    final isSaved = _savedProjectIds.contains(project.id);
 
     final isOpen = project.isOpen;
 
@@ -1400,22 +1203,16 @@ class _ProjectDetailsState extends State<ProjectDetails>
       elevation: 18,
       child: SafeArea(
         top: false,
-        child: Center(
+        child: Align(
+          alignment: Alignment.center,
+
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 1180,
-            ),
+            constraints: const BoxConstraints(maxWidth: 1180),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                16,
-                12,
-                16,
-                14,
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final compact =
-                      constraints.maxWidth < 560;
+                  final compact = constraints.maxWidth < 560;
 
                   if (compact) {
                     return Column(
@@ -1430,8 +1227,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                                     : 'Applications are closed',
                                 style: const TextStyle(
                                   color: _textPrimary,
-                                  fontWeight:
-                                      FontWeight.w700,
+                                  fontWeight: FontWeight.w700,
                                   fontSize: 13.5,
                                 ),
                               ),
@@ -1440,8 +1236,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                               _budget(project),
                               style: const TextStyle(
                                 color: _primary,
-                                fontWeight:
-                                    FontWeight.w800,
+                                fontWeight: FontWeight.w800,
                                 fontSize: 14,
                               ),
                             ),
@@ -1455,23 +1250,15 @@ class _ProjectDetailsState extends State<ProjectDetails>
                                 onPressed: _isSaving
                                     ? null
                                     : () {
-                                        _toggleSave(
-                                          project,
-                                        );
+                                        _toggleSave(project);
                                       },
                                 icon: Icon(
                                   isSaved
-                                      ? Icons
-                                          .bookmark_rounded
-                                      : Icons
-                                          .bookmark_border_rounded,
+                                      ? Icons.bookmark_rounded
+                                      : Icons.bookmark_border_rounded,
                                   size: 18,
                                 ),
-                                label: Text(
-                                  isSaved
-                                      ? 'Saved'
-                                      : 'Save',
-                                ),
+                                label: Text(isSaved ? 'Saved' : 'Save'),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -1480,9 +1267,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                               child: _ApplyButton(
                                 enabled: isOpen,
                                 onPressed: () {
-                                  _handleApply(
-                                    project,
-                                  );
+                                  _handleApply(project);
                                 },
                               ),
                             ),
@@ -1493,11 +1278,11 @@ class _ProjectDetailsState extends State<ProjectDetails>
                   }
 
                   return Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Expanded(
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
                               isOpen
@@ -1505,8 +1290,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
                                   : 'Applications are currently closed',
                               style: const TextStyle(
                                 color: _textPrimary,
-                                fontWeight:
-                                    FontWeight.w800,
+                                fontWeight: FontWeight.w800,
                                 fontSize: 14,
                               ),
                             ),
@@ -1530,13 +1314,10 @@ class _ProjectDetailsState extends State<ProjectDetails>
                         icon: Icon(
                           isSaved
                               ? Icons.bookmark_rounded
-                              : Icons
-                                  .bookmark_border_rounded,
+                              : Icons.bookmark_border_rounded,
                           size: 18,
                         ),
-                        label: Text(
-                          isSaved ? 'Saved' : 'Save Project',
-                        ),
+                        label: Text(isSaved ? 'Saved' : 'Save Project'),
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
@@ -1571,9 +1352,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
           pinned: true,
           backgroundColor: Colors.white,
           leading: Padding(
-            padding: const EdgeInsets.only(
-              left: 10,
-            ),
+            padding: const EdgeInsets.only(left: 10),
             child: _CircleIconButton(
               icon: Icons.arrow_back_rounded,
               tooltip: 'Back',
@@ -1588,38 +1367,23 @@ class _ProjectDetailsState extends State<ProjectDetails>
             padding: const EdgeInsets.all(20),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: 1180,
-                ),
+                constraints: const BoxConstraints(maxWidth: 1180),
                 child: Column(
                   children: [
-                    const _SkeletonBox(
-                      height: 210,
-                      radius: 24,
-                    ),
+                    const _SkeletonBox(height: 210, radius: 24),
                     const SizedBox(height: 18),
                     Row(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           flex: 7,
                           child: Column(
                             children: const [
-                              _SkeletonBox(
-                                height: 210,
-                                radius: 20,
-                              ),
+                              _SkeletonBox(height: 210, radius: 20),
                               SizedBox(height: 18),
-                              _SkeletonBox(
-                                height: 160,
-                                radius: 20,
-                              ),
+                              _SkeletonBox(height: 160, radius: 20),
                               SizedBox(height: 18),
-                              _SkeletonBox(
-                                height: 150,
-                                radius: 20,
-                              ),
+                              _SkeletonBox(height: 150, radius: 20),
                             ],
                           ),
                         ),
@@ -1628,15 +1392,9 @@ class _ProjectDetailsState extends State<ProjectDetails>
                           flex: 4,
                           child: Column(
                             children: const [
-                              _SkeletonBox(
-                                height: 300,
-                                radius: 20,
-                              ),
+                              _SkeletonBox(height: 300, radius: 20),
                               SizedBox(height: 18),
-                              _SkeletonBox(
-                                height: 190,
-                                radius: 20,
-                              ),
+                              _SkeletonBox(height: 190, radius: 20),
                             ],
                           ),
                         ),
@@ -1705,25 +1463,16 @@ class _ProjectDetailsState extends State<ProjectDetails>
   List<String> _readStringList(dynamic value) {
     if (value is Iterable) {
       return value
-          .map(
-            (item) => item.toString().trim(),
-          )
-          .where(
-            (item) => item.isNotEmpty,
-          )
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
           .toList();
     }
 
-    if (value is String &&
-        value.trim().isNotEmpty) {
+    if (value is String && value.trim().isNotEmpty) {
       return value
           .split(',')
-          .map(
-            (item) => item.trim(),
-          )
-          .where(
-            (item) => item.isNotEmpty,
-          )
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
           .toList();
     }
 
@@ -1733,8 +1482,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
   String? _readString(dynamic value) {
     if (value == null) return null;
 
-    final stringValue =
-        value.toString().trim();
+    final stringValue = value.toString().trim();
 
     if (stringValue.isEmpty) {
       return null;
@@ -1776,10 +1524,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return '₹${value.toStringAsFixed(0)}';
   }
 
-  String _displayValue(
-    String value, {
-    required String fallback,
-  }) {
+  String _displayValue(String value, {required String fallback}) {
     final trimmed = value.trim();
 
     if (trimmed.isEmpty) {
@@ -1789,12 +1534,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return trimmed;
   }
 
-
-
-  String _formatDate(
-    DateTime? date, {
-    required String fallback,
-  }) {
+  String _formatDate(DateTime? date, {required String fallback}) {
     if (date == null) {
       return fallback;
     }
@@ -1865,27 +1605,15 @@ class _ProjectDetailsState extends State<ProjectDetails>
           backgroundColor: isError
               ? const Color(0xFFB91C1C)
               : const Color(0xFF111827),
-          margin: const EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            92,
-          ),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 92),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(14),
           ),
           content: Row(
             children: [
-              Icon(
-                icon,
-                color: Colors.white,
-                size: 19,
-              ),
+              Icon(icon, color: Colors.white, size: 19),
               const SizedBox(width: 10),
-              Expanded(
-                child: Text(message),
-              ),
+              Expanded(child: Text(message)),
             ],
           ),
         ),
@@ -1914,14 +1642,10 @@ class _SurfaceCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _ProjectDetailsState._border,
-        ),
+        border: Border.all(color: _ProjectDetailsState._border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.035,
-            ),
+            color: Colors.black.withValues(alpha: 0.035),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -1937,21 +1661,16 @@ class _SurfaceCard extends StatelessWidget {
 // =============================================================================
 
 class _AnimatedSection extends StatefulWidget {
-  const _AnimatedSection({
-    required this.child,
-    this.delay = Duration.zero,
-  });
+  const _AnimatedSection({required this.child, this.delay = Duration.zero});
 
   final Widget child;
   final Duration delay;
 
   @override
-  State<_AnimatedSection> createState() =>
-      _AnimatedSectionState();
+  State<_AnimatedSection> createState() => _AnimatedSectionState();
 }
 
-class _AnimatedSectionState
-    extends State<_AnimatedSection>
+class _AnimatedSectionState extends State<_AnimatedSection>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
@@ -1961,19 +1680,14 @@ class _AnimatedSectionState
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(
-        milliseconds: 600,
-      ),
+      duration: const Duration(milliseconds: 600),
     );
 
-    Future<void>.delayed(
-      widget.delay,
-      () {
-        if (mounted) {
-          _controller.forward();
-        }
-      },
-    );
+    Future<void>.delayed(widget.delay, () {
+      if (mounted) {
+        _controller.forward();
+      }
+    });
   }
 
   @override
@@ -2007,10 +1721,7 @@ class _AnimatedSectionState
 // =============================================================================
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.icon,
-    required this.title,
-  });
+  const _SectionHeader({required this.icon, required this.title});
 
   final IconData icon;
   final String title;
@@ -2023,24 +1734,17 @@ class _SectionHeader extends StatelessWidget {
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            color: _ProjectDetailsState._primary
-                .withValues(alpha: 0.09),
-            borderRadius:
-                BorderRadius.circular(11),
+            color: _ProjectDetailsState._primary.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(11),
           ),
-          child: Icon(
-            icon,
-            color: _ProjectDetailsState._primary,
-            size: 19,
-          ),
+          child: Icon(icon, color: _ProjectDetailsState._primary, size: 19),
         ),
         const SizedBox(width: 11),
         Expanded(
           child: Text(
             title,
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._textPrimary,
+              color: _ProjectDetailsState._textPrimary,
               fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
@@ -2069,42 +1773,25 @@ class _HeroInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(
-        minWidth: 135,
-      ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: 12,
-      ),
+      constraints: const BoxConstraints(minWidth: 135),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(
-          alpha: 0.85,
-        ),
-        borderRadius:
-            BorderRadius.circular(15),
-        border: Border.all(
-          color: _ProjectDetailsState._border,
-        ),
+        color: Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: _ProjectDetailsState._border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color:
-                _ProjectDetailsState._primary,
-          ),
+          Icon(icon, size: 18, color: _ProjectDetailsState._primary),
           const SizedBox(width: 8),
           Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
                 style: const TextStyle(
-                  color:
-                      _ProjectDetailsState._textSecondary,
+                  color: _ProjectDetailsState._textSecondary,
                   fontSize: 10.5,
                   fontWeight: FontWeight.w500,
                 ),
@@ -2113,8 +1800,7 @@ class _HeroInfoCard extends StatelessWidget {
               Text(
                 value,
                 style: const TextStyle(
-                  color:
-                      _ProjectDetailsState._textPrimary,
+                  color: _ProjectDetailsState._textPrimary,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w800,
                 ),
@@ -2132,36 +1818,25 @@ class _HeroInfoCard extends StatelessWidget {
 // =============================================================================
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({
-    required this.status,
-  });
+  const _StatusBadge({required this.status});
 
   final String status;
 
   @override
   Widget build(BuildContext context) {
-    final normalized =
-        status.trim().toLowerCase();
+    final normalized = status.trim().toLowerCase();
 
     final open = normalized == 'open';
 
-    final color = open
-        ? const Color(0xFF059669)
-        : const Color(0xFF6B7280);
+    final color = open ? const Color(0xFF059669) : const Color(0xFF6B7280);
 
-    final background = open
-        ? const Color(0xFFECFDF5)
-        : const Color(0xFFF3F4F6);
+    final background = open ? const Color(0xFFECFDF5) : const Color(0xFFF3F4F6);
 
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: background,
-        borderRadius:
-            BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(30),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2169,10 +1844,7 @@ class _StatusBadge extends StatelessWidget {
           Container(
             width: 7,
             height: 7,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(
@@ -2195,8 +1867,7 @@ class _StatusBadge extends StatelessWidget {
       return 'Unavailable';
     }
 
-    return trimmed[0].toUpperCase() +
-        trimmed.substring(1).toLowerCase();
+    return trimmed[0].toUpperCase() + trimmed.substring(1).toLowerCase();
   }
 }
 
@@ -2205,23 +1876,17 @@ class _StatusBadge extends StatelessWidget {
 // =============================================================================
 
 class _MatchBadge extends StatelessWidget {
-  const _MatchBadge({
-    required this.percentage,
-  });
+  const _MatchBadge({required this.percentage});
 
   final int percentage;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0xFFEEF2FF),
-        borderRadius:
-            BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(30),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2235,8 +1900,7 @@ class _MatchBadge extends StatelessWidget {
           Text(
             '$percentage% Match',
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._primary,
+              color: _ProjectDetailsState._primary,
               fontSize: 11,
               fontWeight: FontWeight.w800,
             ),
@@ -2252,9 +1916,7 @@ class _MatchBadge extends StatelessWidget {
 // =============================================================================
 
 class _MatchCircle extends StatelessWidget {
-  const _MatchCircle({
-    required this.percentage,
-  });
+  const _MatchCircle({required this.percentage});
 
   final int percentage;
 
@@ -2279,22 +1941,15 @@ class _MatchCircle extends StatelessWidget {
             width: 150,
             height: 150,
             child: TweenAnimationBuilder<double>(
-              tween: Tween<double>(
-                begin: 0,
-                end: percentage / 100,
-              ),
-              duration: const Duration(
-                milliseconds: 1200,
-              ),
+              tween: Tween<double>(begin: 0, end: percentage / 100),
+              duration: const Duration(milliseconds: 1200),
               curve: Curves.easeOutCubic,
-              builder:
-                  (context, value, child) {
+              builder: (context, value, child) {
                 return CircularProgressIndicator(
                   value: value,
                   strokeWidth: 10,
                   strokeCap: StrokeCap.round,
-                  color:
-                      _ProjectDetailsState._primary,
+                  color: _ProjectDetailsState._primary,
                 );
               },
             ),
@@ -2305,8 +1960,7 @@ class _MatchCircle extends StatelessWidget {
               Text(
                 '$percentage%',
                 style: const TextStyle(
-                  color:
-                      _ProjectDetailsState._textPrimary,
+                  color: _ProjectDetailsState._textPrimary,
                   fontSize: 32,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -1,
@@ -2315,8 +1969,7 @@ class _MatchCircle extends StatelessWidget {
               const Text(
                 'match',
                 style: TextStyle(
-                  color:
-                      _ProjectDetailsState._textSecondary,
+                  color: _ProjectDetailsState._textSecondary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -2334,42 +1987,32 @@ class _MatchCircle extends StatelessWidget {
 // =============================================================================
 
 class _SkillChip extends StatelessWidget {
-  const _SkillChip({
-    required this.label,
-  });
+  const _SkillChip({required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 8,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF5F3FF),
-        borderRadius:
-            BorderRadius.circular(10),
-        border: Border.all(
-          color: const Color(0xFFE9E5FF),
-        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE9E5FF)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(
             Icons.check_circle_outline_rounded,
-            color:
-                _ProjectDetailsState._primary,
+            color: _ProjectDetailsState._primary,
             size: 15,
           ),
           const SizedBox(width: 6),
           Text(
             label,
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._textPrimary,
+              color: _ProjectDetailsState._textPrimary,
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
             ),
@@ -2385,42 +2028,32 @@ class _SkillChip extends StatelessWidget {
 // =============================================================================
 
 class _TechnologyChip extends StatelessWidget {
-  const _TechnologyChip({
-    required this.label,
-  });
+  const _TechnologyChip({required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 8,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF9FAFB),
-        borderRadius:
-            BorderRadius.circular(10),
-        border: Border.all(
-          color: _ProjectDetailsState._border,
-        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _ProjectDetailsState._border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(
             Icons.code_rounded,
-            color:
-                _ProjectDetailsState._textSecondary,
+            color: _ProjectDetailsState._textSecondary,
             size: 15,
           ),
           const SizedBox(width: 6),
           Text(
             label,
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._textPrimary,
+              color: _ProjectDetailsState._textPrimary,
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
             ),
@@ -2448,51 +2081,34 @@ class _InfoTileData {
 }
 
 class _InfoTile extends StatelessWidget {
-  const _InfoTile({
-    required this.data,
-  });
+  const _InfoTile({required this.data});
 
   final _InfoTileData data;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 13,
-        vertical: 11,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
       decoration: BoxDecoration(
         color: const Color(0xFFFAFAFB),
-        borderRadius:
-            BorderRadius.circular(13),
-        border: Border.all(
-          color: _ProjectDetailsState._border,
-        ),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: _ProjectDetailsState._border),
       ),
       child: Row(
         children: [
-          Icon(
-            data.icon,
-            color:
-                _ProjectDetailsState._primary,
-            size: 18,
-          ),
+          Icon(data.icon, color: _ProjectDetailsState._primary, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              mainAxisAlignment:
-                  MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   data.label,
                   maxLines: 1,
-                  overflow:
-                      TextOverflow.ellipsis,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color:
-                        _ProjectDetailsState._textSecondary,
+                    color: _ProjectDetailsState._textSecondary,
                     fontSize: 10.5,
                   ),
                 ),
@@ -2500,11 +2116,9 @@ class _InfoTile extends StatelessWidget {
                 Text(
                   data.value,
                   maxLines: 1,
-                  overflow:
-                      TextOverflow.ellipsis,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color:
-                        _ProjectDetailsState._textPrimary,
+                    color: _ProjectDetailsState._textPrimary,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2542,8 +2156,7 @@ class _TimelineItem extends StatelessWidget {
     return SizedBox(
       height: 70,
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 28,
@@ -2553,17 +2166,14 @@ class _TimelineItem extends StatelessWidget {
                   Expanded(
                     child: Container(
                       width: 1,
-                      color:
-                          _ProjectDetailsState._border,
+                      color: _ProjectDetailsState._border,
                     ),
                   ),
                 Container(
                   width: 26,
                   height: 26,
                   decoration: BoxDecoration(
-                    color: _ProjectDetailsState
-                        ._primary
-                        .withValues(
+                    color: _ProjectDetailsState._primary.withValues(
                       alpha: 0.10,
                     ),
                     shape: BoxShape.circle,
@@ -2571,16 +2181,14 @@ class _TimelineItem extends StatelessWidget {
                   child: Icon(
                     icon,
                     size: 14,
-                    color:
-                        _ProjectDetailsState._primary,
+                    color: _ProjectDetailsState._primary,
                   ),
                 ),
                 if (!isLast)
                   Expanded(
                     child: Container(
                       width: 1,
-                      color:
-                          _ProjectDetailsState._border,
+                      color: _ProjectDetailsState._border,
                     ),
                   ),
               ],
@@ -2589,17 +2197,14 @@ class _TimelineItem extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Padding(
-              padding:
-                  const EdgeInsets.only(top: 1),
+              padding: const EdgeInsets.only(top: 1),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
                     style: const TextStyle(
-                      color:
-                          _ProjectDetailsState._textPrimary,
+                      color: _ProjectDetailsState._textPrimary,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
@@ -2608,8 +2213,7 @@ class _TimelineItem extends StatelessWidget {
                   Text(
                     subtitle,
                     style: const TextStyle(
-                      color:
-                          _ProjectDetailsState._textSecondary,
+                      color: _ProjectDetailsState._textSecondary,
                       fontSize: 11.5,
                     ),
                   ),
@@ -2628,9 +2232,7 @@ class _TimelineItem extends StatelessWidget {
 // =============================================================================
 
 class _ProfileHint extends StatelessWidget {
-  const _ProfileHint({
-    required this.message,
-  });
+  const _ProfileHint({required this.message});
 
   final String message;
 
@@ -2641,20 +2243,15 @@ class _ProfileHint extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFFF5F3FF),
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFE9E5FF),
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE9E5FF)),
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(
             Icons.info_outline_rounded,
-            color:
-                _ProjectDetailsState._primary,
+            color: _ProjectDetailsState._primary,
             size: 18,
           ),
           const SizedBox(width: 9),
@@ -2662,8 +2259,7 @@ class _ProfileHint extends StatelessWidget {
             child: Text(
               message,
               style: const TextStyle(
-                color:
-                    _ProjectDetailsState._textSecondary,
+                color: _ProjectDetailsState._textSecondary,
                 fontSize: 11.5,
                 height: 1.45,
               ),
@@ -2680,10 +2276,7 @@ class _ProfileHint extends StatelessWidget {
 // =============================================================================
 
 class _ApplyButton extends StatelessWidget {
-  const _ApplyButton({
-    required this.enabled,
-    required this.onPressed,
-  });
+  const _ApplyButton({required this.enabled, required this.onPressed});
 
   final bool enabled;
   final VoidCallback onPressed;
@@ -2693,38 +2286,24 @@ class _ApplyButton extends StatelessWidget {
     return SizedBox(
       height: 50,
       child: ElevatedButton.icon(
-        onPressed: enabled
-            ? onPressed
-            : null,
+        onPressed: enabled ? onPressed : null,
         icon: Icon(
-          enabled
-              ? Icons.send_rounded
-              : Icons.lock_outline_rounded,
+          enabled ? Icons.send_rounded : Icons.lock_outline_rounded,
           size: 18,
         ),
         label: Text(
-          enabled
-              ? 'Apply Now'
-              : 'Applications Closed',
-          style: const TextStyle(
-            fontWeight: FontWeight.w800,
-          ),
+          enabled ? 'Apply Now' : 'Applications Closed',
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor:
-              _ProjectDetailsState._primary,
+          backgroundColor: _ProjectDetailsState._primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor:
-              const Color(0xFFE5E7EB),
-          disabledForegroundColor:
-              const Color(0xFF9CA3AF),
+          disabledBackgroundColor: const Color(0xFFE5E7EB),
+          disabledForegroundColor: const Color(0xFF9CA3AF),
           elevation: enabled ? 5 : 0,
-          shadowColor:
-              _ProjectDetailsState._primary
-                  .withValues(alpha: 0.25),
+          shadowColor: _ProjectDetailsState._primary.withValues(alpha: 0.25),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(13),
+            borderRadius: BorderRadius.circular(13),
           ),
         ),
       ),
@@ -2757,18 +2336,14 @@ class _CircleIconButton extends StatelessWidget {
         onPressed: onPressed,
         icon: Icon(
           icon,
-          color: color ??
-              _ProjectDetailsState._textPrimary,
+          color: color ?? _ProjectDetailsState._textPrimary,
           size: 21,
         ),
         style: IconButton.styleFrom(
-          backgroundColor:
-              const Color(0xFFF9FAFB),
-          disabledForegroundColor:
-              const Color(0xFFD1D5DB),
+          backgroundColor: const Color(0xFFF9FAFB),
+          disabledForegroundColor: const Color(0xFFD1D5DB),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
       ),
@@ -2806,9 +2381,7 @@ class _ActionInfoSheet extends StatelessWidget {
       ),
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(26),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2818,8 +2391,7 @@ class _ActionInfoSheet extends StatelessWidget {
             height: 4,
             decoration: BoxDecoration(
               color: const Color(0xFFD1D5DB),
-              borderRadius:
-                  BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10),
             ),
           ),
           const SizedBox(height: 24),
@@ -2827,25 +2399,17 @@ class _ActionInfoSheet extends StatelessWidget {
             width: 58,
             height: 58,
             decoration: BoxDecoration(
-              color: _ProjectDetailsState._primary
-                  .withValues(alpha: 0.10),
-              borderRadius:
-                  BorderRadius.circular(17),
+              color: _ProjectDetailsState._primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(17),
             ),
-            child: Icon(
-              icon,
-              color:
-                  _ProjectDetailsState._primary,
-              size: 27,
-            ),
+            child: Icon(icon, color: _ProjectDetailsState._primary, size: 27),
           ),
           const SizedBox(height: 17),
           Text(
             title,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._textPrimary,
+              color: _ProjectDetailsState._textPrimary,
               fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
@@ -2855,8 +2419,7 @@ class _ActionInfoSheet extends StatelessWidget {
             description,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color:
-                  _ProjectDetailsState._textSecondary,
+              color: _ProjectDetailsState._textSecondary,
               fontSize: 13.5,
               height: 1.55,
             ),
@@ -2868,19 +2431,15 @@ class _ActionInfoSheet extends StatelessWidget {
             child: ElevatedButton(
               onPressed: onPrimary,
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    _ProjectDetailsState._primary,
+                backgroundColor: _ProjectDetailsState._primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(13),
                 ),
               ),
               child: Text(
                 primaryLabel,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -2895,21 +2454,16 @@ class _ActionInfoSheet extends StatelessWidget {
 // =============================================================================
 
 class _SkeletonBox extends StatefulWidget {
-  const _SkeletonBox({
-    required this.height,
-    required this.radius,
-  });
+  const _SkeletonBox({required this.height, required this.radius});
 
   final double height;
   final double radius;
 
   @override
-  State<_SkeletonBox> createState() =>
-      _SkeletonBoxState();
+  State<_SkeletonBox> createState() => _SkeletonBoxState();
 }
 
-class _SkeletonBoxState
-    extends State<_SkeletonBox>
+class _SkeletonBoxState extends State<_SkeletonBox>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
@@ -2919,9 +2473,7 @@ class _SkeletonBoxState
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(
-        milliseconds: 1200,
-      ),
+      duration: const Duration(milliseconds: 1200),
     )..repeat();
   }
 
@@ -2936,24 +2488,14 @@ class _SkeletonBoxState
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final value =
-            0.06 +
-            (_controller.value * 0.05);
+        final value = 0.06 + (_controller.value * 0.05);
 
         return Container(
           width: double.infinity,
           height: widget.height,
           decoration: BoxDecoration(
-            color: Color.fromRGBO(
-              229,
-              231,
-              235,
-              value + 0.10,
-            ),
-            borderRadius:
-                BorderRadius.circular(
-              widget.radius,
-            ),
+            color: Color.fromRGBO(229, 231, 235, value + 0.10),
+            borderRadius: BorderRadius.circular(widget.radius),
           ),
         );
       },
@@ -2990,47 +2532,35 @@ class _CenteredState extends StatelessWidget {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 82,
               height: 82,
               decoration: BoxDecoration(
-                color: _ProjectDetailsState._primary
-                    .withValues(alpha: 0.09),
-                borderRadius:
-                    BorderRadius.circular(24),
+                color: _ProjectDetailsState._primary.withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(24),
               ),
-              child: Icon(
-                icon,
-                color:
-                    _ProjectDetailsState._primary,
-                size: 38,
-              ),
+              child: Icon(icon, color: _ProjectDetailsState._primary, size: 38),
             ),
             const SizedBox(height: 22),
             Text(
               title,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color:
-                    _ProjectDetailsState._textPrimary,
+                color: _ProjectDetailsState._textPrimary,
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 10),
             ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 480,
-              ),
+              constraints: const BoxConstraints(maxWidth: 480),
               child: Text(
                 message,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color:
-                      _ProjectDetailsState._textSecondary,
+                  color: _ProjectDetailsState._textSecondary,
                   fontSize: 14,
                   height: 1.55,
                 ),
@@ -3044,45 +2574,33 @@ class _CenteredState extends StatelessWidget {
               children: [
                 ElevatedButton.icon(
                   onPressed: onPrimary,
-                  icon: const Icon(
-                    Icons.arrow_back_rounded,
-                  ),
+                  icon: const Icon(Icons.arrow_back_rounded),
                   label: Text(primaryLabel),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        _ProjectDetailsState._primary,
+                    backgroundColor: _ProjectDetailsState._primary,
                     foregroundColor: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(
+                    padding: const EdgeInsets.symmetric(
                       horizontal: 18,
                       vertical: 13,
                     ),
-                    shape:
-                        RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
                     ),
                   ),
                 ),
-                if (secondaryLabel != null &&
-                    onSecondary != null)
+                if (secondaryLabel != null && onSecondary != null)
                   OutlinedButton(
                     onPressed: onSecondary,
-                    style:
-                        OutlinedButton.styleFrom(
-                      padding:
-                          const EdgeInsets.symmetric(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 18,
                         vertical: 13,
                       ),
-                      shape:
-                          RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(13),
                       ),
                     ),
-                    child:
-                        Text(secondaryLabel!),
+                    child: Text(secondaryLabel!),
                   ),
               ],
             ),
@@ -3104,6 +2622,5 @@ String _capitalize(String value) {
     return '';
   }
 
-  return trimmed[0].toUpperCase() +
-      trimmed.substring(1).toLowerCase();
+  return trimmed[0].toUpperCase() + trimmed.substring(1).toLowerCase();
 }

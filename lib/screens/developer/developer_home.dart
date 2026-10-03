@@ -4,7 +4,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'developer_profile.dart';
+import 'my_applications.dart';
 import 'discover_projects.dart';
+import 'active_projects.dart';
+import 'teams.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -76,7 +79,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
   }
 
 void _selectNav(int index) {
-  // Discover Projects is a separate screen.
+  // Discover Projects
   if (index == 1) {
     Navigator.push(
       context,
@@ -87,7 +90,40 @@ void _selectNav(int index) {
     return;
   }
 
-  // My Profile is a separate screen.
+  // My Applications
+  if (index == 2) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MyApplications(),
+      ),
+    );
+    return;
+  }
+
+  // Active Projects
+  if (index == 3) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ActiveProjects(),
+      ),
+    );
+    return;
+  }
+
+  // Teams
+if (index == 4) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const Teams(),
+    ),
+  );
+  return;
+}
+
+  // My Profile
   if (index == 6) {
     Navigator.push(
       context,

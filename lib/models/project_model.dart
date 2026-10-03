@@ -195,7 +195,12 @@ class ProjectModel {
   }
 
   /// Whether this project is currently open for applications.
-  bool get isOpen => status.toLowerCase() == 'open';
+bool get isOpen {
+  final normalizedStatus = status.trim().toLowerCase();
+
+  return normalizedStatus == 'open' ||
+      normalizedStatus == 'requirement';
+}
 
   /// Whether the project has a defined budget range.
   bool get hasBudgetRange =>

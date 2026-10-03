@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'project_details.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -8,9 +10,7 @@ import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
 
 class DiscoverProjects extends StatefulWidget {
-  const DiscoverProjects({
-    super.key,
-  });
+  const DiscoverProjects({super.key});
 
   @override
   State<DiscoverProjects> createState() => _DiscoverProjectsState();
@@ -19,16 +19,15 @@ class DiscoverProjects extends StatefulWidget {
 class _DiscoverProjectsState extends State<DiscoverProjects>
     with TickerProviderStateMixin {
   final ProjectService _projectService = ProjectService();
-late final Stream<List<ProjectModel>> _openProjectsStream;
-StreamSubscription<List<ProjectModel>>? _projectsSubscription;
 
-String? _lastProjectSnapshotSignature;
+  late final Stream<List<ProjectModel>> _openProjectsStream;
 
-  final TextEditingController _searchController =
-      TextEditingController();
+  // Keeps the exact stream list that has already been applied to state.
+  // This prevents StreamBuilder rebuilds from scheduling endless setState calls.
 
-  final ScrollController _scrollController =
-      ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+
+  final ScrollController _scrollController = ScrollController();
 
   late final AnimationController _headerController;
   late final AnimationController _contentController;
@@ -39,7 +38,9 @@ String? _lastProjectSnapshotSignature;
   late final Animation<double> _contentFade;
 
   StreamSubscription<Set<String>>? _savedProjectsSubscription;
+  StreamSubscription<List<ProjectModel>>? _projectsSubscription;
 
+  bool _projectsLoading = true;
   List<ProjectModel> _allProjects = [];
   List<ProjectModel> _filteredProjects = [];
   List<ProjectRecommendation> _recommendations = [];
@@ -75,22 +76,7 @@ String? _lastProjectSnapshotSignature;
   @override
   void initState() {
     super.initState();
-_openProjectsStream =
-    _projectService.watchOpenProjects();
-
-_projectsSubscription = _openProjectsStream.listen(
-  (projects) {
-    _onProjectsChanged(projects);
-  },
-  onError: (error) {
-    if (!mounted) return;
-
-    setState(() {
-      _errorMessage =
-          'Unable to load projects. Please try again.';
-    });
-  },
-);
+    _openProjectsStream = _projectService.watchOpenProjects();
 
     _headerController = AnimationController(
       vsync: this,
@@ -107,15 +93,13 @@ _projectsSubscription = _openProjectsStream.listen(
       curve: Curves.easeOutCubic,
     );
 
-    _headerSlide = Tween<Offset>(
-      begin: const Offset(0, 0.08),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _headerController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _headerSlide = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _headerController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
 
     _contentFade = CurvedAnimation(
       parent: _contentController,
@@ -124,17 +108,37 @@ _projectsSubscription = _openProjectsStream.listen(
 
     _headerController.forward();
 
-    Future<void>.delayed(
-      const Duration(milliseconds: 180),
-      () {
-        if (mounted) {
-          _contentController.forward();
-        }
-      },
-    );
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (mounted) {
+        _contentController.forward();
+      }
+    });
 
     _loadDeveloperProfile();
     _listenToSavedProjects();
+    void _listenToProjects() {
+      _projectsSubscription = _openProjectsStream.listen(
+        (projects) {
+          if (!mounted) return;
+
+          _onProjectsChanged(projects);
+
+          setState(() {
+            _projectsLoading = false;
+          });
+        },
+        onError: (error) {
+          if (!mounted) return;
+
+          setState(() {
+            _projectsLoading = false;
+            _errorMessage = 'Unable to load projects: $error';
+          });
+        },
+      );
+    }
+
+    _listenToProjects();
   }
 
   @override
@@ -143,41 +147,14 @@ _projectsSubscription = _openProjectsStream.listen(
     _scrollController.dispose();
     _headerController.dispose();
     _contentController.dispose();
-_savedProjectsSubscription?.cancel();
-_projectsSubscription?.cancel();
+    _savedProjectsSubscription?.cancel();
+    _projectsSubscription?.cancel();
     super.dispose();
   }
 
   // ===========================================================================
   // PROFILE
   // ===========================================================================
-String _projectSnapshotSignature(
-  List<ProjectModel> projects,
-) {
-  return projects
-      .map(
-        (project) => [
-          project.id,
-          project.title,
-          project.description,
-          project.clientId,
-          project.clientName,
-          project.status,
-          project.budget.toString(),
-          project.budgetMin.toString(),
-          project.budgetMax.toString(),
-          project.duration,
-          project.projectType,
-          project.workMode,
-          project.skills.join(','),
-          project.technologies.join(','),
-          project.applicationsCount.toString(),
-          project.updatedAt?.millisecondsSinceEpoch.toString() ?? '',
-          project.createdAt?.millisecondsSinceEpoch.toString() ?? '',
-        ].join('|'),
-      )
-      .join('||');
-}
   Future<void> _loadDeveloperProfile() async {
     setState(() {
       _errorMessage = null;
@@ -187,9 +164,7 @@ String _projectSnapshotSignature(
       final uid = FirebaseAuth.instance.currentUser?.uid;
 
       if (uid == null) {
-        throw Exception(
-          'No authenticated developer account was found.',
-        );
+        throw Exception('No authenticated developer account was found.');
       }
 
       final profileSnapshot = await FirebaseFirestore.instance
@@ -202,32 +177,25 @@ String _projectSnapshotSignature(
           .doc(uid)
           .get();
 
-      final profileData =
-          profileSnapshot.data() ?? <String, dynamic>{};
+      final profileData = profileSnapshot.data() ?? <String, dynamic>{};
 
-      final userData =
-          userSnapshot.data() ?? <String, dynamic>{};
+      final userData = userSnapshot.data() ?? <String, dynamic>{};
 
-      _developerSkills = _readStringList(
-        profileData['skills'],
-      );
+      _developerSkills = _readStringList(profileData['skills']);
 
-      _developerTechnologies = _readStringList(
-        profileData['technologies'],
-      );
+      _developerTechnologies = _readStringList(profileData['technologies']);
 
       _developerProjectType =
           _readString(profileData['projectType']) ??
-              _readString(userData['projectType']);
+          _readString(userData['projectType']);
 
       _developerWorkMode =
           _readString(profileData['workMode']) ??
-              _readString(userData['workMode']);
+          _readString(userData['workMode']);
 
       _developerDuration =
           _readString(profileData['projectDuration']) ??
-              _readString(profileData['duration']);
-
+          _readString(profileData['duration']);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -244,8 +212,7 @@ String _projectSnapshotSignature(
   // ===========================================================================
 
   void _listenToSavedProjects() {
-    _savedProjectsSubscription =
-        _projectService.watchSavedProjectIds().listen(
+    _savedProjectsSubscription = _projectService.watchSavedProjectIds().listen(
       (ids) {
         if (!mounted) return;
 
@@ -267,70 +234,77 @@ String _projectSnapshotSignature(
   // PROJECT DATA
   // ===========================================================================
 
-  void _onProjectsChanged(
-  List<ProjectModel> projects,
-) {
-  if (!mounted) return;
+  void _onProjectsChanged(List<ProjectModel> projects) {
+    if (!mounted) return;
 
-  final signature = _projectSnapshotSignature(projects);
-
-  if (signature == _lastProjectSnapshotSignature) {
-    return;
+    setState(() {
+      _allProjects = List<ProjectModel>.from(projects);
+      _applyFilters();
+      _calculateRecommendations();
+      _errorMessage = null;
+    });
   }
 
-  _lastProjectSnapshotSignature = signature;
+ void _applyFilters() {
+  final query = _searchController.text.trim().toLowerCase();
 
-  setState(() {
-    _allProjects = List<ProjectModel>.from(projects);
-    _applyFilters();
-    _calculateRecommendations();
-    _errorMessage = null;
-  });
+  final filtered = _projectService.filterProjects(
+    _allProjects,
+    technology: _selectedTechnology == 'All'
+        ? null
+        : _selectedTechnology,
+    skill: _selectedSkill == 'All'
+        ? null
+        : _selectedSkill,
+    workMode: _selectedWorkMode == 'All'
+        ? null
+        : _selectedWorkMode,
+    projectType: _selectedProjectType == 'All'
+        ? null
+        : _selectedProjectType,
+    duration: _selectedDuration == 'All'
+        ? null
+        : _selectedDuration,
+    minimumBudget: _minimumBudget,
+    maximumBudget: _maximumBudget,
+  );
+
+  final searched = query.isEmpty
+      ? filtered
+      : filtered.where((project) {
+          final searchableText = [
+            project.title,
+            project.description,
+            project.clientName,
+            project.projectType,
+            project.workMode,
+            project.duration,
+            ...project.skills,
+            ...project.technologies,
+          ].join(' ').toLowerCase();
+
+          return searchableText.contains(query);
+        }).toList();
+
+  final sorted = _projectService.sortProjects(
+    searched,
+    sortBy: _sortBy,
+  );
+
+  _filteredProjects = sorted;
+
+  if (_visibleProjectCount > sorted.length) {
+    _visibleProjectCount = sorted.length;
+  }
+
+  if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
+    _visibleProjectCount =
+        sorted.length < 8 ? sorted.length : 8;
+  }
 }
 
-  void _applyFilters() {
-    final filtered = _projectService.filterProjects(
-      _allProjects,
-      query: _searchController.text,
-      technology: _selectedTechnology == 'All'
-          ? null
-          : _selectedTechnology,
-      skill: _selectedSkill == 'All'
-          ? null
-          : _selectedSkill,
-      workMode: _selectedWorkMode == 'All'
-          ? null
-          : _selectedWorkMode,
-      projectType: _selectedProjectType == 'All'
-          ? null
-          : _selectedProjectType,
-      duration: _selectedDuration == 'All'
-          ? null
-          : _selectedDuration,
-      minimumBudget: _minimumBudget,
-      maximumBudget: _maximumBudget,
-    );
-
-    final sorted = _projectService.sortProjects(
-      filtered,
-      sortBy: _sortBy,
-    );
-
-    _filteredProjects = sorted;
-
-    if (_visibleProjectCount > sorted.length) {
-      _visibleProjectCount = sorted.length;
-    }
-
-    if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
-      _visibleProjectCount =
-          sorted.length < 8 ? sorted.length : 8;
-    }
-  }
-
   void _calculateRecommendations() {
-    _recommendations =
-        _projectService.getRecommendedProjects(
+    _recommendations = _projectService.getRecommendedProjects(
       _allProjects,
       developerSkills: _developerSkills,
       developerTechnologies: _developerTechnologies,
@@ -352,15 +326,13 @@ String _projectSnapshotSignature(
     try {
       await _loadDeveloperProfile();
 
-      final projects =
-          await _projectService.getOpenProjects();
+      final projects = await _projectService.getOpenProjects();
 
       _onProjectsChanged(projects);
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage =
-              'Unable to refresh projects. Please try again.';
+          _errorMessage = 'Unable to refresh projects. Please try again.';
         });
       }
     } finally {
@@ -465,10 +437,7 @@ String _projectSnapshotSignature(
     });
   }
 
-  void _setBudgetRange(
-    double? minimum,
-    double? maximum,
-  ) {
+  void _setBudgetRange(double? minimum, double? maximum) {
     setState(() {
       _minimumBudget = minimum;
       _maximumBudget = maximum;
@@ -481,20 +450,14 @@ String _projectSnapshotSignature(
   // SAVING
   // ===========================================================================
 
-  Future<void> _toggleSave(
-    ProjectModel project,
-  ) async {
+  Future<void> _toggleSave(ProjectModel project) async {
     final isSaved = _savedProjectIds.contains(project.id);
 
     try {
       if (isSaved) {
-        await _projectService.unsaveProject(
-          project.id,
-        );
+        await _projectService.unsaveProject(project.id);
       } else {
-        await _projectService.saveProject(
-          project.id,
-        );
+        await _projectService.saveProject(project.id);
       }
 
       if (!mounted) return;
@@ -503,9 +466,7 @@ String _projectSnapshotSignature(
         isSaved
             ? 'Project removed from saved projects.'
             : 'Project saved successfully.',
-        icon: isSaved
-            ? Icons.bookmark_border_rounded
-            : Icons.bookmark_rounded,
+        icon: isSaved ? Icons.bookmark_border_rounded : Icons.bookmark_rounded,
       );
     } catch (e) {
       if (!mounted) return;
@@ -523,63 +484,31 @@ String _projectSnapshotSignature(
   // ===========================================================================
 
   @override
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FC),
-      body: SafeArea(
-        child:StreamBuilder<List<ProjectModel>>(
-  stream: _openProjectsStream,
-  builder: (context, snapshot) {
-    // ---------------------------------------------------------------
-    // ERROR
-    // ---------------------------------------------------------------
-    if (snapshot.hasError) {
-      return _buildErrorState(
-        theme,
-        snapshot.error.toString(),
+    if (_projectsLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF7F8FC),
+        body: SafeArea(child: _buildLoadingState(theme)),
       );
     }
 
-    // ---------------------------------------------------------------
-    // LOADING
-    // ---------------------------------------------------------------
-    if (snapshot.connectionState == ConnectionState.waiting &&
-        _allProjects.isEmpty) {
-      return _buildLoadingState(theme);
+    if (_errorMessage != null && _allProjects.isEmpty) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF7F8FC),
+        body: SafeArea(child: _buildErrorState(theme, _errorMessage!)),
+      );
     }
 
-    // ---------------------------------------------------------------
-    // FIRESTORE DATA RECEIVED
-    // ---------------------------------------------------------------
-    if (snapshot.hasData) {
-      final projects = snapshot.data!;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-
-        _onProjectsChanged(projects);
-      });
-    }
-
-    // ---------------------------------------------------------------
-    // MAIN CONTENT
-    // ---------------------------------------------------------------
-    return _buildMainContent(
-      context,
-      theme,
-    );
-  },
-),
-      ),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FC),
+      body: SafeArea(child: _buildMainContent(context, theme)),
     );
   }
 
-  Widget _buildMainContent(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildMainContent(BuildContext context, ThemeData theme) {
     return RefreshIndicator(
       onRefresh: _refreshProjects,
       color: _primaryColor,
@@ -594,10 +523,7 @@ String _projectSnapshotSignature(
               position: _headerSlide,
               child: FadeTransition(
                 opacity: _headerFade,
-                child: _buildHeader(
-                  context,
-                  theme,
-                ),
+                child: _buildHeader(context, theme),
               ),
             ),
           ),
@@ -605,42 +531,29 @@ String _projectSnapshotSignature(
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _contentFade,
-              child: _buildSearchSection(
-                context,
-                theme,
-              ),
+              child: _buildSearchSection(context, theme),
             ),
           ),
 
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _contentFade,
-              child: _buildFilterBar(
-                context,
-                theme,
-              ),
+              child: _buildFilterBar(context, theme),
             ),
           ),
 
-          if (_showRecommendations &&
-              _recommendations.isNotEmpty)
+          if (_showRecommendations && _recommendations.isNotEmpty)
             SliverToBoxAdapter(
               child: FadeTransition(
                 opacity: _contentFade,
-                child: _buildRecommendationsSection(
-                  context,
-                  theme,
-                ),
+                child: _buildRecommendationsSection(context, theme),
               ),
             ),
 
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _contentFade,
-              child: _buildProjectsHeader(
-                context,
-                theme,
-              ),
+              child: _buildProjectsHeader(context, theme),
             ),
           ),
 
@@ -648,10 +561,7 @@ String _projectSnapshotSignature(
             SliverToBoxAdapter(
               child: FadeTransition(
                 opacity: _contentFade,
-                child: _buildEmptyState(
-                  context,
-                  theme,
-                ),
+                child: _buildEmptyState(context, theme),
               ),
             )
           else
@@ -663,66 +573,37 @@ String _projectSnapshotSignature(
                 32,
               ),
               sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final project =
-                        _filteredProjects[index];
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final project = _filteredProjects[index];
 
-                    return _AnimatedProjectCard(
-                      key: ValueKey(project.id),
-                      project: project,
-                      index: index,
-                      isSaved:
-                          _savedProjectIds.contains(
-                        project.id,
-                      ),
-                      matchPercentage:
-                          _getMatchPercentage(project),
-                      onSave: () =>
-                          _toggleSave(project),
-                      onOpen: () =>
-                          _openProject(project),
-                    );
-                  },
-                  childCount: _visibleProjectCount,
-                ),
-                gridDelegate:
-                    _gridDelegate(context),
+                  return _AnimatedProjectCard(
+                    key: ValueKey(project.id),
+                    project: project,
+                    index: index,
+                    isSaved: _savedProjectIds.contains(project.id),
+                    matchPercentage: _getMatchPercentage(project),
+                    onSave: () => _toggleSave(project),
+                    onOpen: () => _openProject(project),
+                  );
+                }, childCount: _visibleProjectCount),
+                gridDelegate: _gridDelegate(context),
               ),
             ),
 
-          if (_visibleProjectCount <
-                  _filteredProjects.length &&
+          if (_visibleProjectCount < _filteredProjects.length &&
               _filteredProjects.isNotEmpty)
-            SliverToBoxAdapter(
-              child: _buildLoadMoreButton(
-                context,
-                theme,
-              ),
-            ),
+            SliverToBoxAdapter(child: _buildLoadMoreButton(context, theme)),
 
           if (_errorMessage != null)
-            SliverToBoxAdapter(
-              child: _buildInfoBanner(
-                theme,
-                _errorMessage!,
-              ),
-            ),
+            SliverToBoxAdapter(child: _buildInfoBanner(theme, _errorMessage!)),
 
-          const SliverPadding(
-            padding: EdgeInsets.only(
-              bottom: 40,
-            ),
-          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 40)),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildHeader(BuildContext context, ThemeData theme) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _horizontalPadding(context),
@@ -732,45 +613,39 @@ String _projectSnapshotSignature(
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact =
-              constraints.maxWidth < 650;
+          final compact = constraints.maxWidth < 650;
 
           return Row(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+
             children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () {
+                  Navigator.of(context).maybePop();
+                },
+                icon: const Icon(Icons.arrow_back_rounded, size: 24),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
                         Container(
-                          padding:
-                              const EdgeInsets.all(10),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            gradient:
-                                const LinearGradient(
-                              colors: [
-                                Color(0xFF4F46E5),
-                                Color(0xFF6366F1),
-                              ],
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
                             ),
-                            borderRadius:
-                                BorderRadius.circular(
-                              14,
-                            ),
+                            borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(
-                                  0xFF4F46E5,
-                                ).withValues(
-                                  alpha: 0.22,
-                                ),
+                                color: const Color(0xFF4F46E5)
+                                    .withValues(alpha: 0.22),
                                 blurRadius: 18,
-                                offset:
-                                    const Offset(0, 7),
+                                offset: const Offset(0, 7),
                               ),
                             ],
                           ),
@@ -784,13 +659,9 @@ String _projectSnapshotSignature(
                         Text(
                           'Discover Projects',
                           style: TextStyle(
-                            fontSize:
-                                compact ? 25 : 30,
-                            fontWeight:
-                                FontWeight.w800,
-                            color: const Color(
-                              0xFF111827,
-                            ),
+                            fontSize: compact ? 25 : 30,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF111827),
                             letterSpacing: -0.7,
                           ),
                         ),
@@ -802,9 +673,7 @@ String _projectSnapshotSignature(
                       'experience and career goals.',
                       style: TextStyle(
                         fontSize: compact ? 13 : 15,
-                        color: const Color(
-                          0xFF6B7280,
-                        ),
+                        color: const Color(0xFF6B7280),
                         height: 1.5,
                       ),
                     ),
@@ -812,8 +681,7 @@ String _projectSnapshotSignature(
                 ),
               ),
               const SizedBox(width: 20),
-              if (!compact)
-                _buildRefreshButton(theme),
+              if (!compact) _buildRefreshButton(theme),
             ],
           );
         },
@@ -821,36 +689,25 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildRefreshButton(
-    ThemeData theme,
-  ) {
+  Widget _buildRefreshButton(ThemeData theme) {
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: _isRefreshing
-            ? null
-            : _refreshProjects,
+        onTap: _isRefreshing ? null : _refreshProjects,
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 15,
-            vertical: 12,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
           child: Row(
             children: [
               AnimatedSwitcher(
-                duration:
-                    const Duration(milliseconds: 250),
+                duration: const Duration(milliseconds: 250),
                 child: _isRefreshing
                     ? const SizedBox(
                         key: ValueKey('loading'),
                         width: 18,
                         height: 18,
-                        child:
-                            CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(
                         key: ValueKey('refresh'),
@@ -861,9 +718,7 @@ String _projectSnapshotSignature(
               const SizedBox(width: 8),
               const Text(
                 'Refresh',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -872,26 +727,17 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildSearchSection(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildSearchSection(BuildContext context, ThemeData theme) {
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: _horizontalPadding(context),
-      ),
+      padding: EdgeInsets.symmetric(horizontal: _horizontalPadding(context)),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: const Color(0xFFE5E7EB),
-          ),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(
-                alpha: 0.035,
-              ),
+              color: Colors.black.withValues(alpha: 0.035),
               blurRadius: 24,
               offset: const Offset(0, 8),
             ),
@@ -902,44 +748,24 @@ String _projectSnapshotSignature(
           onChanged: _onSearchChanged,
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
-            hintText:
-                'Search projects, skills, technologies...',
-            hintStyle: const TextStyle(
-              color: Color(0xFF9CA3AF),
-            ),
+            hintText: 'Search projects, skills, technologies...',
+            hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
             prefixIcon: const Padding(
-              padding: EdgeInsets.only(
-                left: 18,
-                right: 10,
-              ),
-              child: Icon(
-                Icons.search_rounded,
-                color: Color(0xFF6366F1),
-              ),
+              padding: EdgeInsets.only(left: 18, right: 10),
+              child: Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
             ),
             suffixIcon: AnimatedSwitcher(
-              duration:
-                  const Duration(milliseconds: 180),
+              duration: const Duration(milliseconds: 180),
               child: _searchController.text.isNotEmpty
                   ? IconButton(
-                      key: const ValueKey(
-                        'clear-search',
-                      ),
+                      key: const ValueKey('clear-search'),
                       onPressed: _clearSearch,
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        size: 20,
-                      ),
+                      icon: const Icon(Icons.close_rounded, size: 20),
                     )
-                  : const SizedBox(
-                      key: ValueKey(
-                        'empty-search',
-                      ),
-                    ),
+                  : const SizedBox(key: ValueKey('empty-search')),
             ),
             border: InputBorder.none,
-            contentPadding:
-                const EdgeInsets.symmetric(
+            contentPadding: const EdgeInsets.symmetric(
               horizontal: 8,
               vertical: 18,
             ),
@@ -949,22 +775,18 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildFilterBar(
-    BuildContext context,
-    ThemeData theme,
-  ) {
-    final technologies =
-        _availableTechnologies();
+  Widget _buildFilterBar(BuildContext context, ThemeData theme) {
+    final technologies = _availableTechnologies();
     final skills = _availableSkills();
 
     final hasActiveFilters =
         _selectedWorkMode != 'All' ||
-            _selectedProjectType != 'All' ||
-            _selectedDuration != 'All' ||
-            _selectedTechnology != 'All' ||
-            _selectedSkill != 'All' ||
-            _minimumBudget != null ||
-            _maximumBudget != null;
+        _selectedProjectType != 'All' ||
+        _selectedDuration != 'All' ||
+        _selectedTechnology != 'All' ||
+        _selectedSkill != 'All' ||
+        _minimumBudget != null ||
+        _maximumBudget != null;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -980,8 +802,7 @@ String _projectSnapshotSignature(
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  physics:
-                      const BouncingScrollPhysics(),
+                  physics: const BouncingScrollPhysics(),
                   child: Row(
                     children: [
                       _FilterButton(
@@ -990,44 +811,29 @@ String _projectSnapshotSignature(
                         active: hasActiveFilters,
                         onTap: () {
                           setState(() {
-                            _showFilters =
-                                !_showFilters;
+                            _showFilters = !_showFilters;
                           });
                         },
                       ),
                       const SizedBox(width: 8),
                       _FilterButton(
-                        icon:
-                            Icons.work_outline_rounded,
+                        icon: Icons.work_outline_rounded,
                         label: _selectedWorkMode,
-                        active:
-                            _selectedWorkMode != 'All',
-                        onTap: () =>
-                            _showSingleFilterMenu(
+                        active: _selectedWorkMode != 'All',
+                        onTap: () => _showSingleFilterMenu(
                           context,
                           title: 'Work Mode',
-                          options: const [
-                            'All',
-                            'Remote',
-                            'Hybrid',
-                            'On-site',
-                          ],
-                          selected:
-                              _selectedWorkMode,
-                          onSelected:
-                              _setWorkMode,
+                          options: const ['All', 'Remote', 'Hybrid', 'On-site'],
+                          selected: _selectedWorkMode,
+                          onSelected: _setWorkMode,
                         ),
                       ),
                       const SizedBox(width: 8),
                       _FilterButton(
-                        icon:
-                            Icons.category_outlined,
+                        icon: Icons.category_outlined,
                         label: _selectedProjectType,
-                        active:
-                            _selectedProjectType !=
-                                'All',
-                        onTap: () =>
-                            _showSingleFilterMenu(
+                        active: _selectedProjectType != 'All',
+                        onTap: () => _showSingleFilterMenu(
                           context,
                           title: 'Project Type',
                           options: const [
@@ -1038,21 +844,16 @@ String _projectSnapshotSignature(
                             'Contract',
                             'Both',
                           ],
-                          selected:
-                              _selectedProjectType,
-                          onSelected:
-                              _setProjectType,
+                          selected: _selectedProjectType,
+                          onSelected: _setProjectType,
                         ),
                       ),
                       const SizedBox(width: 8),
                       _FilterButton(
-                        icon:
-                            Icons.schedule_rounded,
+                        icon: Icons.schedule_rounded,
                         label: _selectedDuration,
-                        active:
-                            _selectedDuration != 'All',
-                        onTap: () =>
-                            _showSingleFilterMenu(
+                        active: _selectedDuration != 'All',
+                        onTap: () => _showSingleFilterMenu(
                           context,
                           title: 'Duration',
                           options: const [
@@ -1063,35 +864,22 @@ String _projectSnapshotSignature(
                             '3-6 months',
                             'Flexible',
                           ],
-                          selected:
-                              _selectedDuration,
-                          onSelected:
-                              _setDuration,
+                          selected: _selectedDuration,
+                          onSelected: _setDuration,
                         ),
                       ),
                       if (technologies.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         _FilterButton(
-                          icon:
-                              Icons.code_rounded,
-                          label:
-                              _selectedTechnology,
-                          active:
-                              _selectedTechnology !=
-                                  'All',
-                          onTap: () =>
-                              _showSingleFilterMenu(
+                          icon: Icons.code_rounded,
+                          label: _selectedTechnology,
+                          active: _selectedTechnology != 'All',
+                          onTap: () => _showSingleFilterMenu(
                             context,
-                            title:
-                                'Technology',
-                            options: [
-                              'All',
-                              ...technologies,
-                            ],
-                            selected:
-                                _selectedTechnology,
-                            onSelected:
-                                _setTechnology,
+                            title: 'Technology',
+                            options: ['All', ...technologies],
+                            selected: _selectedTechnology,
+                            onSelected: _setTechnology,
                           ),
                         ),
                       ],
@@ -1100,25 +888,16 @@ String _projectSnapshotSignature(
                 ),
               ),
               const SizedBox(width: 10),
-              _buildSortButton(
-                context,
-                theme,
-              ),
+              _buildSortButton(context, theme),
             ],
           ),
           AnimatedCrossFade(
-            duration:
-                const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 300),
             crossFadeState: _showFilters
                 ? CrossFadeState.showSecond
                 : CrossFadeState.showFirst,
-            firstChild:
-                const SizedBox.shrink(),
-            secondChild: _buildAdvancedFilters(
-              context,
-              theme,
-              skills,
-            ),
+            firstChild: const SizedBox.shrink(),
+            secondChild: _buildAdvancedFilters(context, theme, skills),
           ),
         ],
       ),
@@ -1132,26 +911,19 @@ String _projectSnapshotSignature(
   ) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(
-        top: 12,
-        bottom: 8,
-      ),
+      margin: const EdgeInsets.only(top: 12, bottom: 8),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-        ),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact =
-              constraints.maxWidth < 650;
+          final compact = constraints.maxWidth < 650;
 
           return Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
@@ -1163,17 +935,12 @@ String _projectSnapshotSignature(
                   const SizedBox(width: 8),
                   const Text(
                     'Advanced Filters',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                   ),
                   const Spacer(),
                   TextButton(
                     onPressed: _resetFilters,
-                    child: const Text(
-                      'Reset',
-                    ),
+                    child: const Text('Reset'),
                   ),
                 ],
               ),
@@ -1182,18 +949,12 @@ String _projectSnapshotSignature(
                 _buildFilterDropdown(
                   label: 'Required Skill',
                   value: _selectedSkill,
-                  options: [
-                    'All',
-                    ...skills,
-                  ],
+                  options: ['All', ...skills],
                   onChanged: _setSkill,
                   compact: compact,
                 ),
               const SizedBox(height: 14),
-              _buildBudgetSelector(
-                context,
-                compact,
-              ),
+              _buildBudgetSelector(context, compact),
             ],
           );
         },
@@ -1201,13 +962,9 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildBudgetSelector(
-    BuildContext context,
-    bool compact,
-  ) {
+  Widget _buildBudgetSelector(BuildContext context, bool compact) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
           'Budget Range',
@@ -1224,43 +981,28 @@ String _projectSnapshotSignature(
           children: [
             _BudgetChip(
               label: 'Any',
-              active:
-                  _minimumBudget == null &&
-                      _maximumBudget == null,
-              onTap: () =>
-                  _setBudgetRange(null, null),
+              active: _minimumBudget == null && _maximumBudget == null,
+              onTap: () => _setBudgetRange(null, null),
             ),
             _BudgetChip(
               label: 'Under ₹10K',
-              active:
-                  _minimumBudget == null &&
-                      _maximumBudget == 10000,
-              onTap: () =>
-                  _setBudgetRange(null, 10000),
+              active: _minimumBudget == null && _maximumBudget == 10000,
+              onTap: () => _setBudgetRange(null, 10000),
             ),
             _BudgetChip(
               label: '₹10K - ₹25K',
-              active:
-                  _minimumBudget == 10000 &&
-                      _maximumBudget == 25000,
-              onTap: () =>
-                  _setBudgetRange(10000, 25000),
+              active: _minimumBudget == 10000 && _maximumBudget == 25000,
+              onTap: () => _setBudgetRange(10000, 25000),
             ),
             _BudgetChip(
               label: '₹25K - ₹50K',
-              active:
-                  _minimumBudget == 25000 &&
-                      _maximumBudget == 50000,
-              onTap: () =>
-                  _setBudgetRange(25000, 50000),
+              active: _minimumBudget == 25000 && _maximumBudget == 50000,
+              onTap: () => _setBudgetRange(25000, 50000),
             ),
             _BudgetChip(
               label: '₹50K+',
-              active:
-                  _minimumBudget == 50000 &&
-                      _maximumBudget == null,
-              onTap: () =>
-                  _setBudgetRange(50000, null),
+              active: _minimumBudget == 50000 && _maximumBudget == null,
+              onTap: () => _setBudgetRange(50000, null),
             ),
           ],
         ),
@@ -1276,45 +1018,26 @@ String _projectSnapshotSignature(
     required bool compact,
   }) {
     return SizedBox(
-      width: compact
-          ? double.infinity
-          : 320,
+      width: compact ? double.infinity : 320,
       child: DropdownButtonFormField<String>(
-        initialValue:
-            options.contains(value)
-                ? value
-                : 'All',
-        decoration:
-            InputDecoration(
+        initialValue: options.contains(value) ? value : 'All',
+        decoration: InputDecoration(
           labelText: label,
-          border: OutlineInputBorder(
-            borderRadius:
-                BorderRadius.circular(12),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
           ),
-          enabledBorder:
-              OutlineInputBorder(
-            borderRadius:
-                BorderRadius.circular(12),
-            borderSide: const BorderSide(
-              color: Color(0xFFE5E7EB),
-            ),
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(
+          contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
             vertical: 12,
           ),
         ),
         items: options
             .map(
-              (option) =>
-                  DropdownMenuItem(
+              (option) => DropdownMenuItem(
                 value: option,
-                child: Text(
-                  option,
-                  overflow:
-                      TextOverflow.ellipsis,
-                ),
+                child: Text(option, overflow: TextOverflow.ellipsis),
               ),
             )
             .toList(),
@@ -1327,60 +1050,33 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildSortButton(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildSortButton(BuildContext context, ThemeData theme) {
     return PopupMenuButton<String>(
       tooltip: 'Sort projects',
       onSelected: _setSort,
       itemBuilder: (context) => const [
-        PopupMenuItem(
-          value: 'newest',
-          child: Text('Newest first'),
-        ),
-        PopupMenuItem(
-          value: 'oldest',
-          child: Text('Oldest first'),
-        ),
-        PopupMenuItem(
-          value: 'budget_high',
-          child: Text('Highest budget'),
-        ),
-        PopupMenuItem(
-          value: 'budget_low',
-          child: Text('Lowest budget'),
-        ),
+        PopupMenuItem(value: 'newest', child: Text('Newest first')),
+        PopupMenuItem(value: 'oldest', child: Text('Oldest first')),
+        PopupMenuItem(value: 'budget_high', child: Text('Highest budget')),
+        PopupMenuItem(value: 'budget_low', child: Text('Lowest budget')),
         PopupMenuItem(
           value: 'applications_low',
           child: Text('Fewest applications'),
         ),
       ],
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 13,
-          vertical: 10,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.circular(13),
-          border: Border.all(
-            color: const Color(0xFFE5E7EB),
-          ),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
-        child: const Icon(
-          Icons.sort_rounded,
-          size: 20,
-        ),
+        child: const Icon(Icons.sort_rounded, size: 20),
       ),
     );
   }
 
-  Widget _buildRecommendationsSection(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildRecommendationsSection(BuildContext context, ThemeData theme) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _horizontalPadding(context),
@@ -1389,20 +1085,15 @@ String _projectSnapshotSignature(
         12,
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding:
-                    const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(
-                    0xFFEEF2FF,
-                  ),
-                  borderRadius:
-                      BorderRadius.circular(10),
+                  color: const Color(0xFFEEF2FF),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.auto_awesome_rounded,
@@ -1413,27 +1104,20 @@ String _projectSnapshotSignature(
               const SizedBox(width: 10),
               const Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Recommended for You',
                       style: TextStyle(
                         fontSize: 18,
-                        fontWeight:
-                            FontWeight.w800,
-                        color:
-                            Color(0xFF111827),
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF111827),
                       ),
                     ),
                     SizedBox(height: 2),
                     Text(
                       'Based on your developer profile',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color:
-                            Color(0xFF6B7280),
-                      ),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                     ),
                   ],
                 ),
@@ -1441,15 +1125,10 @@ String _projectSnapshotSignature(
               TextButton(
                 onPressed: () {
                   setState(() {
-                    _showRecommendations =
-                        !_showRecommendations;
+                    _showRecommendations = !_showRecommendations;
                   });
                 },
-                child: Text(
-                  _showRecommendations
-                      ? 'Hide'
-                      : 'Show',
-                ),
+                child: Text(_showRecommendations ? 'Hide' : 'Show'),
               ),
             ],
           ),
@@ -1458,31 +1137,17 @@ String _projectSnapshotSignature(
             height: 220,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              physics:
-                  const BouncingScrollPhysics(),
-              itemCount:
-                  _recommendations.length,
-              separatorBuilder:
-                  (_, index) =>
-                      const SizedBox(width: 14),
+              physics: const BouncingScrollPhysics(),
+              itemCount: _recommendations.length,
+              separatorBuilder: (_, index) => const SizedBox(width: 14),
               itemBuilder: (context, index) {
-                final recommendation =
-                    _recommendations[index];
+                final recommendation = _recommendations[index];
 
                 return _RecommendationCard(
-                  recommendation:
-                      recommendation,
-                  isSaved: _savedProjectIds
-                      .contains(
-                    recommendation.project.id,
-                  ),
-                  onSave: () => _toggleSave(
-                    recommendation.project,
-                  ),
-                  onOpen: () =>
-                      _openProject(
-                    recommendation.project,
-                  ),
+                  recommendation: recommendation,
+                  isSaved: _savedProjectIds.contains(recommendation.project.id),
+                  onSave: () => _toggleSave(recommendation.project),
+                  onOpen: () => _openProject(recommendation.project),
                 );
               },
             ),
@@ -1492,10 +1157,7 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildProjectsHeader(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildProjectsHeader(BuildContext context, ThemeData theme) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _horizontalPadding(context),
@@ -1507,8 +1169,7 @@ String _projectSnapshotSignature(
         children: [
           const Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'All Projects',
@@ -1521,30 +1182,19 @@ String _projectSnapshotSignature(
                 SizedBox(height: 3),
                 Text(
                   'Explore currently available opportunities',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                  ),
+                  style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                 ),
               ],
             ),
           ),
           AnimatedSwitcher(
-            duration:
-                const Duration(milliseconds: 250),
+            duration: const Duration(milliseconds: 250),
             child: Container(
-              key: ValueKey(
-                _filteredProjects.length,
-              ),
-              padding:
-                  const EdgeInsets.symmetric(
-                horizontal: 11,
-                vertical: 7,
-              ),
+              key: ValueKey(_filteredProjects.length),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
               decoration: BoxDecoration(
                 color: const Color(0xFFEEF2FF),
-                borderRadius:
-                    BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 '${_filteredProjects.length} found',
@@ -1561,10 +1211,7 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildLoadMoreButton(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildLoadMoreButton(BuildContext context, ThemeData theme) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _horizontalPadding(context),
@@ -1578,33 +1225,19 @@ String _projectSnapshotSignature(
             setState(() {
               _visibleProjectCount += 8;
 
-              if (_visibleProjectCount >
-                  _filteredProjects.length) {
-                _visibleProjectCount =
-                    _filteredProjects.length;
+              if (_visibleProjectCount > _filteredProjects.length) {
+                _visibleProjectCount = _filteredProjects.length;
               }
             });
           },
-          icon: const Icon(
-            Icons.expand_more_rounded,
-          ),
-          label: const Text(
-            'Load more projects',
-          ),
+          icon: const Icon(Icons.expand_more_rounded),
+          label: const Text('Load more projects'),
           style: OutlinedButton.styleFrom(
-            foregroundColor:
-                const Color(0xFF4F46E5),
-            side: const BorderSide(
-              color: Color(0xFFD9DDFB),
-            ),
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 13,
-            ),
+            foregroundColor: const Color(0xFF4F46E5),
+            side: const BorderSide(color: Color(0xFFD9DDFB)),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
             shape: RoundedRectangleBorder(
-              borderRadius:
-                  BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(13),
             ),
           ),
         ),
@@ -1612,19 +1245,16 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildEmptyState(
-    BuildContext context,
-    ThemeData theme,
-  ) {
+  Widget _buildEmptyState(BuildContext context, ThemeData theme) {
     final hasFilters =
         _searchController.text.isNotEmpty ||
-            _selectedWorkMode != 'All' ||
-            _selectedProjectType != 'All' ||
-            _selectedDuration != 'All' ||
-            _selectedTechnology != 'All' ||
-            _selectedSkill != 'All' ||
-            _minimumBudget != null ||
-            _maximumBudget != null;
+        _selectedWorkMode != 'All' ||
+        _selectedProjectType != 'All' ||
+        _selectedDuration != 'All' ||
+        _selectedTechnology != 'All' ||
+        _selectedSkill != 'All' ||
+        _minimumBudget != null ||
+        _maximumBudget != null;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -1635,16 +1265,11 @@ String _projectSnapshotSignature(
       ),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 28,
-          vertical: 50,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 50),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: const Color(0xFFE5E7EB),
-          ),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
         child: Column(
           children: [
@@ -1656,18 +1281,14 @@ String _projectSnapshotSignature(
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                hasFilters
-                    ? Icons.search_off_rounded
-                    : Icons.work_off_outlined,
+                hasFilters ? Icons.search_off_rounded : Icons.work_off_outlined,
                 size: 34,
                 color: const Color(0xFF4F46E5),
               ),
             ),
             const SizedBox(height: 20),
             Text(
-              hasFilters
-                  ? 'No matching projects'
-                  : 'No projects available',
+              hasFilters ? 'No matching projects' : 'No projects available',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
@@ -1678,9 +1299,9 @@ String _projectSnapshotSignature(
             Text(
               hasFilters
                   ? 'Try changing your search or filters '
-                    'to discover more opportunities.'
+                        'to discover more opportunities.'
                   : 'New opportunities will appear here '
-                    'when clients publish projects.',
+                        'when clients publish projects.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 13,
@@ -1692,9 +1313,7 @@ String _projectSnapshotSignature(
               const SizedBox(height: 18),
               OutlinedButton(
                 onPressed: _resetFilters,
-                child: const Text(
-                  'Clear filters',
-                ),
+                child: const Text('Clear filters'),
               ),
             ],
           ],
@@ -1703,50 +1322,29 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildLoadingState(
-    ThemeData theme,
-  ) {
+  Widget _buildLoadingState(ThemeData theme) {
     return CustomScrollView(
-      physics:
-          const NeverScrollableScrollPhysics(),
+      physics: const NeverScrollableScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              24,
-              30,
-              24,
-              20,
-            ),
-            child: _SkeletonBox(
-              height: 90,
-              radius: 18,
-            ),
+            padding: const EdgeInsets.fromLTRB(24, 30, 24, 20),
+            child: _SkeletonBox(height: 90, radius: 18),
           ),
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 24,
-            ),
-            child: _SkeletonBox(
-              height: 64,
-              radius: 18,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _SkeletonBox(height: 64, radius: 18),
           ),
         ),
         SliverPadding(
           padding: const EdgeInsets.all(24),
           sliver: SliverGrid(
-            delegate:
-                SliverChildBuilderDelegate(
-              (context, index) {
-                return const _ProjectSkeletonCard();
-              },
-              childCount: 6,
-            ),
-            gridDelegate:
-                _gridDelegateForWidth(
+            delegate: SliverChildBuilderDelegate((context, index) {
+              return const _ProjectSkeletonCard();
+            }, childCount: 6),
+            gridDelegate: _gridDelegateForWidth(
               MediaQuery.sizeOf(context).width,
             ),
           ),
@@ -1755,16 +1353,12 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildErrorState(
-    ThemeData theme,
-    String error,
-  ) {
+  Widget _buildErrorState(ThemeData theme, String error) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(30),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 76,
@@ -1782,41 +1376,28 @@ String _projectSnapshotSignature(
             const SizedBox(height: 18),
             const Text(
               'Unable to load projects',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             const Text(
               'Please check your connection and try again.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-              ),
+              style: TextStyle(color: Color(0xFF6B7280)),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
               onPressed: _refreshProjects,
-              icon: const Icon(
-                Icons.refresh_rounded,
-              ),
-              label: const Text(
-                'Try Again',
-              ),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try Again'),
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    const Color(0xFF4F46E5),
+                backgroundColor: const Color(0xFF4F46E5),
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(
+                padding: const EdgeInsets.symmetric(
                   horizontal: 20,
                   vertical: 14,
                 ),
-                shape:
-                    RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
                 ),
               ),
             ),
@@ -1826,41 +1407,24 @@ String _projectSnapshotSignature(
     );
   }
 
-  Widget _buildInfoBanner(
-    ThemeData theme,
-    String message,
-  ) {
+  Widget _buildInfoBanner(ThemeData theme, String message) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        24,
-        8,
-        24,
-        20,
-      ),
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: const Color(0xFFFFFBEB),
-          borderRadius:
-              BorderRadius.circular(13),
-          border: Border.all(
-            color: const Color(0xFFFDE68A),
-          ),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: const Color(0xFFFDE68A)),
         ),
         child: Row(
           children: [
-            const Icon(
-              Icons.info_outline_rounded,
-              color: Color(0xFFD97706),
-            ),
+            const Icon(Icons.info_outline_rounded, color: Color(0xFFD97706)),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 message,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF92400E),
-                ),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
               ),
             ),
           ],
@@ -1873,17 +1437,26 @@ String _projectSnapshotSignature(
   // PROJECT OPENING
   // ===========================================================================
 
-  void _openProject(
-    ProjectModel project,
-  ) {
-    _showProjectPreview(
-      project,
+  void _openProject(ProjectModel project) {
+    _showProjectPreview(project);
+  }
+
+  Future<void> _openFullProject(ProjectModel project) async {
+    Navigator.of(context).pop();
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ProjectDetails(projectId: project.id, initialProject: project),
+      ),
     );
   }
 
-  void _showProjectPreview(
-    ProjectModel project,
-  ) {
+  void _showProjectPreview(ProjectModel project) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1891,15 +1464,14 @@ String _projectSnapshotSignature(
       builder: (context) {
         return _ProjectPreviewSheet(
           project: project,
-          isSaved:
-              _savedProjectIds.contains(
-            project.id,
-          ),
-          matchPercentage:
-              _getMatchPercentage(project),
+          isSaved: _savedProjectIds.contains(project.id),
+          matchPercentage: _getMatchPercentage(project),
           onSave: () async {
             Navigator.of(context).pop();
             await _toggleSave(project);
+          },
+          onViewFullProject: () {
+            _openFullProject(project);
           },
         );
       },
@@ -1924,19 +1496,11 @@ String _projectSnapshotSignature(
         return Container(
           decoration: const BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(26),
-            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
           ),
           child: SafeArea(
             child: Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(
-                20,
-                14,
-                20,
-                20,
-              ),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1944,10 +1508,8 @@ String _projectSnapshotSignature(
                     width: 42,
                     height: 4,
                     decoration: BoxDecoration(
-                      color:
-                          const Color(0xFFD1D5DB),
-                      borderRadius:
-                          BorderRadius.circular(10),
+                      color: const Color(0xFFD1D5DB),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -1958,73 +1520,48 @@ String _projectSnapshotSignature(
                           title,
                           style: const TextStyle(
                             fontSize: 18,
-                            fontWeight:
-                                FontWeight.w800,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
                       IconButton(
-                        onPressed: () =>
-                            Navigator.pop(
-                          sheetContext,
-                        ),
-                        icon: const Icon(
-                          Icons.close_rounded,
-                        ),
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  ...options.map(
-                    (option) {
-                      final active =
-                          option == selected;
+                  ...options.map((option) {
+                    final active = option == selected;
 
-                      return ListTile(
-                        shape:
-                            RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(
-                            12,
-                          ),
+                    return ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      tileColor: active ? const Color(0xFFEEF2FF) : null,
+                      title: Text(
+                        option,
+                        style: TextStyle(
+                          fontWeight: active
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: active
+                              ? const Color(0xFF4F46E5)
+                              : const Color(0xFF374151),
                         ),
-                        tileColor: active
-                            ? const Color(
-                                0xFFEEF2FF,
-                              )
-                            : null,
-                        title: Text(
-                          option,
-                          style: TextStyle(
-                            fontWeight: active
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: active
-                                ? const Color(
-                                    0xFF4F46E5,
-                                  )
-                                : const Color(
-                                    0xFF374151,
-                                  ),
-                          ),
-                        ),
-                        trailing: active
-                            ? const Icon(
-                                Icons
-                                    .check_circle_rounded,
-                                color:
-                                    Color(0xFF4F46E5),
-                              )
-                            : null,
-                        onTap: () {
-                          onSelected(option);
-                          Navigator.pop(
-                            sheetContext,
-                          );
-                        },
-                      );
-                    },
-                  ),
+                      ),
+                      trailing: active
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF4F46E5),
+                            )
+                          : null,
+                      onTap: () {
+                        onSelected(option);
+                        Navigator.pop(sheetContext);
+                      },
+                    );
+                  }),
                 ],
               ),
             ),
@@ -2038,11 +1575,8 @@ String _projectSnapshotSignature(
   // HELPERS
   // ===========================================================================
 
-  double _horizontalPadding(
-    BuildContext context,
-  ) {
-    final width =
-        MediaQuery.sizeOf(context).width;
+  double _horizontalPadding(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
 
     if (width >= 1400) return 44;
     if (width >= 1000) return 32;
@@ -2051,17 +1585,11 @@ String _projectSnapshotSignature(
     return 16;
   }
 
-  SliverGridDelegate _gridDelegate(
-    BuildContext context,
-  ) {
-    return _gridDelegateForWidth(
-      MediaQuery.sizeOf(context).width,
-    );
+  SliverGridDelegate _gridDelegate(BuildContext context) {
+    return _gridDelegateForWidth(MediaQuery.sizeOf(context).width);
   }
 
-  SliverGridDelegate _gridDelegateForWidth(
-    double width,
-  ) {
+  SliverGridDelegate _gridDelegateForWidth(double width) {
     if (width >= 1500) {
       return const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
@@ -2102,18 +1630,13 @@ String _projectSnapshotSignature(
 
     for (final project in _allProjects) {
       values.addAll(
-        project.technologies
-            .where((item) => item.trim().isNotEmpty),
+        project.technologies.where((item) => item.trim().isNotEmpty),
       );
     }
 
     final result = values.toList();
 
-    result.sort(
-      (a, b) => a.toLowerCase().compareTo(
-        b.toLowerCase(),
-      ),
-    );
+    result.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     return result;
   }
@@ -2122,76 +1645,49 @@ String _projectSnapshotSignature(
     final values = <String>{};
 
     for (final project in _allProjects) {
-      values.addAll(
-        project.skills
-            .where((item) => item.trim().isNotEmpty),
-      );
+      values.addAll(project.skills.where((item) => item.trim().isNotEmpty));
     }
 
     final result = values.toList();
 
-    result.sort(
-      (a, b) => a.toLowerCase().compareTo(
-        b.toLowerCase(),
-      ),
-    );
+    result.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     return result;
   }
 
-  int _getMatchPercentage(
-    ProjectModel project,
-  ) {
+  int _getMatchPercentage(ProjectModel project) {
     return project.getMatchPercentage(
       developerSkills: _developerSkills,
-      developerTechnologies:
-          _developerTechnologies,
-      developerProjectType:
-          _developerProjectType,
-      developerWorkMode:
-          _developerWorkMode,
-      developerDuration:
-          _developerDuration,
+      developerTechnologies: _developerTechnologies,
+      developerProjectType: _developerProjectType,
+      developerWorkMode: _developerWorkMode,
+      developerDuration: _developerDuration,
     );
   }
 
-  List<String> _readStringList(
-    dynamic value,
-  ) {
+  List<String> _readStringList(dynamic value) {
     if (value is Iterable) {
       return value
-          .map(
-            (item) => item.toString().trim(),
-          )
-          .where(
-            (item) => item.isNotEmpty,
-          )
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
           .toList();
     }
 
-    if (value is String &&
-        value.trim().isNotEmpty) {
+    if (value is String && value.trim().isNotEmpty) {
       return value
           .split(',')
-          .map(
-            (item) => item.trim(),
-          )
-          .where(
-            (item) => item.isNotEmpty,
-          )
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
           .toList();
     }
 
     return [];
   }
 
-  String? _readString(
-    dynamic value,
-  ) {
+  String? _readString(dynamic value) {
     if (value == null) return null;
 
-    final stringValue =
-        value.toString().trim();
+    final stringValue = value.toString().trim();
 
     if (stringValue.isEmpty) {
       return null;
@@ -2209,35 +1705,25 @@ String _projectSnapshotSignature(
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          behavior:
-              SnackBarBehavior.floating,
+          behavior: SnackBarBehavior.floating,
           backgroundColor: isError
               ? const Color(0xFFB91C1C)
               : const Color(0xFF111827),
-          shape:
-              RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(13),
           ),
           content: Row(
             children: [
-              Icon(
-                icon,
-                color: Colors.white,
-                size: 19,
-              ),
+              Icon(icon, color: Colors.white, size: 19),
               const SizedBox(width: 10),
-              Expanded(
-                child: Text(message),
-              ),
+              Expanded(child: Text(message)),
             ],
           ),
         ),
       );
   }
 
-  Color get _primaryColor =>
-      const Color(0xFF4F46E5);
+  Color get _primaryColor => const Color(0xFF4F46E5);
 }
 
 // =============================================================================
@@ -2263,12 +1749,10 @@ class _AnimatedProjectCard extends StatefulWidget {
   final VoidCallback onOpen;
 
   @override
-  State<_AnimatedProjectCard> createState() =>
-      _AnimatedProjectCardState();
+  State<_AnimatedProjectCard> createState() => _AnimatedProjectCardState();
 }
 
-class _AnimatedProjectCardState
-    extends State<_AnimatedProjectCard>
+class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
@@ -2280,21 +1764,14 @@ class _AnimatedProjectCardState
 
     _controller = AnimationController(
       vsync: this,
-      duration:
-          const Duration(milliseconds: 550),
+      duration: const Duration(milliseconds: 550),
     );
 
-    Future<void>.delayed(
-      Duration(
-        milliseconds:
-            40 + (widget.index * 60),
-      ),
-      () {
-        if (mounted) {
-          _controller.forward();
-        }
-      },
-    );
+    Future<void>.delayed(Duration(milliseconds: 40 + (widget.index * 60)), () {
+      if (mounted) {
+        _controller.forward();
+      }
+    });
   }
 
   @override
@@ -2306,20 +1783,12 @@ class _AnimatedProjectCardState
   @override
   Widget build(BuildContext context) {
     return FadeTransition(
-      opacity: CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOut,
-      ),
+      opacity: CurvedAnimation(parent: _controller, curve: Curves.easeOut),
       child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.06),
-          end: Offset.zero,
-        ).animate(
-          CurvedAnimation(
-            parent: _controller,
-            curve: Curves.easeOutCubic,
-          ),
-        ),
+        position: Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
+            .animate(
+              CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+            ),
         child: MouseRegion(
           onEnter: (_) {
             setState(() {
@@ -2334,8 +1803,7 @@ class _AnimatedProjectCardState
           cursor: SystemMouseCursors.click,
           child: AnimatedScale(
             scale: _hovering ? 1.012 : 1,
-            duration:
-                const Duration(milliseconds: 180),
+            duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
             child: _buildCard(context),
           ),
@@ -2344,27 +1812,21 @@ class _AnimatedProjectCardState
     );
   }
 
-  Widget _buildCard(
-    BuildContext context,
-  ) {
+  Widget _buildCard(BuildContext context) {
     final project = widget.project;
 
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
       elevation: _hovering ? 5 : 0,
-      shadowColor:
-          const Color(0xFF4F46E5).withValues(
-        alpha: 0.10,
-      ),
+      shadowColor: const Color(0xFF4F46E5).withValues(alpha: 0.10),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         onTap: widget.onOpen,
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: _hovering
                   ? const Color(0xFFD8DDFC)
@@ -2372,47 +1834,32 @@ class _AnimatedProjectCardState
             ),
           ),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
                             Container(
                               width: 36,
                               height: 36,
-                              decoration:
-                                  BoxDecoration(
-                                gradient:
-                                    const LinearGradient(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
                                   colors: [
-                                    Color(
-                                      0xFFEEF2FF,
-                                    ),
-                                    Color(
-                                      0xFFE0E7FF,
-                                    ),
+                                    Color(0xFFEEF2FF),
+                                    Color(0xFFE0E7FF),
                                   ],
                                 ),
-                                borderRadius:
-                                    BorderRadius
-                                        .circular(
-                                  10,
-                                ),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                               child: const Icon(
-                                Icons
-                                    .rocket_launch_rounded,
-                                color:
-                                    Color(0xFF4F46E5),
+                                Icons.rocket_launch_rounded,
+                                color: Color(0xFF4F46E5),
                                 size: 18,
                               ),
                             ),
@@ -2421,16 +1868,11 @@ class _AnimatedProjectCardState
                               child: Text(
                                 project.title,
                                 maxLines: 2,
-                                overflow:
-                                    TextOverflow
-                                        .ellipsis,
-                                style:
-                                    const TextStyle(
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
                                   fontSize: 15,
-                                  fontWeight:
-                                      FontWeight.w800,
-                                  color:
-                                      Color(0xFF111827),
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF111827),
                                   height: 1.25,
                                 ),
                               ),
@@ -2447,25 +1889,15 @@ class _AnimatedProjectCardState
                         : 'Save project',
                     splashRadius: 20,
                     icon: AnimatedSwitcher(
-                      duration: const Duration(
-                        milliseconds: 220,
-                      ),
+                      duration: const Duration(milliseconds: 220),
                       child: Icon(
                         widget.isSaved
-                            ? Icons
-                                .bookmark_rounded
-                            : Icons
-                                .bookmark_border_rounded,
-                        key: ValueKey(
-                          widget.isSaved,
-                        ),
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        key: ValueKey(widget.isSaved),
                         color: widget.isSaved
-                            ? const Color(
-                                0xFF4F46E5,
-                              )
-                            : const Color(
-                                0xFF9CA3AF,
-                              ),
+                            ? const Color(0xFF4F46E5)
+                            : const Color(0xFF9CA3AF),
                         size: 21,
                       ),
                     ),
@@ -2492,19 +1924,14 @@ class _AnimatedProjectCardState
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  if (project.workMode
-                      .trim()
-                      .isNotEmpty)
+                  if (project.workMode.trim().isNotEmpty)
                     _SmallTag(
                       icon: Icons.public_rounded,
                       label: project.workMode,
                     ),
-                  if (project.duration
-                      .trim()
-                      .isNotEmpty)
+                  if (project.duration.trim().isNotEmpty)
                     _SmallTag(
-                      icon:
-                          Icons.schedule_rounded,
+                      icon: Icons.schedule_rounded,
                       label: project.duration,
                     ),
                 ],
@@ -2516,23 +1943,14 @@ class _AnimatedProjectCardState
                 SizedBox(
                   height: 26,
                   child: ListView.separated(
-                    scrollDirection:
-                        Axis.horizontal,
-                    physics:
-                        const NeverScrollableScrollPhysics(),
-                    itemCount:
-                        project.skills.length > 3
-                            ? 3
-                            : project.skills.length,
-                    separatorBuilder:
-                        (_, index) =>
-                            const SizedBox(width: 5),
-                    itemBuilder:
-                        (context, index) {
-                      return _SkillChip(
-                        label:
-                            project.skills[index],
-                      );
+                    scrollDirection: Axis.horizontal,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: project.skills.length > 3
+                        ? 3
+                        : project.skills.length,
+                    separatorBuilder: (_, index) => const SizedBox(width: 5),
+                    itemBuilder: (context, index) {
+                      return _SkillChip(label: project.skills[index]);
                     },
                   ),
                 ),
@@ -2543,27 +1961,22 @@ class _AnimatedProjectCardState
                 children: [
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
                           'Budget',
                           style: TextStyle(
                             fontSize: 10,
-                            color:
-                                Color(0xFF9CA3AF),
+                            color: Color(0xFF9CA3AF),
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           _formatBudget(project),
-                          style:
-                              const TextStyle(
+                          style: const TextStyle(
                             fontSize: 13,
-                            fontWeight:
-                                FontWeight.w800,
-                            color:
-                                Color(0xFF111827),
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF111827),
                           ),
                         ),
                       ],
@@ -2571,31 +1984,20 @@ class _AnimatedProjectCardState
                   ),
                   if (widget.matchPercentage > 0)
                     Container(
-                      padding:
-                          const EdgeInsets
-                              .symmetric(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 9,
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(
-                          0xFFECFDF5,
-                        ),
-                        borderRadius:
-                            BorderRadius.circular(
-                          9,
-                        ),
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(9),
                       ),
                       child: Text(
                         '${widget.matchPercentage}% match',
-                        style:
-                            const TextStyle(
+                        style: const TextStyle(
                           fontSize: 10,
-                          fontWeight:
-                              FontWeight.w800,
-                          color: Color(
-                            0xFF047857,
-                          ),
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF047857),
                         ),
                       ),
                     ),
@@ -2607,34 +2009,22 @@ class _AnimatedProjectCardState
               SizedBox(
                 width: double.infinity,
                 child: AnimatedContainer(
-                  duration:
-                      const Duration(
-                    milliseconds: 180,
-                  ),
+                  duration: const Duration(milliseconds: 180),
                   decoration: BoxDecoration(
                     color: _hovering
-                        ? const Color(
-                            0xFF4338CA,
-                          )
-                        : const Color(
-                            0xFF4F46E5,
-                          ),
-                    borderRadius:
-                        BorderRadius.circular(11),
+                        ? const Color(0xFF4338CA)
+                        : const Color(0xFF4F46E5),
+                    borderRadius: BorderRadius.circular(11),
                   ),
                   child: const Padding(
-                    padding:
-                        EdgeInsets.symmetric(
-                      vertical: 10,
-                    ),
+                    padding: EdgeInsets.symmetric(vertical: 10),
                     child: Center(
                       child: Text(
                         'View Project',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 12,
-                          fontWeight:
-                              FontWeight.w700,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -2648,34 +2038,26 @@ class _AnimatedProjectCardState
     );
   }
 
-  String _formatBudget(
-    ProjectModel project,
-  ) {
-    final minimum =
-        project.effectiveBudgetMin;
-    final maximum =
-        project.effectiveBudgetMax;
+  String _formatBudget(ProjectModel project) {
+    final minimum = project.effectiveBudgetMin;
+    final maximum = project.effectiveBudgetMax;
 
     if (minimum <= 0 && maximum <= 0) {
       return 'Budget flexible';
     }
 
-    if (minimum > 0 &&
-        maximum > minimum) {
+    if (minimum > 0 && maximum > minimum) {
       return '₹${_compactNumber(minimum)}'
           ' - '
           '₹${_compactNumber(maximum)}';
     }
 
-    final value =
-        maximum > 0 ? maximum : minimum;
+    final value = maximum > 0 ? maximum : minimum;
 
     return '₹${_compactNumber(value)}';
   }
 
-  String _compactNumber(
-    double value,
-  ) {
+  String _compactNumber(double value) {
     if (value >= 100000) {
       return '${(value / 100000).toStringAsFixed(value % 100000 == 0 ? 0 : 1)}L';
     }
@@ -2684,8 +2066,7 @@ class _AnimatedProjectCardState
       return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}K';
     }
 
-    return value
-        .toStringAsFixed(0);
+    return value.toStringAsFixed(0);
   }
 }
 
@@ -2708,67 +2089,44 @@ class _RecommendationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final project =
-        recommendation.project;
+    final project = recommendation.project;
 
     return SizedBox(
       width: 310,
       child: Material(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(18),
         child: InkWell(
-          borderRadius:
-              BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(18),
           onTap: onOpen,
           child: Container(
-            padding:
-                const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              borderRadius:
-                  BorderRadius.circular(18),
-              border: Border.all(
-                color:
-                    const Color(0xFFE5E7EB),
-              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(
-                    0xFF4F46E5,
-                  ).withValues(
-                    alpha: 0.035,
-                  ),
+                  color: const Color(0xFF4F46E5).withValues(alpha: 0.035),
                   blurRadius: 18,
-                  offset:
-                      const Offset(0, 7),
+                  offset: const Offset(0, 7),
                 ),
               ],
             ),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
                     Container(
                       width: 34,
                       height: 34,
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            const Color(
-                          0xFFEEF2FF,
-                        ),
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          9,
-                        ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        borderRadius: BorderRadius.circular(9),
                       ),
                       child: const Icon(
                         Icons.auto_awesome_rounded,
-                        color:
-                            Color(0xFF4F46E5),
+                        color: Color(0xFF4F46E5),
                         size: 17,
                       ),
                     ),
@@ -2777,33 +2135,23 @@ class _RecommendationCard extends StatelessWidget {
                       child: Text(
                         project.title,
                         maxLines: 2,
-                        overflow:
-                            TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
                           fontSize: 14,
-                          fontWeight:
-                              FontWeight.w800,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
                     IconButton(
                       onPressed: onSave,
-                      visualDensity:
-                          VisualDensity.compact,
+                      visualDensity: VisualDensity.compact,
                       icon: Icon(
                         isSaved
-                            ? Icons
-                                .bookmark_rounded
-                            : Icons
-                                .bookmark_border_rounded,
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
                         color: isSaved
-                            ? const Color(
-                                0xFF4F46E5,
-                              )
-                            : const Color(
-                                0xFF9CA3AF,
-                              ),
+                            ? const Color(0xFF4F46E5)
+                            : const Color(0xFF9CA3AF),
                         size: 20,
                       ),
                     ),
@@ -2813,56 +2161,40 @@ class _RecommendationCard extends StatelessWidget {
                 Text(
                   project.description,
                   maxLines: 2,
-                  overflow:
-                      TextOverflow.ellipsis,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 11,
                     height: 1.45,
-                    color:
-                        Color(0xFF6B7280),
+                    color: Color(0xFF6B7280),
                   ),
                 ),
                 const Spacer(),
                 Row(
                   children: [
                     Container(
-                      padding:
-                          const EdgeInsets
-                              .symmetric(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 9,
                         vertical: 6,
                       ),
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            const Color(
-                          0xFFECFDF5,
-                        ),
-                        borderRadius:
-                            BorderRadius.circular(
-                          8,
-                        ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         '${recommendation.matchPercentage}% Match',
-                        style:
-                            const TextStyle(
+                        style: const TextStyle(
                           fontSize: 10,
-                          fontWeight:
-                              FontWeight.w800,
-                          color:
-                              Color(0xFF047857),
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF047857),
                         ),
                       ),
                     ),
                     const Spacer(),
                     Text(
                       _budget(project),
-                      style:
-                          const TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
-                        fontWeight:
-                            FontWeight.w800,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
@@ -2876,17 +2208,14 @@ class _RecommendationCard extends StatelessWidget {
   }
 
   String _budget(ProjectModel project) {
-    final min =
-        project.effectiveBudgetMin;
-    final max =
-        project.effectiveBudgetMax;
+    final min = project.effectiveBudgetMin;
+    final max = project.effectiveBudgetMax;
 
     if (min <= 0 && max <= 0) {
       return 'Flexible';
     }
 
-    final value =
-        max > 0 ? max : min;
+    final value = max > 0 ? max : min;
 
     if (value >= 100000) {
       return '₹${(value / 100000).toStringAsFixed(1)}L';
@@ -2910,12 +2239,14 @@ class _ProjectPreviewSheet extends StatelessWidget {
     required this.isSaved,
     required this.matchPercentage,
     required this.onSave,
+    required this.onViewFullProject,
   });
 
   final ProjectModel project;
   final bool isSaved;
   final int matchPercentage;
   final VoidCallback onSave;
+  final VoidCallback onViewFullProject;
 
   @override
   Widget build(BuildContext context) {
@@ -2923,118 +2254,66 @@ class _ProjectPreviewSheet extends StatelessWidget {
       initialChildSize: 0.72,
       minChildSize: 0.45,
       maxChildSize: 0.94,
-      builder: (
-        context,
-        scrollController,
-      ) {
+      builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
             color: Color(0xFFF8F9FD),
-            borderRadius:
-                BorderRadius.vertical(
-              top: Radius.circular(28),
-            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: CustomScrollView(
             controller: scrollController,
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(
-                    22,
-                    12,
-                    22,
-                    10,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 10),
                   child: Column(
                     children: [
                       Container(
                         width: 42,
                         height: 4,
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              const Color(
-                            0xFFD1D5DB,
-                          ),
-                          borderRadius:
-                              BorderRadius
-                                  .circular(
-                            10,
-                          ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD1D5DB),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                       const SizedBox(height: 20),
                       Row(
-                        crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
                             width: 50,
                             height: 50,
-                            decoration:
-                                BoxDecoration(
-                              gradient:
-                                  const LinearGradient(
-                                colors: [
-                                  Color(
-                                    0xFF4F46E5,
-                                  ),
-                                  Color(
-                                    0xFF6366F1,
-                                  ),
-                                ],
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
                               ),
-                              borderRadius:
-                                  BorderRadius
-                                      .circular(
-                                14,
-                              ),
+                              borderRadius: BorderRadius.circular(14),
                             ),
                             child: const Icon(
-                              Icons
-                                  .rocket_launch_rounded,
-                              color:
-                                  Colors.white,
+                              Icons.rocket_launch_rounded,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(width: 13),
                           Expanded(
                             child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment
-                                      .start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   project.title,
-                                  style:
-                                      const TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 20,
-                                    fontWeight:
-                                        FontWeight.w800,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                if (project
-                                    .clientName
-                                    .isNotEmpty)
+                                if (project.clientName.isNotEmpty)
                                   Padding(
-                                    padding:
-                                        const EdgeInsets
-                                            .only(
-                                      top: 4,
-                                    ),
+                                    padding: const EdgeInsets.only(top: 4),
                                     child: Text(
                                       'Posted by ${project.clientName}',
-                                      style:
-                                          const TextStyle(
-                                        color:
-                                            Color(
-                                          0xFF6B7280,
-                                        ),
-                                        fontSize:
-                                            12,
+                                      style: const TextStyle(
+                                        color: Color(0xFF6B7280),
+                                        fontSize: 12,
                                       ),
                                     ),
                                   ),
@@ -3042,18 +2321,12 @@ class _ProjectPreviewSheet extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            onPressed:
-                                onSave,
+                            onPressed: onSave,
                             icon: Icon(
                               isSaved
-                                  ? Icons
-                                      .bookmark_rounded
-                                  : Icons
-                                      .bookmark_border_rounded,
-                              color:
-                                  const Color(
-                                0xFF4F46E5,
-                              ),
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_border_rounded,
+                              color: const Color(0xFF4F46E5),
                             ),
                           ),
                         ],
@@ -3064,68 +2337,48 @@ class _ProjectPreviewSheet extends StatelessWidget {
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 22,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 22),
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (matchPercentage > 0)
-                        _PreviewMatchBanner(
-                          percentage:
-                              matchPercentage,
-                        ),
+                        _PreviewMatchBanner(percentage: matchPercentage),
                       const SizedBox(height: 16),
                       _PreviewSection(
                         title: 'About the project',
-                        icon:
-                            Icons.description_outlined,
+                        icon: Icons.description_outlined,
                         child: Text(
                           project.description,
-                          style:
-                              const TextStyle(
+                          style: const TextStyle(
                             fontSize: 13,
                             height: 1.6,
-                            color:
-                                Color(0xFF4B5563),
+                            color: Color(0xFF4B5563),
                           ),
                         ),
                       ),
                       const SizedBox(height: 18),
                       _PreviewSection(
                         title: 'Project details',
-                        icon:
-                            Icons.info_outline_rounded,
+                        icon: Icons.info_outline_rounded,
                         child: Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: [
                             _DetailPill(
-                              icon:
-                                  Icons.payments_outlined,
-                              label:
-                                  _budget(project),
+                              icon: Icons.payments_outlined,
+                              label: _budget(project),
                             ),
                             _DetailPill(
-                              icon:
-                                  Icons.schedule_rounded,
-                              label:
-                                  project.duration,
+                              icon: Icons.schedule_rounded,
+                              label: project.duration,
                             ),
                             _DetailPill(
-                              icon:
-                                  Icons.public_rounded,
-                              label:
-                                  project.workMode,
+                              icon: Icons.public_rounded,
+                              label: project.workMode,
                             ),
                             _DetailPill(
-                              icon:
-                                  Icons.category_outlined,
-                              label:
-                                  project.projectType,
+                              icon: Icons.category_outlined,
+                              label: project.projectType,
                             ),
                           ],
                         ),
@@ -3133,43 +2386,28 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       const SizedBox(height: 18),
                       if (project.skills.isNotEmpty)
                         _PreviewSection(
-                          title:
-                              'Required skills',
-                          icon:
-                              Icons.psychology_outlined,
+                          title: 'Required skills',
+                          icon: Icons.psychology_outlined,
                           child: Wrap(
                             spacing: 7,
                             runSpacing: 7,
                             children: project.skills
-                                .map(
-                                  (skill) =>
-                                      _SkillChip(
-                                    label: skill,
-                                  ),
-                                )
+                                .map((skill) => _SkillChip(label: skill))
                                 .toList(),
                           ),
                         ),
                       const SizedBox(height: 18),
-                      if (project
-                          .technologies
-                          .isNotEmpty)
+                      if (project.technologies.isNotEmpty)
                         _PreviewSection(
-                          title:
-                              'Technologies',
-                          icon:
-                              Icons.code_rounded,
+                          title: 'Technologies',
+                          icon: Icons.code_rounded,
                           child: Wrap(
                             spacing: 7,
                             runSpacing: 7,
-                            children: project
-                                .technologies
+                            children: project.technologies
                                 .map(
                                   (technology) =>
-                                      _TechnologyChip(
-                                    label:
-                                        technology,
-                                  ),
+                                      _TechnologyChip(label: technology),
                                 )
                                 .toList(),
                           ),
@@ -3177,49 +2415,16 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       const SizedBox(height: 28),
                       SizedBox(
                         width: double.infinity,
-                        child:
-                            ElevatedButton.icon(
-                          onPressed: () {
-                            
-                          Navigator.of(context).pop();
-
-Navigator.of(context).push(
-  MaterialPageRoute(
-    builder: (_) => ProjectDetails(
-      projectId: project.id,
-      initialProject: project,
-    ),
-  ),
-);
-                         
-                          },
-                          icon: const Icon(
-                            Icons.arrow_forward_rounded,
-                          ),
-                          label: const Text(
-                            'View Full Project',
-                          ),
-                          style:
-                              ElevatedButton
-                                  .styleFrom(
-                            backgroundColor:
-                                const Color(
-                              0xFF4F46E5,
-                            ),
-                            foregroundColor:
-                                Colors.white,
-                            padding:
-                                const EdgeInsets
-                                    .symmetric(
-                              vertical: 15,
-                            ),
-                            shape:
-                                RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius
-                                      .circular(
-                                13,
-                              ),
+                        child: ElevatedButton.icon(
+                          onPressed: onViewFullProject,
+                          icon: const Icon(Icons.arrow_forward_rounded),
+                          label: const Text('View Full Project'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4F46E5),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 15),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(13),
                             ),
                           ),
                         ),
@@ -3237,10 +2442,8 @@ Navigator.of(context).push(
   }
 
   String _budget(ProjectModel project) {
-    final min =
-        project.effectiveBudgetMin;
-    final max =
-        project.effectiveBudgetMax;
+    final min = project.effectiveBudgetMin;
+    final max = project.effectiveBudgetMax;
 
     if (min <= 0 && max <= 0) {
       return 'Budget Flexible';
@@ -3271,9 +2474,7 @@ Navigator.of(context).push(
 // =============================================================================
 
 class _PreviewMatchBanner extends StatelessWidget {
-  const _PreviewMatchBanner({
-    required this.percentage,
-  });
+  const _PreviewMatchBanner({required this.percentage});
 
   final int percentage;
 
@@ -3283,23 +2484,14 @@ class _PreviewMatchBanner extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [
-            Color(0xFFEEF2FF),
-            Color(0xFFF5F3FF),
-          ],
+          colors: [Color(0xFFEEF2FF), Color(0xFFF5F3FF)],
         ),
-        borderRadius:
-            BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFFDDE2FF),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFDDE2FF)),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.auto_awesome_rounded,
-            color: Color(0xFF4F46E5),
-          ),
+          const Icon(Icons.auto_awesome_rounded, color: Color(0xFF4F46E5)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -3332,23 +2524,15 @@ class _PreviewSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(
-              icon,
-              size: 18,
-              color: const Color(0xFF4F46E5),
-            ),
+            Icon(icon, size: 18, color: const Color(0xFF4F46E5)),
             const SizedBox(width: 8),
             Text(
               title,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-              ),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
             ),
           ],
         ),
@@ -3360,10 +2544,7 @@ class _PreviewSection extends StatelessWidget {
 }
 
 class _DetailPill extends StatelessWidget {
-  const _DetailPill({
-    required this.icon,
-    required this.label,
-  });
+  const _DetailPill({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
@@ -3371,34 +2552,20 @@ class _DetailPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 8,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(10),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 15,
-            color: const Color(0xFF6366F1),
-          ),
+          Icon(icon, size: 15, color: const Color(0xFF6366F1)),
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -3422,28 +2589,17 @@ class _FilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: active
-          ? const Color(0xFFEEF2FF)
-          : Colors.white,
-      borderRadius:
-          BorderRadius.circular(12),
+      color: active ? const Color(0xFFEEF2FF) : Colors.white,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 9,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: active
-                  ? const Color(0xFFC7D2FE)
-                  : const Color(0xFFE5E7EB),
+              color: active ? const Color(0xFFC7D2FE) : const Color(0xFFE5E7EB),
             ),
           ),
           child: Row(
@@ -3461,9 +2617,7 @@ class _FilterButton extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  fontWeight: active
-                      ? FontWeight.w700
-                      : FontWeight.w500,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                   color: active
                       ? const Color(0xFF4338CA)
                       : const Color(0xFF4B5563),
@@ -3491,40 +2645,25 @@ class _BudgetChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: active
-          ? const Color(0xFFEEF2FF)
-          : Colors.white,
-      borderRadius:
-          BorderRadius.circular(10),
+      color: active ? const Color(0xFFEEF2FF) : Colors.white,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 11,
-            vertical: 8,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: active
-                  ? const Color(0xFFC7D2FE)
-                  : const Color(0xFFE5E7EB),
+              color: active ? const Color(0xFFC7D2FE) : const Color(0xFFE5E7EB),
             ),
           ),
           child: Text(
             label,
             style: TextStyle(
               fontSize: 11,
-              fontWeight: active
-                  ? FontWeight.w700
-                  : FontWeight.w500,
-              color: active
-                  ? const Color(0xFF4F46E5)
-                  : const Color(0xFF4B5563),
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active ? const Color(0xFF4F46E5) : const Color(0xFF4B5563),
             ),
           ),
         ),
@@ -3534,10 +2673,7 @@ class _BudgetChip extends StatelessWidget {
 }
 
 class _SmallTag extends StatelessWidget {
-  const _SmallTag({
-    required this.icon,
-    required this.label,
-  });
+  const _SmallTag({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
@@ -3545,24 +2681,15 @@ class _SmallTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 7,
-        vertical: 5,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       decoration: BoxDecoration(
         color: const Color(0xFFF9FAFB),
-        borderRadius:
-            BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(7),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 12,
-            color: const Color(0xFF6B7280),
-          ),
+          Icon(icon, size: 12, color: const Color(0xFF6B7280)),
           const SizedBox(width: 4),
           Text(
             label,
@@ -3579,24 +2706,17 @@ class _SmallTag extends StatelessWidget {
 }
 
 class _SkillChip extends StatelessWidget {
-  const _SkillChip({
-    required this.label,
-  });
+  const _SkillChip({required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 5,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: const Color(0xFFF3F4F6),
-        borderRadius:
-            BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(7),
       ),
       child: Text(
         label,
@@ -3611,27 +2731,18 @@ class _SkillChip extends StatelessWidget {
 }
 
 class _TechnologyChip extends StatelessWidget {
-  const _TechnologyChip({
-    required this.label,
-  });
+  const _TechnologyChip({required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0xFFEEF2FF),
-        borderRadius:
-            BorderRadius.circular(8),
-        border: Border.all(
-          color: const Color(0xFFDDE2FF),
-        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFDDE2FF)),
       ),
       child: Text(
         label,
@@ -3646,10 +2757,7 @@ class _TechnologyChip extends StatelessWidget {
 }
 
 class _SkeletonBox extends StatelessWidget {
-  const _SkeletonBox({
-    required this.height,
-    required this.radius,
-  });
+  const _SkeletonBox({required this.height, required this.radius});
 
   final double height;
   final double radius;
@@ -3660,8 +2768,7 @@ class _SkeletonBox extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: const Color(0xFFEDEFF5),
-        borderRadius:
-            BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(radius),
       ),
     );
   }
@@ -3676,40 +2783,21 @@ class _ProjectSkeletonCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: const Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SkeletonBox(
-            height: 40,
-            radius: 10,
-          ),
+          _SkeletonBox(height: 40, radius: 10),
           SizedBox(height: 15),
-          _SkeletonBox(
-            height: 12,
-            radius: 6,
-          ),
+          _SkeletonBox(height: 12, radius: 6),
           SizedBox(height: 8),
-          _SkeletonBox(
-            height: 12,
-            radius: 6,
-          ),
+          _SkeletonBox(height: 12, radius: 6),
           SizedBox(height: 8),
-          _SkeletonBox(
-            height: 12,
-            radius: 6,
-          ),
+          _SkeletonBox(height: 12, radius: 6),
           Spacer(),
-          _SkeletonBox(
-            height: 34,
-            radius: 10,
-          ),
+          _SkeletonBox(height: 34, radius: 10),
         ],
       ),
     );

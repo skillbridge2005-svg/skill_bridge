@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
 import '../models/project_model.dart';
 
 /// Service responsible for all project-related Firestore operations.
@@ -42,7 +41,7 @@ Stream<List<ProjectModel>> watchOpenProjects() {
   return _projectsCollection
       .where(
         'status',
-        isEqualTo: 'open',
+        whereIn: ['open', 'requirement'],
       )
       .snapshots()
       .map(_documentsToProjects);
@@ -84,17 +83,16 @@ Stream<List<ProjectModel>> watchOpenProjects() {
   // ---------------------------------------------------------------------------
 
   /// Fetches all open projects once.
- Future<List<ProjectModel>> getOpenProjects() async {
+Future<List<ProjectModel>> getOpenProjects() async {
   final snapshot = await _projectsCollection
       .where(
         'status',
-        isEqualTo: 'open',
+        whereIn: ['open', 'requirement'],
       )
       .get();
 
   return _documentsToProjects(snapshot);
 }
-
   /// Fetches one project.
   Future<ProjectModel?> getProject(
     String projectId,
@@ -758,13 +756,13 @@ Stream<List<ProjectModel>> watchOpenProjects() {
   // HELPERS
   // ---------------------------------------------------------------------------
 
-  List<ProjectModel> _documentsToProjects(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) {
-    return snapshot.docs
-        .map(ProjectModel.fromFirestore)
-        .toList();
-  }
+List<ProjectModel> _documentsToProjects(
+  QuerySnapshot<Map<String, dynamic>> snapshot,
+) {
+  return snapshot.docs
+      .map(ProjectModel.fromFirestore)
+      .toList();
+}
 
   DateTime _safeDate(
     DateTime? date,
