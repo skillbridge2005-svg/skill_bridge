@@ -12,6 +12,7 @@ import 'client_profile_screen.dart';
 import 'client_messages_screen.dart';
 import 'client_notifications_screen.dart';
 import 'project_details_screen.dart';
+import 'hire_developer_screen.dart';
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -606,6 +607,13 @@ class _ClientDashboardSection extends StatelessWidget {
     );
   }
 
+  void _openHireDeveloper(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const HireDeveloperScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -693,6 +701,10 @@ class _ClientDashboardSection extends StatelessWidget {
                       const SizedBox(height: 18),
                       _CreateProjectBanner(
                         onTap: () => _openCreateProject(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _HireDeveloperBanner(
+                        onTap: () => _openHireDeveloper(context),
                       ),
                       const SizedBox(height: 27),
                       _StatsGrid(
@@ -975,6 +987,103 @@ class _CreateProjectBanner extends StatelessWidget {
                 child: const Icon(
                   Icons.arrow_forward_rounded,
                   color: Colors.white,
+                  size: 21,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HireDeveloperBanner extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _HireDeveloperBanner({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.all(21),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFE0E7FF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x080F172A),
+                blurRadius: 22,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFEFF6FF), Color(0xFFE0E7FF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                child: const Icon(
+                  Icons.person_search_rounded,
+                  color: Color(0xFF4F46E5),
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.hireDeveloper,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF101828),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      l10n.findDevelopers,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.4,
+                        color: Color(0xFF667085),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                width: 43,
+                height: 43,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: Color(0xFF4F46E5),
                   size: 21,
                 ),
               ),
@@ -1474,6 +1583,7 @@ class _QuickActions extends StatelessWidget {
             subtitle: l10n.continueConversations,
             onTap: onMessages,
           ),
+          const SizedBox(height: 10),
         ],
       );
     }
@@ -1497,6 +1607,7 @@ class _QuickActions extends StatelessWidget {
             onTap: onMessages,
           ),
         ),
+        const SizedBox(width: 12),
       ],
     );
   }
