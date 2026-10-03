@@ -2,20 +2,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class ClientPaymentsScreen extends StatelessWidget {
   const ClientPaymentsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF6F8FC),
+      return Scaffold(
+        backgroundColor: const Color(0xFFF6F8FC),
         body: Center(
           child: Text(
-            'Please login again.',
-            style: TextStyle(
+            l10n.loginAgain,
+            style: const TextStyle(
               color: Color(0xFF64748B),
               fontWeight: FontWeight.w600,
             ),
@@ -41,9 +44,21 @@ class ClientPaymentsScreen extends StatelessWidget {
           ),
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    tooltip: l10n.back,
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Color(0xFF111827),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   Container(
                     width: 44,
                     height: 44,
@@ -58,24 +73,24 @@ class ClientPaymentsScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Payments',
-                          style: TextStyle(
+                          l10n.payments,
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
                             color: Color(0xFF111827),
                             letterSpacing: -0.3,
                           ),
                         ),
-                        SizedBox(height: 3),
+                        const SizedBox(height: 3),
                         Text(
-                          'SkillBridge payment history',
-                          style: TextStyle(
+                          l10n.paymentHistory,
+                          style: const TextStyle(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF6B7280),
@@ -99,7 +114,7 @@ class ClientPaymentsScreen extends StatelessWidget {
           ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
-                .collectionGroup('payments')
+                .collection('payments')
                 .where('clientId', isEqualTo: user.uid)
                 .snapshots(),
             builder: (context, snapshot) {
@@ -112,13 +127,27 @@ class ClientPaymentsScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _PaymentsErrorCard(
-                      message: 'Unable to load payments.\n${snapshot.error}',
+                      message:
+                          '${l10n.somethingWentWrong}\n'
+                          '${snapshot.error}',
                     ),
                   ),
                 );
               }
 
               final payments = snapshot.data?.docs ?? [];
+
+              final pendingPayments = payments.where((document) {
+                final status = document.data()['status']?.toString() ?? '';
+
+                return status == 'pending';
+              }).toList();
+
+              final paymentHistory = payments.where((document) {
+                final status = document.data()['status']?.toString() ?? '';
+
+                return status != 'pending';
+              }).toList();
 
               if (payments.isEmpty) {
                 return const _EmptyPayments();
@@ -134,19 +163,52 @@ class ClientPaymentsScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const _PaymentsSectionHeading(),
-                        const SizedBox(height: 18),
-                        Column(
-                          children: payments
-                              .map(
-                                (paymentDocument) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _PaymentCard(
-                                    payment: paymentDocument.data(),
-                                  ),
+
+                        if (pendingPayments.isNotEmpty) ...[
+                          const SizedBox(height: 26),
+                          _PaymentSectionTitle(
+                            eyebrow: l10n.pending,
+                            title: l10n.pending,
+                            subtitle: l10n.advancePayment,
+                            color: const Color(0xFFD97706),
+                          ),
+                          const SizedBox(height: 14),
+                          Column(
+                            children: pendingPayments.map((paymentDocument) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _PaymentCard(
+                                  payment: paymentDocument.data(),
+                                  isPending: true,
                                 ),
-                              )
-                              .toList(),
-                        ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+
+                        if (paymentHistory.isNotEmpty) ...[
+                          SizedBox(
+                            height: pendingPayments.isNotEmpty ? 18 : 26,
+                          ),
+                          _PaymentSectionTitle(
+                            eyebrow: l10n.paymentHistory,
+                            title: l10n.paymentHistory,
+                            subtitle: l10n.paymentDetails,
+                            color: const Color(0xFF4F46E5),
+                          ),
+                          const SizedBox(height: 14),
+                          Column(
+                            children: paymentHistory.map((paymentDocument) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _PaymentCard(
+                                  payment: paymentDocument.data(),
+                                  isPending: false,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -165,32 +227,88 @@ class _PaymentsSectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final l10n = AppLocalizations.of(context);
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'FINANCE',
-          style: TextStyle(
+          l10n.payments.toUpperCase(),
+          style: const TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.25,
             color: Color(0xFF4F46E5),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Payment history',
-          style: TextStyle(
+          l10n.payments,
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
             color: Color(0xFF111827),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Track your project payments and transaction status.',
-          style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+          l10n.paymentHistory,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentSectionTitle extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+  final Color color;
+
+  const _PaymentSectionTitle({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow.toUpperCase(),
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.25,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF111827),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 11.5,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
     );
@@ -199,21 +317,24 @@ class _PaymentsSectionHeading extends StatelessWidget {
 
 class _PaymentCard extends StatelessWidget {
   final Map<String, dynamic> payment;
+  final bool isPending;
 
-  const _PaymentCard({required this.payment});
+  const _PaymentCard({required this.payment, required this.isPending});
 
-  String _formatStatus(String status) {
+  String _formatStatus(BuildContext context, String status) {
+    final l10n = AppLocalizations.of(context);
+
     switch (status) {
       case 'pending':
-        return 'Pending';
+        return l10n.pending;
       case 'paid':
-        return 'Paid';
+        return l10n.paid;
       case 'failed':
-        return 'Failed';
+        return l10n.failed;
       case 'refunded':
-        return 'Refunded';
+        return l10n.refunded;
       case 'cancelled':
-        return 'Cancelled';
+        return l10n.paymentCancelled;
       default:
         return status;
     }
@@ -253,12 +374,14 @@ class _PaymentCard extends StatelessWidget {
     }
   }
 
-  String _formatPaymentType(String type) {
+  String _formatPaymentType(BuildContext context, String type) {
+    final l10n = AppLocalizations.of(context);
+
     switch (type) {
       case 'advance':
-        return 'Advance Payment';
+        return l10n.advancePayment;
       case 'final':
-        return 'Final Payment';
+        return l10n.finalPayment;
       default:
         return type;
     }
@@ -266,7 +389,9 @@ class _PaymentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = payment['projectTitle']?.toString() ?? 'Project Payment';
+    final l10n = AppLocalizations.of(context);
+
+    final title = payment['projectTitle']?.toString() ?? l10n.project;
 
     final projectId = payment['projectId']?.toString() ?? '';
 
@@ -284,12 +409,16 @@ class _PaymentCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: const [
+        border: Border.all(
+          color: isPending ? const Color(0xFFFDE3B0) : const Color(0xFFE5E7EB),
+        ),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x060F172A),
+            color: isPending
+                ? const Color(0x0FD97706)
+                : const Color(0x060F172A),
             blurRadius: 17,
-            offset: Offset(0, 6),
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -310,9 +439,11 @@ class _PaymentCard extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.all(Radius.circular(16)),
                 ),
-                child: const Icon(
-                  Icons.currency_rupee_rounded,
-                  color: Color(0xFF4F46E5),
+                child: Icon(
+                  isPending
+                      ? Icons.pending_actions_rounded
+                      : Icons.currency_rupee_rounded,
+                  color: const Color(0xFF4F46E5),
                   size: 24,
                 ),
               ),
@@ -334,7 +465,7 @@ class _PaymentCard extends StatelessWidget {
                     if (paymentType.isNotEmpty) ...[
                       const SizedBox(height: 5),
                       Text(
-                        _formatPaymentType(paymentType),
+                        _formatPaymentType(context, paymentType),
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -353,7 +484,7 @@ class _PaymentCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  _formatStatus(status),
+                  _formatStatus(context, status),
                   style: TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w900,
@@ -374,10 +505,10 @@ class _PaymentCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Amount',
-                    style: TextStyle(
+                    l10n.amount,
+                    style: const TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF6B7280),
@@ -385,7 +516,7 @@ class _PaymentCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  amount.isEmpty ? 'Not specified' : '₹$amount',
+                  amount.isEmpty ? l10n.noData : '₹$amount',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
@@ -420,6 +551,38 @@ class _PaymentCard extends StatelessWidget {
               ],
             ),
           ],
+          if (isPending) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7E8),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    size: 17,
+                    color: Color(0xFFD97706),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      l10n.pending,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF92400E),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -431,6 +594,8 @@ class _EmptyPayments extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -460,23 +625,23 @@ class _EmptyPayments extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    _EmptyPaymentIcon(),
-                    SizedBox(height: 18),
+                    const _EmptyPaymentIcon(),
+                    const SizedBox(height: 18),
                     Text(
-                      'No payments yet',
-                      style: TextStyle(
+                      l10n.noPayments,
+                      style: const TextStyle(
                         fontSize: 21,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
                       ),
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
-                      'Your project payment records will appear here.',
+                      l10n.paymentHistory,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         height: 1.5,
                         color: Color(0xFF6B7280),

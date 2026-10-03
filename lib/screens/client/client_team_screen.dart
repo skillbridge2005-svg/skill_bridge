@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class ClientTeamScreen extends StatelessWidget {
   final String projectId;
 
@@ -8,6 +10,8 @@ class ClientTeamScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
@@ -15,9 +19,9 @@ class ClientTeamScreen extends StatelessWidget {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         titleSpacing: 20,
-        title: const Text(
-          'Project Team',
-          style: TextStyle(
+        title: Text(
+          l10n.projectTeam,
+          style: const TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
             color: Color(0xFF111827),
@@ -49,7 +53,9 @@ class ClientTeamScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _TeamErrorCard(
-                      message: 'Unable to load team.\n${snapshot.error}',
+                      message:
+                          '${l10n.somethingWentWrong}\n'
+                          '${snapshot.error}',
                     ),
                   ),
                 );
@@ -83,6 +89,7 @@ class ClientTeamScreen extends StatelessWidget {
                       }
 
                       final document = members[index - 1];
+
                       final data = document.data();
 
                       return _TeamMemberCard(data: data);
@@ -103,12 +110,12 @@ class _TeamHeader extends StatelessWidget {
 
   const _TeamHeader({required this.memberCount});
 
-  String _memberLabel() {
-    return memberCount == 1 ? 'member' : 'members';
-  }
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
+    final memberText = memberCount == 1 ? l10n.teamMembers : l10n.teamMembers;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -148,9 +155,9 @@ class _TeamHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'PROJECT TEAM',
-                  style: TextStyle(
+                Text(
+                  l10n.projectTeam.toUpperCase(),
+                  style: const TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 1.2,
@@ -158,9 +165,9 @@ class _TeamHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 5),
-                const Text(
-                  'Your development team',
-                  style: TextStyle(
+                Text(
+                  l10n.projectTeam,
+                  style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
                     color: Colors.white,
@@ -169,7 +176,7 @@ class _TeamHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '$memberCount ${_memberLabel()} assigned to this project',
+                  '$memberCount $memberText',
                   style: const TextStyle(
                     fontSize: 11.5,
                     color: Color(0xFFD1D5DB),
@@ -228,23 +235,25 @@ class _TeamMemberCard extends StatelessWidget {
     }
   }
 
-  String _formatRole(String role) {
+  String _formatRole(BuildContext context, String role) {
+    final l10n = AppLocalizations.of(context);
+
     switch (role) {
       case 'frontend':
-        return 'Frontend Developer';
+        return l10n.frontendDeveloper;
 
       case 'backend':
-        return 'Backend Developer';
+        return l10n.backendDeveloper;
 
       case 'database':
-        return 'Database Developer';
+        return l10n.databaseDeveloper;
 
       case 'tester':
-        return 'Tester / QA';
+        return l10n.tester;
 
       case 'project_manager':
       case 'team_leader':
-        return 'Project Manager / Team Leader';
+        return l10n.teamLeader;
 
       default:
         return role;
@@ -276,8 +285,12 @@ class _TeamMemberCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = data['name']?.toString() ?? 'Developer';
+    final l10n = AppLocalizations.of(context);
+
+    final name = data['name']?.toString() ?? l10n.frontendDeveloper;
+
     final role = data['role']?.toString() ?? '';
+
     final email = data['email']?.toString() ?? '';
 
     final roleColor = _roleColor(role);
@@ -342,7 +355,7 @@ class _TeamMemberCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(9),
                     ),
                     child: Text(
-                      _formatRole(role),
+                      _formatRole(context, role),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -392,6 +405,8 @@ class _EmptyTeam extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -427,20 +442,20 @@ class _EmptyTeam extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              const Text(
-                'No team members yet',
+              Text(
+                l10n.noTeamMembers,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 21,
                   fontWeight: FontWeight.w900,
                   color: Color(0xFF111827),
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Team members assigned to this project will appear here.',
+              Text(
+                l10n.projectTeam,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12.5,
                   height: 1.5,
                   color: Color(0xFF6B7280),
