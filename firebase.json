@@ -1,1 +1,47 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"skill-bridge-e8366","appId":"1:980367306545:android:b25056de240afa374c8a10","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"skill-bridge-e8366","configurations":{"android":"1:980367306545:android:b25056de240afa374c8a10","ios":"1:980367306545:ios:6caf8c414a9f467e4c8a10","macos":"1:980367306545:ios:6caf8c414a9f467e4c8a10","web":"1:980367306545:web:911d7553b9aaca984c8a10","windows":"1:980367306545:web:a3343dda49e154434c8a10"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "skill-bridge-e8366",
+          "appId": "1:980367306545:android:b25056de240afa374c8a10",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "skill-bridge-e8366",
+          "configurations": {
+            "android": "1:980367306545:android:b25056de240afa374c8a10",
+            "ios": "1:980367306545:ios:6caf8c414a9f467e4c8a10",
+            "macos": "1:980367306545:ios:6caf8c414a9f467e4c8a10",
+            "web": "1:980367306545:web:911d7553b9aaca984c8a10",
+            "windows": "1:980367306545:web:a3343dda49e154434c8a10"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint"
+      ]
+    }
+  ],
+  "emulators": {
+    "functions": {
+      "host": "0.0.0.0",
+      "port": 5001
+    }
+  }
+}

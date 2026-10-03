@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/language_provider.dart';
 
+import '../../services/payment_service.dart';
 import 'create_project_screen.dart';
 import 'my_projects_screen.dart';
 import 'client_profile_screen.dart';
@@ -22,6 +23,8 @@ class ClientHome extends StatefulWidget {
 
 class _ClientHomeState extends State<ClientHome>
     with SingleTickerProviderStateMixin {
+  final PaymentService _paymentService = PaymentService();
+
   int _selectedNav = 0;
 
   late final AnimationController _pageController;
@@ -50,6 +53,7 @@ class _ClientHomeState extends State<ClientHome>
 
   @override
   void dispose() {
+    _paymentService.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -153,6 +157,28 @@ class _ClientHomeState extends State<ClientHome>
               bottomNavigationBar: _buildMobileNavigation(
                 unreadMessageCount: unreadMessageCount,
                 unreadNotificationCount: unreadNotificationCount,
+              ),
+              floatingActionButton: ElevatedButton.icon(
+                onPressed: () async {
+                  try {
+                    await _paymentService.startPayment(
+                      amount: 500,
+                      projectId: 'test_project_001',
+                      email: 'test@example.com',
+                      contact: '9999999999',
+                    );
+                  } catch (e) {
+                    if (!context.mounted) return;
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Payment initialization failed: $e'),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.payment),
+                label: const Text('Pay ₹500'),
               ),
             );
           },

@@ -1,5 +1,10 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:skill_bridge/screens/splash_screen.dart';
+
+import 'firebase_options.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
@@ -8,10 +13,17 @@ import 'screens/auth/auth_wrapper.dart';
 import 'localization/app_localizations.dart';
 import 'localization/language_provider.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Connect Firebase Cloud Functions to local emulator
+  // for development/testing on physical Android phone.
+  if (kDebugMode) {
+    FirebaseFunctions.instanceFor(region: 'us-central1')
+        .useFunctionsEmulator('10.44.128.192', 5001);
+  }
 
   runApp(
     ChangeNotifierProvider(
@@ -29,6 +41,7 @@ class SkillBridgeApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'SkillBridge',
+      home: const SkillBridgeSplashScreen(),
 
       locale: context.watch<LanguageProvider>().locale,
 
