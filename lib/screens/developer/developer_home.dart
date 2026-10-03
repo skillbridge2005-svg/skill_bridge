@@ -3,8 +3,8 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
 import 'developer_profile.dart';
+import 'discover_projects.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -75,24 +75,35 @@ class _DeveloperHomeState extends State<DeveloperHome>
     await FirebaseAuth.instance.signOut();
   }
 
-  void _selectNav(int index) {
-    // My Profile is a separate screen.
-    if (index == 6) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const DeveloperProfile(),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _selectedNav = index;
-      _notificationsOpen = false;
-      _messagesOpen = false;
-    });
+void _selectNav(int index) {
+  // Discover Projects is a separate screen.
+  if (index == 1) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DiscoverProjects(),
+      ),
+    );
+    return;
   }
+
+  // My Profile is a separate screen.
+  if (index == 6) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DeveloperProfile(),
+      ),
+    );
+    return;
+  }
+
+  setState(() {
+    _selectedNav = index;
+    _notificationsOpen = false;
+    _messagesOpen = false;
+  });
+}
 
   void _showFeatureSnack(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
