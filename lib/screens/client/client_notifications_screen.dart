@@ -2,18 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class ClientNotificationsScreen extends StatelessWidget {
   const ClientNotificationsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Center(
+      return Center(
         child: Text(
-          'Please login again.',
-          style: TextStyle(
+          l10n.loginAgain,
+          style: const TextStyle(
             color: Color(0xFF64748B),
             fontWeight: FontWeight.w600,
           ),
@@ -48,7 +51,7 @@ class ClientNotificationsScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(24),
                     child: _NotificationErrorCard(
                       message:
-                          'Unable to load notifications.\n${snapshot.error}',
+                          '${l10n.unableToLoadMessages}\n${snapshot.error}',
                     ),
                   ),
                 );
@@ -103,32 +106,38 @@ class _NotificationSectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final l10n = AppLocalizations.of(context);
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'ACTIVITY',
-          style: TextStyle(
+          l10n.activity.toUpperCase(),
+          style: const TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.25,
             color: Color(0xFF4F46E5),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Recent notifications',
-          style: TextStyle(
+          l10n.recentNotifications,
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
             color: Color(0xFF111827),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Review the latest updates from your SkillBridge workspace.',
-          style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+          l10n.latestWorkspaceUpdates,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
     );
@@ -208,15 +217,38 @@ class _NotificationCard extends StatelessWidget {
     }
   }
 
+  String _getTypeLabel(BuildContext context, String type) {
+    final l10n = AppLocalizations.of(context);
+
+    switch (type) {
+      case 'project':
+        return l10n.project;
+      case 'message':
+        return l10n.messages;
+      case 'team':
+        return l10n.team;
+      case 'payment':
+        return l10n.payments;
+      case 'status':
+        return l10n.status;
+      default:
+        return l10n.notifications;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final title = data['title']?.toString() ?? 'Notification';
+    final l10n = AppLocalizations.of(context);
+
+    final title = data['title']?.toString() ?? l10n.notifications;
 
     final message = data['message']?.toString() ?? '';
 
     final type = data['type']?.toString() ?? 'system';
 
     final isRead = data['isRead'] == true;
+
+    final typeLabel = _getTypeLabel(context, type);
 
     return Material(
       color: Colors.transparent,
@@ -310,7 +342,7 @@ class _NotificationCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        type.toUpperCase(),
+                        typeLabel.toUpperCase(),
                         style: TextStyle(
                           fontSize: 8.5,
                           fontWeight: FontWeight.w900,
@@ -335,6 +367,8 @@ class _EmptyNotifications extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -364,24 +398,23 @@ class _EmptyNotifications extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    _EmptyNotificationIcon(),
-                    SizedBox(height: 18),
+                    const _EmptyNotificationIcon(),
+                    const SizedBox(height: 18),
                     Text(
-                      'No notifications',
-                      style: TextStyle(
+                      l10n.noNotifications,
+                      style: const TextStyle(
                         fontSize: 21,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
                       ),
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
-                      'New project updates and messages '
-                      'will appear here.',
+                      l10n.latestWorkspaceUpdates,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         height: 1.5,
                         color: Color(0xFF6B7280),

@@ -5,6 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:skill_bridge/screens/splash_screen.dart';
 
 import 'firebase_options.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+
+import 'firebase_options.dart';
+import 'screens/auth/auth_wrapper.dart';
+import 'localization/app_localizations.dart';
+import 'localization/language_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,7 +25,12 @@ Future<void> main() async {
         .useFunctionsEmulator('10.44.128.192', 5001);
   }
 
-  runApp(const SkillBridgeApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => LanguageProvider(),
+      child: const SkillBridgeApp(),
+    ),
+  );
 }
 
 class SkillBridgeApp extends StatelessWidget {
@@ -30,6 +42,24 @@ class SkillBridgeApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'SkillBridge',
       home: const SkillBridgeSplashScreen(),
+
+      locale: context.watch<LanguageProvider>().locale,
+
+      supportedLocales: const [Locale('en'), Locale('mr'), Locale('hi')],
+
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
+      ),
+
+      home: const AuthWrapper(),
     );
   }
 }

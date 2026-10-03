@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
 import 'project_details_screen.dart';
 
 class MyProjectsScreen extends StatelessWidget {
@@ -9,15 +10,16 @@ class MyProjectsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF6F8FC),
+      return Scaffold(
+        backgroundColor: const Color(0xFFF6F8FC),
         body: Center(
           child: Text(
-            'Please login again.',
-            style: TextStyle(
+            l10n.loginAgain,
+            style: const TextStyle(
               color: Color(0xFF64748B),
               fontWeight: FontWeight.w600,
             ),
@@ -50,7 +52,7 @@ class MyProjectsScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _ProjectsErrorCard(
-                      message: 'Unable to load projects.\n${snapshot.error}',
+                      message: '${l10n.somethingWentWrong}\n${snapshot.error}',
                     ),
                   ),
                 );
@@ -77,7 +79,7 @@ class MyProjectsScreen extends StatelessWidget {
                       30,
                     ),
                     itemCount: projects.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    separatorBuilder: (_, _) => const SizedBox(height: 14),
                     itemBuilder: (context, index) {
                       if (index == 0) {
                         return _ProjectsHeader(projectCount: projects.length);
@@ -108,6 +110,8 @@ class _ProjectsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(21),
@@ -143,33 +147,33 @@ class _ProjectsHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 15),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'MY PROJECTS',
-                  style: TextStyle(
+                  l10n.myProjects.toUpperCase(),
+                  style: const TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 1.2,
                     color: Color(0xFFA5B4FC),
                   ),
                 ),
-                SizedBox(height: 5),
+                const SizedBox(height: 5),
                 Text(
-                  'Your projects',
-                  style: TextStyle(
+                  l10n.myProjects,
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                     color: Colors.white,
                     letterSpacing: -0.4,
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
-                  'Track your projects and open their details.',
-                  style: TextStyle(
+                  l10n.latestProjectActivity,
+                  style: const TextStyle(
                     fontSize: 11.5,
                     height: 1.4,
                     color: Color(0xFFD1D5DB),
@@ -211,25 +215,18 @@ class _ProjectCard extends StatelessWidget {
     switch (status) {
       case 'requirement':
         return const Color(0xFF4F46E5);
-
       case 'team_formation':
         return const Color(0xFF7C3AED);
-
       case 'development':
         return const Color(0xFFD97706);
-
       case 'testing':
         return const Color(0xFF0891B2);
-
       case 'client_review':
         return const Color(0xFFDB2777);
-
       case 'completed':
         return const Color(0xFF16A34A);
-
       case 'cancelled':
         return const Color(0xFFDC2626);
-
       default:
         return const Color(0xFF64748B);
     }
@@ -239,53 +236,41 @@ class _ProjectCard extends StatelessWidget {
     switch (status) {
       case 'requirement':
         return Icons.description_outlined;
-
       case 'team_formation':
         return Icons.groups_outlined;
-
       case 'development':
         return Icons.code_rounded;
-
       case 'testing':
         return Icons.bug_report_outlined;
-
       case 'client_review':
         return Icons.rate_review_outlined;
-
       case 'completed':
         return Icons.check_circle_outline_rounded;
-
       case 'cancelled':
         return Icons.cancel_outlined;
-
       default:
         return Icons.info_outline_rounded;
     }
   }
 
-  String _formatStatus(String status) {
+  String _formatStatus(BuildContext context, String status) {
+    final l10n = AppLocalizations.of(context);
+
     switch (status) {
       case 'requirement':
-        return 'Requirement';
-
+        return l10n.requirement;
       case 'team_formation':
-        return 'Team Formation';
-
+        return l10n.teamFormation;
       case 'development':
-        return 'Development';
-
+        return l10n.development;
       case 'testing':
-        return 'Testing';
-
+        return l10n.testing;
       case 'client_review':
-        return 'Client Review';
-
+        return l10n.clientReview;
       case 'completed':
-        return 'Completed';
-
+        return l10n.completed;
       case 'cancelled':
-        return 'Cancelled';
-
+        return l10n.cancelled;
       default:
         return status;
     }
@@ -293,16 +278,13 @@ class _ProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = project['title']?.toString() ?? 'Untitled Project';
+    final l10n = AppLocalizations.of(context);
 
+    final title = project['title']?.toString() ?? l10n.project;
     final category = project['category']?.toString() ?? '';
-
     final description = project['description']?.toString() ?? '';
-
     final budget = project['budget']?.toString() ?? '';
-
     final timeline = project['timeline']?.toString() ?? '';
-
     final status = project['status']?.toString() ?? 'requirement';
 
     final statusColor = _statusColor(status);
@@ -390,7 +372,7 @@ class _ProjectCard extends StatelessWidget {
                           const SizedBox(width: 5),
                           Flexible(
                             child: Text(
-                              _formatStatus(status),
+                              _formatStatus(context, status),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -406,7 +388,6 @@ class _ProjectCard extends StatelessWidget {
                   ),
                 ],
               ),
-
               if (category.isNotEmpty) ...[
                 const SizedBox(height: 13),
                 Container(
@@ -440,7 +421,6 @@ class _ProjectCard extends StatelessWidget {
                   ),
                 ),
               ],
-
               if (description.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 Text(
@@ -454,7 +434,6 @@ class _ProjectCard extends StatelessWidget {
                   ),
                 ),
               ],
-
               if (budget.isNotEmpty || timeline.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Container(
@@ -485,17 +464,15 @@ class _ProjectCard extends StatelessWidget {
                   ),
                 ),
               ],
-
               const SizedBox(height: 16),
               const Divider(height: 1, color: Color(0xFFE5E7EB)),
               const SizedBox(height: 13),
-
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const Text(
-                    'View Details',
-                    style: TextStyle(
+                  Text(
+                    l10n.projectDetails,
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF4F46E5),
@@ -564,6 +541,8 @@ class _EmptyProjects extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -599,20 +578,20 @@ class _EmptyProjects extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              const Text(
-                'No projects yet',
+              Text(
+                l10n.noProjectsYet,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 21,
                   fontWeight: FontWeight.w900,
                   color: Color(0xFF111827),
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Projects you create will appear here.',
+              Text(
+                l10n.createFirstProject,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12.5,
                   height: 1.5,
                   color: Color(0xFF6B7280),

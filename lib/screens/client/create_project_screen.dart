@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class CreateProjectScreen extends StatefulWidget {
   const CreateProjectScreen({super.key});
 
@@ -41,7 +43,70 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     super.dispose();
   }
 
+  String _categoryLabel(BuildContext context, String category) {
+    final language = AppLocalizations.of(context);
+
+    switch (category) {
+      case 'Web Application':
+        return language.projects == 'Projects'
+            ? 'Web Application'
+            : category == 'Web Application' &&
+                  language.projects == 'प्रोजेक्ट्स'
+            ? 'वेब ॲप्लिकेशन'
+            : language.locale.languageCode == 'hi'
+            ? 'वेब एप्लिकेशन'
+            : 'वेब ॲप्लिकेशन';
+
+      case 'Mobile Application':
+        return language.locale.languageCode == 'hi'
+            ? 'मोबाइल एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'मोबाइल ॲप्लिकेशन'
+            : 'Mobile Application';
+
+      case 'Desktop Application':
+        return language.locale.languageCode == 'hi'
+            ? 'डेस्कटॉप एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'डेस्कटॉप ॲप्लिकेशन'
+            : 'Desktop Application';
+
+      case 'Software System':
+        return language.locale.languageCode == 'hi'
+            ? 'सॉफ्टवेयर सिस्टम'
+            : language.locale.languageCode == 'mr'
+            ? 'सॉफ्टवेअर सिस्टम'
+            : 'Software System';
+
+      case 'E-Commerce':
+        return language.locale.languageCode == 'hi'
+            ? 'ई-कॉमर्स'
+            : language.locale.languageCode == 'mr'
+            ? 'ई-कॉमर्स'
+            : 'E-Commerce';
+
+      case 'Business Application':
+        return language.locale.languageCode == 'hi'
+            ? 'बिजनेस एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'बिझनेस ॲप्लिकेशन'
+            : 'Business Application';
+
+      case 'Other':
+        return language.locale.languageCode == 'hi'
+            ? 'अन्य'
+            : language.locale.languageCode == 'mr'
+            ? 'इतर'
+            : 'Other';
+
+      default:
+        return category;
+    }
+  }
+
   Future<void> _createProject() async {
+    final l10n = AppLocalizations.of(context);
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -50,8 +115,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please login again.'),
+        SnackBar(
+          content: Text(l10n.loginAgain),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -88,8 +153,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           .doc(user.uid)
           .collection('notifications')
           .add({
-            'title': 'Project Created',
-            'message': 'Your project has been created successfully.',
+            'title': l10n.createProject,
+            'message': l10n.projectGeneratedSuccessfully,
             'type': 'project',
             'isRead': false,
             'createdAt': FieldValue.serverTimestamp(),
@@ -98,8 +163,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Project created successfully.'),
+        SnackBar(
+          content: Text(l10n.projectGeneratedSuccessfully),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -110,7 +175,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Firestore error: ${e.message ?? e.code}'),
+          content: Text(
+            '${l10n.somethingWentWrong}\n'
+            '${e.message ?? e.code}',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -119,7 +187,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Something went wrong: $e'),
+          content: Text('${l10n.somethingWentWrong}\n$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -174,6 +242,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
@@ -182,9 +252,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         surfaceTintColor: Colors.white,
         titleSpacing: 20,
         iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: const Text(
-          'Create Project',
-          style: TextStyle(
+        title: Text(
+          l10n.createProject,
+          style: const TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
             color: Color(0xFF111827),
@@ -247,33 +317,33 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 ),
                               ),
                               const SizedBox(width: 15),
-                              const Expanded(
+                              Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'NEW PROJECT',
-                                      style: TextStyle(
+                                      l10n.createProject.toUpperCase(),
+                                      style: const TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 1.2,
                                         color: Color(0xFFA5B4FC),
                                       ),
                                     ),
-                                    SizedBox(height: 5),
+                                    const SizedBox(height: 5),
                                     Text(
-                                      'Tell us about your project',
-                                      style: TextStyle(
+                                      l10n.createProject,
+                                      style: const TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,
                                         color: Colors.white,
                                         letterSpacing: -0.4,
                                       ),
                                     ),
-                                    SizedBox(height: 4),
+                                    const SizedBox(height: 4),
                                     Text(
-                                      'Add your requirements so SkillBridge can understand your project.',
-                                      style: TextStyle(
+                                      l10n.softwareProjectsDescription,
+                                      style: const TextStyle(
                                         fontSize: 11.5,
                                         height: 1.45,
                                         color: Color(0xFFD1D5DB),
@@ -305,9 +375,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'PROJECT DETAILS',
-                                style: TextStyle(
+                              Text(
+                                l10n.projectDetails.toUpperCase(),
+                                style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 1.2,
@@ -315,9 +385,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 ),
                               ),
                               const SizedBox(height: 5),
-                              const Text(
-                                'Basic information',
-                                style: TextStyle(
+                              Text(
+                                l10n.overview,
+                                style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
                                   color: Color(0xFF111827),
@@ -330,13 +400,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 controller: _titleController,
                                 textInputAction: TextInputAction.next,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Title',
-                                  hint: 'Example: Online Billing System',
+                                  label: l10n.projectTitle,
+                                  hint: l10n.exampleProjectIdea,
                                   icon: Icons.title_rounded,
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project title';
+                                    return l10n.projectTitle;
                                   }
 
                                   return null;
@@ -348,8 +418,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                               DropdownButtonFormField<String>(
                                 initialValue: _selectedCategory,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Type',
-                                  hint: 'Select project type',
+                                  label: l10n.category,
+                                  hint: l10n.select,
                                   icon: Icons.category_outlined,
                                 ),
                                 dropdownColor: Colors.white,
@@ -359,7 +429,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                       (category) => DropdownMenuItem<String>(
                                         value: category,
                                         child: Text(
-                                          category,
+                                          _categoryLabel(context, category),
                                           style: const TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w600,
@@ -370,7 +440,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                     )
                                     .toList(),
                                 onChanged: (value) {
-                                  if (value == null) return;
+                                  if (value == null) {
+                                    return;
+                                  }
 
                                   setState(() {
                                     _selectedCategory = value;
@@ -400,9 +472,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'DESCRIPTION',
-                                style: TextStyle(
+                              Text(
+                                l10n.description.toUpperCase(),
+                                style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 1.2,
@@ -410,9 +482,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 ),
                               ),
                               const SizedBox(height: 5),
-                              const Text(
-                                'Explain what you need',
-                                style: TextStyle(
+                              Text(
+                                l10n.describeProject,
+                                style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
                                   color: Color(0xFF111827),
@@ -426,17 +498,17 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 maxLines: 5,
                                 textInputAction: TextInputAction.newline,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Description',
-                                  hint: 'Explain what software you want to build.',
+                                  label: l10n.projectDescription,
+                                  hint: l10n.describeProject,
                                   icon: Icons.description_outlined,
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project description';
+                                    return l10n.projectDescription;
                                   }
 
                                   if (value.trim().length < 20) {
-                                    return 'Please provide more details';
+                                    return l10n.requirements;
                                   }
 
                                   return null;
@@ -450,13 +522,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 maxLines: 6,
                                 textInputAction: TextInputAction.newline,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Requirements',
-                                  hint: 'List the important features or requirements.',
+                                  label: l10n.requirements,
+                                  hint: l10n.requirements,
                                   icon: Icons.checklist_rounded,
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project requirements';
+                                    return l10n.requirements;
                                   }
 
                                   return null;
@@ -485,9 +557,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'PLANNING',
-                                style: TextStyle(
+                              Text(
+                                l10n.timeline.toUpperCase(),
+                                style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 1.2,
@@ -495,9 +567,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 ),
                               ),
                               const SizedBox(height: 5),
-                              const Text(
-                                'Budget & timeline',
-                                style: TextStyle(
+                              Text(
+                                '${l10n.budget} & ${l10n.timeline}',
+                                style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
                                   color: Color(0xFF111827),
@@ -515,14 +587,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                           controller: _budgetController,
                                           keyboardType: TextInputType.number,
                                           decoration: _fieldDecoration(
-                                            label: 'Budget',
-                                            hint: 'Expected budget',
+                                            label: l10n.budget,
+                                            hint: l10n.amount,
                                             icon: Icons.currency_rupee_rounded,
                                           ),
                                           validator: (value) {
                                             if (value == null ||
                                                 value.trim().isEmpty) {
-                                              return 'Enter budget';
+                                              return l10n.budget;
                                             }
 
                                             return null;
@@ -532,14 +604,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                         TextFormField(
                                           controller: _timelineController,
                                           decoration: _fieldDecoration(
-                                            label: 'Expected Timeline',
-                                            hint: 'Example: 4 weeks',
+                                            label: l10n.timeline,
+                                            hint: l10n.timeline,
                                             icon: Icons.schedule_outlined,
                                           ),
                                           validator: (value) {
                                             if (value == null ||
                                                 value.trim().isEmpty) {
-                                              return 'Enter timeline';
+                                              return l10n.timeline;
                                             }
 
                                             return null;
@@ -556,14 +628,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                           controller: _budgetController,
                                           keyboardType: TextInputType.number,
                                           decoration: _fieldDecoration(
-                                            label: 'Budget',
-                                            hint: 'Expected budget',
+                                            label: l10n.budget,
+                                            hint: l10n.amount,
                                             icon: Icons.currency_rupee_rounded,
                                           ),
                                           validator: (value) {
                                             if (value == null ||
                                                 value.trim().isEmpty) {
-                                              return 'Enter budget';
+                                              return l10n.budget;
                                             }
 
                                             return null;
@@ -575,14 +647,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                         child: TextFormField(
                                           controller: _timelineController,
                                           decoration: _fieldDecoration(
-                                            label: 'Expected Timeline',
-                                            hint: 'Example: 4 weeks',
+                                            label: l10n.timeline,
+                                            hint: l10n.timeline,
                                             icon: Icons.schedule_outlined,
                                           ),
                                           validator: (value) {
                                             if (value == null ||
                                                 value.trim().isEmpty) {
-                                              return 'Enter timeline';
+                                              return l10n.timeline;
                                             }
 
                                             return null;
@@ -615,12 +687,12 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 180),
                               child: _isLoading
-                                  ? const Row(
-                                      key: ValueKey('loading'),
+                                  ? Row(
+                                      key: const ValueKey('loading'),
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        SizedBox(
+                                        const SizedBox(
                                           width: 21,
                                           height: 21,
                                           child: CircularProgressIndicator(
@@ -628,29 +700,29 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                             color: Colors.white,
                                           ),
                                         ),
-                                        SizedBox(width: 11),
+                                        const SizedBox(width: 11),
                                         Text(
-                                          'Creating Project...',
-                                          style: TextStyle(
+                                          l10n.loading,
+                                          style: const TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
                                           ),
                                         ),
                                       ],
                                     )
-                                  : const Row(
-                                      key: ValueKey('create'),
+                                  : Row(
+                                      key: const ValueKey('create'),
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        Icon(
+                                        const Icon(
                                           Icons.add_business_rounded,
                                           size: 21,
                                         ),
-                                        SizedBox(width: 9),
+                                        const SizedBox(width: 9),
                                         Text(
-                                          'Create Project',
-                                          style: TextStyle(
+                                          l10n.createProject,
+                                          style: const TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
                                           ),
@@ -663,10 +735,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                         const SizedBox(height: 10),
 
-                        const Text(
-                          'Your project will be created with Requirement status.',
+                        Text(
+                          l10n.requirement,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 10.5,
                             color: Color(0xFF98A2B3),
                             fontWeight: FontWeight.w500,
