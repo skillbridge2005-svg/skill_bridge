@@ -2,18 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class ClientMessagesScreen extends StatelessWidget {
   const ClientMessagesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Center(
+      return Center(
         child: Text(
-          'Please login again.',
-          style: TextStyle(
+          l10n.loginAgain,
+          style: const TextStyle(
             color: Color(0xFF64748B),
             fontWeight: FontWeight.w600,
           ),
@@ -45,7 +48,8 @@ class ClientMessagesScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _MessagesErrorCard(
-                      message: 'Unable to load messages.\n${snapshot.error}',
+                      message:
+                          '${l10n.unableToLoadMessages}\n${snapshot.error}',
                     ),
                   ),
                 );
@@ -80,7 +84,7 @@ class ClientMessagesScreen extends StatelessWidget {
                                         projectDoc
                                             .data()['title']
                                             ?.toString() ??
-                                        'Project',
+                                        l10n.project,
                                     category:
                                         projectDoc
                                             .data()['category']
@@ -109,32 +113,38 @@ class _MessagesSectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final l10n = AppLocalizations.of(context);
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'CONVERSATIONS',
-          style: TextStyle(
+          l10n.messages.toUpperCase(),
+          style: const TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.25,
             color: Color(0xFF4F46E5),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Your project chats',
-          style: TextStyle(
+          l10n.messages,
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
             color: Color(0xFF111827),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Open a project conversation to continue working together.',
-          style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+          l10n.continueConversations,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
     );
@@ -154,6 +164,8 @@ class _ConversationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('projects')
@@ -163,14 +175,13 @@ class _ConversationCard extends StatelessWidget {
           .limit(1)
           .snapshots(),
       builder: (context, snapshot) {
-        String lastMessage = 'No messages yet';
-
+        String lastMessage = l10n.noMessagesYet;
         String senderName = '';
 
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           final message = snapshot.data!.docs.first.data();
 
-          lastMessage = message['message']?.toString() ?? 'No messages yet';
+          lastMessage = message['message']?.toString() ?? l10n.noMessagesYet;
 
           senderName = message['senderName']?.toString() ?? '';
         }
@@ -323,7 +334,7 @@ class ClientProjectChat extends StatefulWidget {
 }
 
 class _ClientProjectChatState extends State<ClientProjectChat> {
-  final _messageController = TextEditingController();
+  final TextEditingController _messageController = TextEditingController();
 
   bool _isSending = false;
 
@@ -340,7 +351,6 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
       final data = doc.data();
 
       final senderId = data['senderId']?.toString() ?? '';
-
       final isRead = data['isRead'] == true;
 
       return senderId != user.uid && !isRead;
@@ -374,6 +384,8 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
       return;
     }
 
+    final l10n = AppLocalizations.of(context);
+
     setState(() {
       _isSending = true;
     });
@@ -393,32 +405,33 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
         'senderName': user.displayName ?? user.email ?? 'Client',
         'senderRole': 'client',
         'message': text,
-
-        // Client's own message is already read.
         'isRead': true,
-
         'createdAt': FieldValue.serverTimestamp(),
       });
 
       _messageController.clear();
     } on FirebaseException catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to send message.\n'
+            '${l10n.unableToSendMessage}\n'
             '${e.message ?? e.code}',
           ),
           behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Something went wrong.\n$e'),
+          content: Text('${l10n.somethingWentWrong}\n$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -433,6 +446,7 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
@@ -486,9 +500,9 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        const Text(
-                          'Project conversation',
-                          style: TextStyle(
+                        Text(
+                          l10n.project,
+                          style: const TextStyle(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF6B7280),
@@ -551,7 +565,7 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
                             padding: const EdgeInsets.all(24),
                             child: _MessagesErrorCard(
                               message:
-                                  'Unable to load conversation.\n'
+                                  '${l10n.unableToLoadConversation}\n'
                                   '${snapshot.error}',
                             ),
                           ),
@@ -752,6 +766,8 @@ class _MessageInput extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: const BoxDecoration(
@@ -780,7 +796,7 @@ class _MessageInput extends StatelessWidget {
                     minLines: 1,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: 'Write a message...',
+                      hintText: l10n.writeMessage,
                       hintStyle: const TextStyle(
                         fontSize: 13,
                         color: Color(0xFF9CA3AF),
@@ -858,6 +874,8 @@ class _EmptyMessages extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -888,23 +906,23 @@ class _EmptyMessages extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    _EmptyMessageIcon(),
-                    SizedBox(height: 18),
+                    const _EmptyMessageIcon(),
+                    const SizedBox(height: 18),
                     Text(
-                      'No conversations yet',
-                      style: TextStyle(
+                      l10n.noConversationsYet,
+                      style: const TextStyle(
                         fontSize: 21,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
                       ),
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
-                      'Messages for your projects will appear here.',
+                      l10n.continueConversations,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         height: 1.5,
                         color: Color(0xFF6B7280),
@@ -926,27 +944,29 @@ class _EmptyChatState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    final l10n = AppLocalizations.of(context);
+
+    return Center(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _EmptyMessageIcon(),
-            SizedBox(height: 18),
+            const _EmptyMessageIcon(),
+            const SizedBox(height: 18),
             Text(
-              'No messages yet',
-              style: TextStyle(
+              l10n.noMessagesYet,
+              style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w900,
                 color: Color(0xFF111827),
               ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
-              'Start a conversation about this project.',
+              l10n.continueConversations,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             ),
           ],
         ),

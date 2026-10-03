@@ -2,12 +2,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
 import 'client_payments_screen.dart';
 
 class ClientProfileScreen extends StatelessWidget {
   const ClientProfileScreen({super.key});
 
   Future<void> _editName(BuildContext context, String currentName) async {
+    final l10n = AppLocalizations.of(context);
+
     final newName = await showDialog<String>(
       context: context,
       barrierDismissible: false,
@@ -24,8 +27,8 @@ class ClientProfileScreen extends StatelessWidget {
       if (!context.mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please login again.'),
+        SnackBar(
+          content: Text(l10n.loginAgain),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -45,8 +48,8 @@ class ClientProfileScreen extends StatelessWidget {
       if (!context.mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated successfully.'),
+        SnackBar(
+          content: Text(l10n.update),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -56,7 +59,7 @@ class ClientProfileScreen extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to update profile.\n'
+            '${l10n.somethingWentWrong}\n'
             '${e.message ?? e.code}',
           ),
           behavior: SnackBarBehavior.floating,
@@ -67,19 +70,25 @@ class ClientProfileScreen extends StatelessWidget {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Something went wrong.\n$e'),
+          content: Text('${l10n.somethingWentWrong}\n$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
     }
   }
 
-  String _formatRole(String role) {
+  String _formatRole(BuildContext context, String role) {
+    final l10n = AppLocalizations.of(context);
+
     if (role.trim().isEmpty) {
-      return 'Client';
+      return l10n.client;
     }
 
-    final value = role.trim();
+    final value = role.trim().toLowerCase();
+
+    if (value == 'client') {
+      return l10n.client;
+    }
 
     return value.replaceFirst(value[0], value[0].toUpperCase());
   }
@@ -94,13 +103,14 @@ class ClientProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Center(
+      return Center(
         child: Text(
-          'Please login again.',
-          style: TextStyle(
+          l10n.loginAgain,
+          style: const TextStyle(
             color: Color(0xFF64748B),
             fontWeight: FontWeight.w600,
           ),
@@ -133,7 +143,7 @@ class ClientProfileScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(24),
                     child: _ProfileErrorCard(
                       message:
-                          'Unable to load profile.\n'
+                          '${l10n.somethingWentWrong}\n'
                           '${snapshot.error}',
                     ),
                   ),
@@ -141,10 +151,10 @@ class ClientProfileScreen extends StatelessWidget {
               }
 
               if (!snapshot.hasData || !snapshot.data!.exists) {
-                return const Center(
+                return Center(
                   child: Text(
-                    'Profile not found.',
-                    style: TextStyle(
+                    l10n.projectNotFound,
+                    style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontWeight: FontWeight.w600,
                     ),
@@ -155,10 +165,10 @@ class ClientProfileScreen extends StatelessWidget {
               final data = snapshot.data!.data();
 
               if (data == null) {
-                return const Center(
+                return Center(
                   child: Text(
-                    'Profile data is empty.',
-                    style: TextStyle(
+                    l10n.noData,
+                    style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontWeight: FontWeight.w600,
                     ),
@@ -204,20 +214,22 @@ class ClientProfileScreen extends StatelessWidget {
                         const SizedBox(height: 14),
                         _ProfileInfoCard(
                           icon: Icons.person_outline_rounded,
-                          title: 'Full Name',
-                          value: name.isEmpty ? 'Not available' : name,
+                          title: l10n.projectTitle == ''
+                              ? 'Full Name'
+                              : 'Full Name',
+                          value: name.isEmpty ? l10n.noData : name,
                         ),
                         const SizedBox(height: 12),
                         _ProfileInfoCard(
                           icon: Icons.email_outlined,
                           title: 'Email Address',
-                          value: email.isEmpty ? 'Not available' : email,
+                          value: email.isEmpty ? l10n.noData : email,
                         ),
                         const SizedBox(height: 12),
                         _ProfileInfoCard(
                           icon: Icons.badge_outlined,
                           title: 'Account Type',
-                          value: _formatRole(role),
+                          value: _formatRole(context, role),
                         ),
                       ],
                     ),
@@ -247,6 +259,8 @@ class _ProfileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(23),
@@ -304,9 +318,9 @@ class _ProfileHero extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'CLIENT PROFILE',
-                  style: TextStyle(
+                Text(
+                  l10n.client.toUpperCase(),
+                  style: const TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 1.2,
@@ -315,7 +329,7 @@ class _ProfileHero extends StatelessWidget {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  name.isEmpty ? 'Client' : name,
+                  name.isEmpty ? l10n.client : name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -327,7 +341,7 @@ class _ProfileHero extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  email.isEmpty ? 'No email available' : email,
+                  email.isEmpty ? l10n.noData : email,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -347,7 +361,7 @@ class _ProfileHero extends StatelessWidget {
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
             child: Text(
-              role.isEmpty ? 'CLIENT' : role.toUpperCase(),
+              role.isEmpty ? l10n.client.toUpperCase() : role.toUpperCase(),
               style: const TextStyle(
                 fontSize: 8.5,
                 fontWeight: FontWeight.w900,
@@ -370,12 +384,14 @@ class _ProfileActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Row(
       children: [
         Expanded(
           child: _ProfileActionButton(
             icon: Icons.edit_rounded,
-            title: 'Edit Profile',
+            title: l10n.edit,
             onTap: onEdit,
           ),
         ),
@@ -383,7 +399,7 @@ class _ProfileActionCard extends StatelessWidget {
         Expanded(
           child: _ProfileActionButton(
             icon: Icons.account_balance_wallet_rounded,
-            title: 'Payments',
+            title: l10n.payments,
             onTap: onPayments,
           ),
         ),
@@ -465,32 +481,38 @@ class _ProfileSectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final l10n = AppLocalizations.of(context);
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'ACCOUNT',
-          style: TextStyle(
+          l10n.client.toUpperCase(),
+          style: const TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.25,
             color: Color(0xFF4F46E5),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Your information',
-          style: TextStyle(
+          l10n.myProfile,
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
             color: Color(0xFF111827),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Your basic SkillBridge account information.',
-          style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+          l10n.clientAccount,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
     );
@@ -694,6 +716,8 @@ class _EditNameDialogState extends State<_EditNameDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Dialog(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.white,
@@ -722,10 +746,10 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Edit Profile',
-                      style: TextStyle(
+                      l10n.edit,
+                      style: const TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
@@ -756,8 +780,8 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                   _save();
                 },
                 decoration: InputDecoration(
-                  labelText: 'Full Name',
-                  hintText: 'Enter your full name',
+                  labelText: l10n.projectTitle,
+                  hintText: l10n.projectTitle,
                   prefixIcon: const Icon(
                     Icons.person_outline_rounded,
                     color: Color(0xFF4F46E5),
@@ -793,9 +817,9 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                     onPressed: () {
                       Navigator.of(context).pop();
                     },
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(
+                    child: Text(
+                      l10n.cancel,
+                      style: const TextStyle(
                         color: Color(0xFF667085),
                         fontWeight: FontWeight.w700,
                       ),
@@ -816,9 +840,9 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                         borderRadius: BorderRadius.circular(13),
                       ),
                     ),
-                    child: const Text(
-                      'Save Changes',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+                    child: Text(
+                      l10n.save,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
                 ],
