@@ -1,15 +1,22 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:skill_bridge/screens/splash_screen.dart';
 
 import 'firebase_options.dart';
-import 'screens/auth/auth_wrapper.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Connect Firebase Cloud Functions to local emulator
+  // for development/testing on physical Android phone.
+  if (kDebugMode) {
+    FirebaseFunctions.instanceFor(region: 'us-central1')
+        .useFunctionsEmulator('10.44.128.192', 5001);
+  }
 
   runApp(const SkillBridgeApp());
 }
@@ -22,13 +29,7 @@ class SkillBridgeApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'SkillBridge',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
-        ),
-      ),
-      home: const AuthWrapper(),
+      home: const SkillBridgeSplashScreen(),
     );
   }
 }
