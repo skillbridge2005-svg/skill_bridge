@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'forgot_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -139,47 +140,6 @@ class _LoginScreenState extends State<LoginScreen> {
           _isLoading = false;
         });
       }
-    }
-  }
-
-  // ------------------------------------------------------------
-  // FORGOT PASSWORD
-  // ------------------------------------------------------------
-
-  Future<void> _forgotPassword() async {
-    final email = _emailController.text.trim();
-
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter your email first.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      return;
-    }
-
-    try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password reset email sent. Check your inbox.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message ?? 'Unable to send reset email.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
     }
   }
 
@@ -495,24 +455,23 @@ class _LoginScreenState extends State<LoginScreen> {
                               // ----------------------------------------
                               Align(
                                 alignment: Alignment.centerRight,
-
                                 child: TextButton(
                                   onPressed: _isLoading
                                       ? null
-                                      : _forgotPassword,
-
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 8,
-                                    ),
-                                  ),
-
+                                      : () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const ForgotPasswordScreen(),
+                                            ),
+                                          );
+                                        },
                                   child: const Text(
                                     'Forgot Password?',
                                     style: TextStyle(
-                                      color: primary,
-                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF249B50),
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),

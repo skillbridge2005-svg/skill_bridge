@@ -17,10 +17,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _requirementsController = TextEditingController();
-  final _budgetController = TextEditingController();
-  final _timelineController = TextEditingController();
 
-  String _selectedCategory = 'Web Application';
+  List<String> _selectedCategories = [];
   bool _isLoading = false;
 
   final List<String> _categories = [
@@ -38,8 +36,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _titleController.dispose();
     _descriptionController.dispose();
     _requirementsController.dispose();
-    _budgetController.dispose();
-    _timelineController.dispose();
     super.dispose();
   }
 
@@ -48,14 +44,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
     switch (category) {
       case 'Web Application':
-        return language.projects == 'Projects'
-            ? 'Web Application'
-            : category == 'Web Application' &&
-                  language.projects == 'प्रोजेक्ट्स'
-            ? 'वेब ॲप्लिकेशन'
-            : language.locale.languageCode == 'hi'
+        return language.locale.languageCode == 'hi'
             ? 'वेब एप्लिकेशन'
-            : 'वेब ॲप्लिकेशन';
+            : language.locale.languageCode == 'mr'
+            ? 'वेब ॲप्लिकेशन'
+            : 'Web Application';
 
       case 'Mobile Application':
         return language.locale.languageCode == 'hi'
@@ -111,6 +104,16 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       return;
     }
 
+    if (_selectedCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.category),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -136,11 +139,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         'projectId': projectRef.id,
         'clientId': user.uid,
         'title': _titleController.text.trim(),
-        'category': _selectedCategory,
+        'categories': _selectedCategories,
         'description': _descriptionController.text.trim(),
         'requirements': _requirementsController.text.trim(),
-        'budget': _budgetController.text.trim(),
-        'timeline': _timelineController.text.trim(),
         'status': 'requirement',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -153,7 +154,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           .doc(user.uid)
           .collection('notifications')
           .add({
-            'title': l10n.createProject,
+            'title': 'Get Project Estimate',
             'message': l10n.projectGeneratedSuccessfully,
             'type': 'project',
             'isRead': false,
@@ -240,6 +241,35 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
+  Widget _aiGenerateButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F3FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE0E7FF)),
+      ),
+      child: TextButton.icon(
+        onPressed: () {},
+        icon: const Icon(
+          Icons.auto_awesome_rounded,
+          size: 17,
+          color: Color(0xFF4F46E5),
+        ),
+        label: const Text(
+          'Generate with AI',
+          style: TextStyle(
+            color: Color(0xFF4F46E5),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -252,9 +282,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         surfaceTintColor: Colors.white,
         titleSpacing: 20,
         iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: Text(
-          l10n.createProject,
-          style: const TextStyle(
+        title: const Text(
+          'Get Project Estimate',
+          style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
             color: Color(0xFF111827),
@@ -311,39 +341,39 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   ),
                                 ),
                                 child: const Icon(
-                                  Icons.add_business_rounded,
+                                  Icons.auto_awesome_rounded,
                                   color: Color(0xFFA5B4FC),
                                   size: 27,
                                 ),
                               ),
                               const SizedBox(width: 15),
-                              Expanded(
+                              const Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      l10n.createProject.toUpperCase(),
-                                      style: const TextStyle(
+                                      'PROJECT ESTIMATE',
+                                      style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 1.2,
                                         color: Color(0xFFA5B4FC),
                                       ),
                                     ),
-                                    const SizedBox(height: 5),
+                                    SizedBox(height: 5),
                                     Text(
-                                      l10n.createProject,
-                                      style: const TextStyle(
+                                      'Get Project Estimate',
+                                      style: TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,
                                         color: Colors.white,
                                         letterSpacing: -0.4,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
+                                    SizedBox(height: 4),
                                     Text(
-                                      l10n.softwareProjectsDescription,
-                                      style: const TextStyle(
+                                      'Tell us about your project and let AI help prepare an initial estimate.',
+                                      style: TextStyle(
                                         fontSize: 11.5,
                                         height: 1.45,
                                         color: Color(0xFFD1D5DB),
@@ -385,9 +415,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 ),
                               ),
                               const SizedBox(height: 5),
-                              Text(
-                                l10n.overview,
-                                style: const TextStyle(
+                              const Text(
+                                'Project Information',
+                                style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
                                   color: Color(0xFF111827),
@@ -415,40 +445,104 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                               const SizedBox(height: 16),
 
-                              DropdownButtonFormField<String>(
-                                initialValue: _selectedCategory,
-                                decoration: _fieldDecoration(
-                                  label: l10n.category,
-                                  hint: l10n.select,
-                                  icon: Icons.category_outlined,
+                              Text(
+                                l10n.category,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF344054),
                                 ),
-                                dropdownColor: Colors.white,
-                                borderRadius: BorderRadius.circular(15),
-                                items: _categories
-                                    .map(
-                                      (category) => DropdownMenuItem<String>(
-                                        value: category,
-                                        child: Text(
-                                          _categoryLabel(context, category),
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF344054),
-                                          ),
+                              ),
+
+                              const SizedBox(height: 8),
+
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(15),
+                                  border: Border.all(
+                                    color: const Color(0xFFE5E7EB),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: _categories.map((category) {
+                                    final selected = _selectedCategories
+                                        .contains(category);
+
+                                    return CheckboxListTile(
+                                      value: selected,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          if (value == true) {
+                                            _selectedCategories.add(category);
+                                          } else {
+                                            _selectedCategories.remove(
+                                              category,
+                                            );
+                                          }
+                                        });
+                                      },
+                                      title: Text(
+                                        _categoryLabel(context, category),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF344054),
                                         ),
                                       ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-
-                                  setState(() {
-                                    _selectedCategory = value;
-                                  });
-                                },
+                                      activeColor: const Color(0xFF4F46E5),
+                                      controlAffinity:
+                                          ListTileControlAffinity.leading,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                      dense: true,
+                                    );
+                                  }).toList(),
+                                ),
                               ),
+
+                              if (_selectedCategories.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 7,
+                                  runSpacing: 7,
+                                  children: _selectedCategories
+                                      .map(
+                                        (category) => Chip(
+                                          label: Text(
+                                            _categoryLabel(context, category),
+                                          ),
+                                          deleteIcon: const Icon(
+                                            Icons.close,
+                                            size: 16,
+                                          ),
+                                          onDeleted: () {
+                                            setState(() {
+                                              _selectedCategories.remove(
+                                                category,
+                                              );
+                                            });
+                                          },
+                                          backgroundColor: const Color(
+                                            0xFFEEF2FF,
+                                          ),
+                                          side: BorderSide.none,
+                                          labelStyle: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF4338CA),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -472,16 +566,25 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                l10n.description.toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.2,
-                                  color: Color(0xFF4F46E5),
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      l10n.description.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                        color: Color(0xFF4F46E5),
+                                      ),
+                                    ),
+                                  ),
+                                  _aiGenerateButton(),
+                                ],
                               ),
+
                               const SizedBox(height: 5),
+
                               Text(
                                 l10n.describeProject,
                                 style: const TextStyle(
@@ -491,6 +594,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   letterSpacing: -0.3,
                                 ),
                               ),
+
                               const SizedBox(height: 18),
 
                               TextFormField(
@@ -515,7 +619,38 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 },
                               ),
 
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20),
+
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      l10n.requirements.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                        color: Color(0xFF4F46E5),
+                                      ),
+                                    ),
+                                  ),
+                                  _aiGenerateButton(),
+                                ],
+                              ),
+
+                              const SizedBox(height: 5),
+
+                              const Text(
+                                'Project Requirements & Features',
+                                style: TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF111827),
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+
+                              const SizedBox(height: 18),
 
                               TextFormField(
                                 controller: _requirementsController,
@@ -532,137 +667,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   }
 
                                   return null;
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x060F172A),
-                                blurRadius: 18,
-                                offset: Offset(0, 6),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                l10n.timeline.toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.2,
-                                  color: Color(0xFF4F46E5),
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                '${l10n.budget} & ${l10n.timeline}',
-                                style: const TextStyle(
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFF111827),
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 18),
-
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  if (constraints.maxWidth < 600) {
-                                    return Column(
-                                      children: [
-                                        TextFormField(
-                                          controller: _budgetController,
-                                          keyboardType: TextInputType.number,
-                                          decoration: _fieldDecoration(
-                                            label: l10n.budget,
-                                            hint: l10n.amount,
-                                            icon: Icons.currency_rupee_rounded,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return l10n.budget;
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                        const SizedBox(height: 16),
-                                        TextFormField(
-                                          controller: _timelineController,
-                                          decoration: _fieldDecoration(
-                                            label: l10n.timeline,
-                                            hint: l10n.timeline,
-                                            icon: Icons.schedule_outlined,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return l10n.timeline;
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ],
-                                    );
-                                  }
-
-                                  return Row(
-                                    children: [
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _budgetController,
-                                          keyboardType: TextInputType.number,
-                                          decoration: _fieldDecoration(
-                                            label: l10n.budget,
-                                            hint: l10n.amount,
-                                            icon: Icons.currency_rupee_rounded,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return l10n.budget;
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _timelineController,
-                                          decoration: _fieldDecoration(
-                                            label: l10n.timeline,
-                                            hint: l10n.timeline,
-                                            icon: Icons.schedule_outlined,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return l10n.timeline;
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  );
                                 },
                               ),
                             ],
@@ -710,19 +714,19 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                         ),
                                       ],
                                     )
-                                  : Row(
-                                      key: const ValueKey('create'),
+                                  : const Row(
+                                      key: ValueKey('estimate'),
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        const Icon(
-                                          Icons.add_business_rounded,
+                                        Icon(
+                                          Icons.auto_awesome_rounded,
                                           size: 21,
                                         ),
-                                        const SizedBox(width: 9),
+                                        SizedBox(width: 9),
                                         Text(
-                                          l10n.createProject,
-                                          style: const TextStyle(
+                                          'Get Project Estimate',
+                                          style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
                                           ),
