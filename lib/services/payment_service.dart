@@ -1,15 +1,23 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
+import 'razorpay_web_stub.dart'
+    if (dart.library.js_interop) 'razorpay_web.dart';
+
 class PaymentService {
-  final Razorpay _razorpay = Razorpay();
+  Razorpay? _razorpay;
 
   PaymentService() {
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    if (!kIsWeb) {
+      _razorpay = Razorpay();
 
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+      _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
 
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+      _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+
+      _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    }
   }
 
   Future<void> startPayment({
@@ -19,10 +27,45 @@ class PaymentService {
     String? contact,
   }) async {
     try {
-      // Connect to Firebase Functions
+      if (kIsWeb) {
+        final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+        final callable = functions.httpsCallable('createRazorpayOrder');
+
+        final result = await callable.call({'projectId': projectId});
+
+        final data = Map<String, dynamic>.from(result.data);
+
+        final String orderId = data['orderId'];
+        final String keyId = data['keyId'];
+        final int amountInPaise = data['amount'];
+
+        final options = {
+          'key': keyId,
+          'amount': amountInPaise,
+          'currency': 'INR',
+          'name': 'SkillBridge',
+          'description': 'Demo Project Payment',
+          'order_id': orderId,
+          'prefill': {
+            'email': email,
+            if (contact != null && contact.isNotEmpty) 'contact': contact,
+          },
+          'notes': {'projectId': projectId},
+          'theme': {'color': '#249B50'},
+          'retry': {'enabled': true, 'max_count': 3},
+        };
+
+        await openRazorpayWeb(
+          options: options,
+          onSuccess: _handleWebPaymentSuccess,
+        );
+
+        return;
+      }
+
       final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
-      // Call createRazorpayOrder Firebase Function
       final callable = functions.httpsCallable('createRazorpayOrder');
 
       final result = await callable.call({
@@ -36,35 +79,45 @@ class PaymentService {
       final String keyId = data['keyId'];
       final int amountInPaise = data['amount'];
 
-      // Razorpay Checkout configuration
       final options = {
         'key': keyId,
         'amount': amountInPaise,
         'currency': 'INR',
-
         'name': 'SkillBridge',
         'description': 'Project Payment',
-
         'order_id': orderId,
-
         'prefill': {
           'email': email,
           if (contact != null && contact.isNotEmpty) 'contact': contact,
         },
-
         'notes': {'projectId': projectId},
-
         'theme': {'color': '#249B50'},
-
         'retry': {'enabled': true, 'max_count': 3},
       };
 
-      // Open Razorpay Checkout
-      _razorpay.open(options);
+      _razorpay!.open(options);
     } catch (e) {
       print('Payment initialization failed: $e');
       rethrow;
     }
+  }
+
+  Future<void> _handleWebPaymentSuccess(
+    String? paymentId,
+    String? orderId,
+    String? signature,
+  ) async {
+    print('========== PAYMENT SUCCESS ==========');
+    print('Payment ID: $paymentId');
+    print('Order ID: $orderId');
+    print('Signature: $signature');
+    print('=====================================');
+
+    await _verifyPayment(
+      orderId: orderId,
+      paymentId: paymentId,
+      signature: signature,
+    );
   }
 
   Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
@@ -74,14 +127,27 @@ class PaymentService {
     print('Signature: ${response.signature}');
     print('=====================================');
 
+    await _verifyPayment(
+      orderId: response.orderId,
+      paymentId: response.paymentId,
+      signature: response.signature,
+    );
+  }
+
+  Future<void> _verifyPayment({
+    required String? orderId,
+    required String? paymentId,
+    required String? signature,
+  }) async {
     try {
       final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
       final callable = functions.httpsCallable('verifyRazorpayPayment');
 
       final result = await callable.call({
-        'razorpayOrderId': response.orderId,
-        'razorpayPaymentId': response.paymentId,
-        'razorpaySignature': response.signature,
+        'razorpayOrderId': orderId,
+        'razorpayPaymentId': paymentId,
+        'razorpaySignature': signature,
       });
 
       final data = Map<String, dynamic>.from(result.data);
@@ -116,6 +182,8 @@ class PaymentService {
   }
 
   void dispose() {
-    _razorpay.clear();
+    if (!kIsWeb) {
+      _razorpay?.clear();
+    }
   }
 }

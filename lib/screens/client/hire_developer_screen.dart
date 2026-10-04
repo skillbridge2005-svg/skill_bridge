@@ -487,7 +487,7 @@ class _FindDevelopersScreenState extends State<FindDevelopersScreen> {
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 30),
                   itemCount: developers.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final data = developers[index].data();
 
@@ -564,7 +564,7 @@ class _FindDevelopersScreenState extends State<FindDevelopersScreen> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           itemCount: _filters.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
             final filter = _filters[index];
             final selected = _filter == filter;
@@ -927,7 +927,7 @@ class _DeveloperTeamsScreenState extends State<DeveloperTeamsScreen> {
                 return ListView.separated(
                   padding: const EdgeInsets.all(20),
                   itemCount: teams.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final data = teams[index].data();
 
