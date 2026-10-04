@@ -159,28 +159,6 @@ class _ClientHomeState extends State<ClientHome>
                 unreadMessageCount: unreadMessageCount,
                 unreadNotificationCount: unreadNotificationCount,
               ),
-              floatingActionButton: ElevatedButton.icon(
-                onPressed: () async {
-                  try {
-                    await _paymentService.startPayment(
-                      amount: 500,
-                      projectId: 'test_project_001',
-                      email: 'test@example.com',
-                      contact: '9999999999',
-                    );
-                  } catch (e) {
-                    if (!context.mounted) return;
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Payment initialization failed: $e'),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.payment),
-                label: const Text('Pay ₹500'),
-              ),
             );
           },
         );
