@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
 
 import 'auth/login_screen.dart';
+import 'auth/role_selection_screen.dart';
 
 class SkillBridgeLandingPage extends StatelessWidget {
   const SkillBridgeLandingPage({super.key});
 
+  void _goToRoleSelection(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+    );
+  }
+
   void _goToLogin(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => const LoginScreen(role: 'developer')),
     );
   }
 
@@ -67,7 +75,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
                         const SizedBox(width: 10),
                         Expanded(
                           child: FilledButton(
-                            onPressed: () => _goToLogin(context),
+                            onPressed: () => _goToRoleSelection(context),
                             child: const Text('Get Started'),
                           ),
                         ),
@@ -87,7 +95,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   FilledButton(
-                    onPressed: () => _goToLogin(context),
+                    onPressed: () => _goToRoleSelection(context),
                     child: const Text('Get Started'),
                   ),
                 ],
@@ -155,12 +163,12 @@ class SkillBridgeLandingPage extends StatelessWidget {
                 alignment: WrapAlignment.center,
                 children: [
                   FilledButton.icon(
-                    onPressed: () => _goToLogin(context),
+                    onPressed: () => _goToRoleSelection(context),
                     icon: const Icon(Icons.rocket_launch_rounded),
                     label: const Text('Get Started'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => _goToLogin(context),
+                    onPressed: () => _goToRoleSelection(context),
                     icon: const Icon(Icons.person_outline_rounded),
                     label: const Text('Join as Developer'),
                   ),
@@ -188,7 +196,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
               description:
                   'Clients can share software requirements and connect '
                   'with developers who can build the solution.',
-              onTap: () => _goToLogin(context),
+              onTap: () => _goToRoleSelection(context),
             ),
             _FeatureCard(
               icon: Icons.groups_outlined,
@@ -196,7 +204,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
               description:
                   'Developers can collaborate using suitable roles '
                   'such as frontend, backend and database development.',
-              onTap: () => _goToLogin(context),
+              onTap: () => _goToRoleSelection(context),
             ),
             _FeatureCard(
               icon: Icons.smart_toy_outlined,
@@ -204,7 +212,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
               description:
                   'AI helps understand requirements, organize project '
                   'information and support project planning.',
-              onTap: () => _goToLogin(context),
+              onTap: () => _goToRoleSelection(context),
             ),
           ];
 
@@ -279,7 +287,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
                       'Build a suitable development team',
                       'Track project progress',
                     ],
-                    onTap: () => _goToLogin(context),
+                    onTap: () => _goToRoleSelection(context),
                   );
 
                   final developerCard = _RoleCard(
@@ -294,7 +302,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
                       'Join development teams',
                       'Work through a structured workflow',
                     ],
-                    onTap: () => _goToLogin(context),
+                    onTap: () => _goToRoleSelection(context),
                   );
 
                   if (constraints.maxWidth > 700) {
@@ -369,7 +377,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
               title: step.$2,
               description: step.$3,
               icon: step.$4,
-              onTap: () => _goToLogin(context),
+              onTap: () => _goToRoleSelection(context),
             ),
           );
         }).toList(),
@@ -428,14 +436,14 @@ class SkillBridgeLandingPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 15),
                   FilledButton(
-                    onPressed: () => _goToLogin(context),
+                    onPressed: () => _goToRoleSelection(context),
                     child: const Text('Explore SkillBridge'),
                   ),
                 ],
               );
 
               final visual = InkWell(
-                onTap: () => _goToLogin(context),
+                onTap: () => _goToRoleSelection(context),
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
                   width: double.infinity,
@@ -526,7 +534,7 @@ class SkillBridgeLandingPage extends StatelessWidget {
               ),
               const SizedBox(height: 30),
               FilledButton.icon(
-                onPressed: () => _goToLogin(context),
+                onPressed: () => _goToRoleSelection(context),
                 icon: const Icon(Icons.arrow_forward_rounded),
                 label: const Text('Join SkillBridge'),
               ),
