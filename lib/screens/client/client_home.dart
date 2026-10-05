@@ -7,6 +7,7 @@ import '../../localization/app_localizations.dart';
 import '../../localization/language_provider.dart';
 
 import '../../services/payment_service.dart';
+import '../settings/settings_screen.dart';
 import 'create_project_screen.dart';
 import 'my_projects_screen.dart';
 import 'client_profile_screen.dart';
@@ -370,6 +371,13 @@ class _ClientHomeState extends State<ClientHome>
                   _selectNav(4);
                 }
 
+                if (value == 'settings') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                }
+
                 if (value == 'logout') {
                   _logout();
                 }
@@ -382,6 +390,19 @@ class _ClientHomeState extends State<ClientHome>
                       const Icon(Icons.person_outline_rounded, size: 19),
                       const SizedBox(width: 10),
                       Text(l10n.myProfile),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.settings_outlined,
+                        size: 20,
+                      ),
+                      SizedBox(width: 12),
+                      Text('Settings'),
                     ],
                   ),
                 ),
