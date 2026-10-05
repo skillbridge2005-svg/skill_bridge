@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../localization/app_localizations.dart';
 import 'client_payments_screen.dart';
@@ -101,6 +103,162 @@ class ClientProfileScreen extends StatelessWidget {
     return name.trim()[0].toUpperCase();
   }
 
+  Future<void> _openInstagram(BuildContext context) async {
+    final uri = Uri.parse('https://www.instagram.com/skillbridge_9t9');
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Instagram.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open Instagram.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openYouTube(BuildContext context) async {
+    final uri = Uri.parse('https://www.youtube.com/@SkillBridge-nt9');
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open YouTube.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open YouTube.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openEmail(BuildContext context) async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'skillbridge2005@gmail.com',
+      queryParameters: {'subject': 'SkillBridge Support'},
+    );
+
+    try {
+      final launched = await launchUrl(uri);
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No email app is available.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open email app.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showInformationDialog(
+    BuildContext context, {
+    required String title,
+    required String content,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: SingleChildScrollView(
+            child: Text(
+              content,
+              style: const TextStyle(fontSize: 13.5, height: 1.55),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showHelpAndSupport(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(
+            'Help & Support',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: const Text(
+            'Need help with SkillBridge?\n\n'
+            'For support, questions, or reporting an issue, '
+            'contact us through email.\n\n'
+            'Email: skillbridge2005@gmail.com',
+            style: TextStyle(fontSize: 13.5, height: 1.55),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _openEmail(context);
+              },
+              child: const Text('Contact Us'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -177,9 +335,7 @@ class ClientProfileScreen extends StatelessWidget {
               }
 
               final name = data['name']?.toString() ?? '';
-
               final email = data['email']?.toString() ?? user.email ?? '';
-
               final role = data['role']?.toString() ?? '';
 
               return SingleChildScrollView(
@@ -214,9 +370,7 @@ class ClientProfileScreen extends StatelessWidget {
                         const SizedBox(height: 14),
                         _ProfileInfoCard(
                           icon: Icons.person_outline_rounded,
-                          title: l10n.projectTitle == ''
-                              ? 'Full Name'
-                              : 'Full Name',
+                          title: 'Full Name',
                           value: name.isEmpty ? l10n.noData : name,
                         ),
                         const SizedBox(height: 12),
@@ -230,6 +384,87 @@ class ClientProfileScreen extends StatelessWidget {
                           icon: Icons.badge_outlined,
                           title: 'Account Type',
                           value: _formatRole(context, role),
+                        ),
+                        const SizedBox(height: 30),
+
+                        const _ProfileSectionTitle(title: 'SUPPORT & LEGAL'),
+                        const SizedBox(height: 12),
+
+                        _ProfileLinkCard(
+                          icon: Icons.description_outlined,
+                          title: 'Terms & Conditions',
+                          onTap: () {
+                            _showInformationDialog(
+                              context,
+                              title: 'Terms & Conditions',
+                              content:
+                                  'By using SkillBridge, you agree to use '
+                                  'the platform responsibly and provide '
+                                  'accurate information.\n\n'
+                                  'Users are responsible for their '
+                                  'projects, communication, agreements, '
+                                  'and activities performed through the '
+                                  'platform.\n\n'
+                                  'SkillBridge may update these terms '
+                                  'when necessary to improve the service '
+                                  'or comply with applicable requirements.',
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.privacy_tip_outlined,
+                          title: 'Privacy Policy',
+                          onTap: () {
+                            _showInformationDialog(
+                              context,
+                              title: 'Privacy Policy',
+                              content:
+                                  'SkillBridge may collect information '
+                                  'such as your name, email address, '
+                                  'profile information, project-related '
+                                  'information, and other data required '
+                                  'to provide the platform services.\n\n'
+                                  'This information is used to provide '
+                                  'authentication, project services, '
+                                  'communication, payments, and platform '
+                                  'functionality.\n\n'
+                                  'We aim to protect user information '
+                                  'and do not use personal information '
+                                  'for purposes unrelated to providing '
+                                  'the service without appropriate '
+                                  'authorization.',
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.help_outline_rounded,
+                          title: 'Help & Support',
+                          onTap: () {
+                            _showHelpAndSupport(context);
+                          },
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        const _ProfileSectionTitle(title: 'FOLLOW US'),
+                        const SizedBox(height: 14),
+
+                        _FollowUsCard(
+                          onInstagram: () {
+                            _openInstagram(context);
+                          },
+                          onYouTube: () {
+                            _openYouTube(context);
+                          },
+                          onEmail: () {
+                            _openEmail(context);
+                          },
                         ),
                       ],
                     ),
@@ -515,6 +750,136 @@ class _ProfileSectionHeading extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ProfileSectionTitle extends StatelessWidget {
+  final String title;
+
+  const _ProfileSectionTitle({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.2,
+        color: Color(0xFF4F46E5),
+      ),
+    );
+  }
+}
+
+class _ProfileLinkCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  const _ProfileLinkCard({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: const Color(0xFF4F46E5), size: 20),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF344054),
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 15,
+                color: Color(0xFF98A2B3),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FollowUsCard extends StatelessWidget {
+  final VoidCallback onInstagram;
+  final VoidCallback onYouTube;
+  final VoidCallback onEmail;
+
+  const _FollowUsCard({
+    required this.onInstagram,
+    required this.onYouTube,
+    required this.onEmail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        _SocialIconButton(icon: FontAwesomeIcons.instagram, onTap: onInstagram),
+        const SizedBox(width: 18),
+        _SocialIconButton(icon: FontAwesomeIcons.youtube, onTap: onYouTube),
+        const SizedBox(width: 18),
+        _SocialIconButton(icon: FontAwesomeIcons.envelope, onTap: onEmail),
+      ],
+    );
+  }
+}
+
+class _SocialIconButton extends StatelessWidget {
+  final FaIconData icon;
+  final VoidCallback onTap;
+
+  const _SocialIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF292929),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Center(child: FaIcon(icon, size: 22, color: Colors.white)),
+        ),
+      ),
     );
   }
 }
