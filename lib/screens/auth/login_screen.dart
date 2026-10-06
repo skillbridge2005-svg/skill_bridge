@@ -1,5 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
@@ -127,6 +131,120 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Something went wrong: $e'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    if (_isLoading) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      UserCredential userCredential;
+      String? googleDisplayName;
+      String? googleEmail;
+
+      if (kIsWeb) {
+        final GoogleAuthProvider provider = GoogleAuthProvider();
+
+        userCredential = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        final GoogleSignIn googleSignIn = GoogleSignIn.instance;
+
+        await googleSignIn.initialize(
+          serverClientId: '980367306545-02ltousaqnvthur87kir8i2hm9l2qpmr.apps.googleusercontent.com',
+        );
+
+        final GoogleSignInAccount googleUser = await googleSignIn
+            .authenticate();
+
+        final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+
+        final credential = GoogleAuthProvider.credential(
+          idToken: googleAuth.idToken,
+        );
+
+        userCredential = await FirebaseAuth.instance.signInWithCredential(
+          credential,
+        );
+
+        googleDisplayName = googleUser.displayName;
+        googleEmail = googleUser.email;
+      }
+
+      final user = userCredential.user;
+
+      if (user == null) {
+        throw Exception('Unable to get Google user.');
+      }
+
+      final userDoc = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+
+      final snapshot = await userDoc.get();
+
+      if (!snapshot.exists) {
+        await userDoc.set({
+          'uid': user.uid,
+          'name': user.displayName ?? googleDisplayName ?? '',
+          'email': user.email ?? googleEmail ?? '',
+          'role': widget.role,
+          'createdAt': FieldValue.serverTimestamp(),
+          'authProvider': 'google',
+        });
+      }
+
+      if (!mounted) return;
+
+      Navigator.popUntil(context, (route) => route.isFirst);
+    } on GoogleSignInException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Google Sign-In failed: ${e.description ?? e.code}'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message ?? 'Google Sign-In failed.'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Google Sign-In failed: $e'),
           behavior: SnackBarBehavior.floating,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
@@ -585,10 +703,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                             Navigator.push(
                                               context,
                                               MaterialPageRoute(
-                                                builder: (_) =>
-                                                    RegisterScreen(
-                                                      initialRole: widget.role,
-                                                    ),
+                                                builder: (_) => RegisterScreen(
+                                                  initialRole: widget.role,
+                                                ),
                                               ),
                                             );
                                           },
@@ -603,6 +720,43 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ],
                               ),
+                              SizedBox(
+                                height: 54,
+                                child: OutlinedButton(
+                                  onPressed: _isLoading
+                                      ? null
+                                      : _signInWithGoogle,
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: Colors.white,
+                                    foregroundColor: dark,
+                                    side: const BorderSide(color: borderColor),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Image.asset(
+                                        'assets/images/google_logo_light.png',
+                                        width: 40,
+                                        height: 40,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Continue with Google',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(height: 20),
                             ],
                           ),
                         ),
