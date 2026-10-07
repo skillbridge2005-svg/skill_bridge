@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/application_model.dart';
+import 'notification_service.dart';
 
 /// Service responsible for all developer application-related
 /// Firestore operations.
@@ -9,11 +10,15 @@ class ApplicationService {
   ApplicationService({
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
+    NotificationService? notificationService,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+        _auth = auth ?? FirebaseAuth.instance,
+        _notificationService =
+            notificationService ?? NotificationService();
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  final NotificationService _notificationService;
 
   CollectionReference<Map<String, dynamic>>
       get _applicationsCollection {
@@ -55,14 +60,14 @@ class ApplicationService {
         .doc(applicationId)
         .snapshots()
         .map(
-          (snapshot) {
-            if (!snapshot.exists) {
-              return null;
-            }
+      (snapshot) {
+        if (!snapshot.exists) {
+          return null;
+        }
 
-            return ApplicationModel.fromFirestore(snapshot);
-          },
-        );
+        return ApplicationModel.fromFirestore(snapshot);
+      },
+    );
   }
 
   // ===========================================================================
@@ -128,49 +133,49 @@ class ApplicationService {
 
   /// Checks whether the current developer has already applied
   /// to a specific project.
-Future<bool> hasAppliedToProject(
-  String projectId,
-) async {
-  final developerId = currentDeveloperId;
+  Future<bool> hasAppliedToProject(
+    String projectId,
+  ) async {
+    final developerId = currentDeveloperId;
 
-  if (developerId == null) {
-    return false;
-  }
-
-  final snapshot = await _firestore
-      .collection('applications')
-      .where(
-        'developerId',
-        isEqualTo: developerId,
-      )
-      .where(
-        'projectId',
-        isEqualTo: projectId,
-      )
-      .limit(10)
-      .get();
-
-  if (snapshot.docs.isEmpty) {
-    return false;
-  }
-
-  // A withdrawn application should not block
-  // the developer from applying again.
-  for (final doc in snapshot.docs) {
-    final data = doc.data();
-
-    final status = (data['status'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-
-    if (status != 'withdrawn') {
-      return true;
+    if (developerId == null) {
+      return false;
     }
-  }
 
-  return false;
-}
+    final snapshot = await _firestore
+        .collection('applications')
+        .where(
+          'developerId',
+          isEqualTo: developerId,
+        )
+        .where(
+          'projectId',
+          isEqualTo: projectId,
+        )
+        .limit(10)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      return false;
+    }
+
+    // A withdrawn application should not block
+    // the developer from applying again.
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+
+      final status = (data['status'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      if (status != 'withdrawn') {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   /// Returns an existing application for the current developer
   /// and project.
@@ -274,6 +279,25 @@ Future<bool> hasAppliedToProject(
       'createdAt': now,
       'updatedAt': now,
     });
+
+    // Create a notification for the developer.
+    //
+    // Notification failure should not cause the already-created
+    // application to fail.
+    try {
+      await _notificationService.createNotification(
+        developerId: developerId,
+        title: 'Application submitted',
+        body:
+            'Your application has been submitted successfully.',
+        type: 'application',
+        projectId: projectId.trim(),
+        applicationId: document.id,
+      );
+    } catch (_) {
+      // Intentionally ignored so the application submission
+      // remains successful even if notification creation fails.
+    }
 
     return document.id;
   }
