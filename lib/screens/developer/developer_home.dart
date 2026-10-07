@@ -3,8 +3,13 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
 import 'developer_profile.dart';
+import 'my_applications.dart';
+import 'discover_projects.dart';
+import 'active_projects.dart';
+import 'teams.dart';
+import '../../models/notification_model.dart';
+import '../../services/notification_service.dart';
 import '../settings/settings_screen.dart';
 
 /// SkillBridge Developer Dashboard
@@ -37,6 +42,8 @@ class _DeveloperHomeState extends State<DeveloperHome>
   bool _showProfileReminder = true;
   bool _notificationsOpen = false;
   bool _messagesOpen = false;
+  final NotificationService _notificationService =
+    NotificationService();
 
   late final AnimationController _pageController;
   late final AnimationController _ambientController;
@@ -76,22 +83,68 @@ class _DeveloperHomeState extends State<DeveloperHome>
     await FirebaseAuth.instance.signOut();
   }
 
-  void _selectNav(int index) {
-    // My Profile is a separate screen.
-    if (index == 6) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const DeveloperProfile()),
-      );
-      return;
-    }
-
-    setState(() {
-      _selectedNav = index;
-      _notificationsOpen = false;
-      _messagesOpen = false;
-    });
+void _selectNav(int index) {
+  // Discover Projects
+  if (index == 1) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DiscoverProjects(),
+      ),
+    );
+    return;
   }
+
+  // My Applications
+  if (index == 2) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MyApplications(),
+      ),
+    );
+    return;
+  }
+
+  // Active Projects
+  if (index == 3) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ActiveProjects(),
+      ),
+    );
+    return;
+  }
+
+  // Teams
+if (index == 4) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const Teams(),
+    ),
+  );
+  return;
+}
+
+  // My Profile
+  if (index == 6) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DeveloperProfile(),
+      ),
+    );
+    return;
+  }
+
+  setState(() {
+    _selectedNav = index;
+    _notificationsOpen = false;
+    _messagesOpen = false;
+  });
+}
 
   void _showFeatureSnack(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -500,15 +553,22 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 ),
               ),
             const SizedBox(width: 8),
-            _HeaderIcon(
-              icon: Icons.notifications_none_rounded,
-              badge: 3,
-              selected: _notificationsOpen,
-              onTap: () => setState(() {
-                _notificationsOpen = !_notificationsOpen;
-                _messagesOpen = false;
-              }),
-            ),
+           StreamBuilder<int>(
+  stream: _notificationService.watchUnreadCount(),
+  builder: (context, snapshot) {
+    final unreadCount = snapshot.data ?? 0;
+
+    return _HeaderIcon(
+      icon: Icons.notifications_none_rounded,
+      badge: unreadCount,
+      selected: _notificationsOpen,
+      onTap: () => setState(() {
+        _notificationsOpen = !_notificationsOpen;
+        _messagesOpen = false;
+      }),
+    );
+  },
+),
             _HeaderIcon(
               icon: Icons.chat_bubble_outline_rounded,
               badge: 2,
@@ -1371,33 +1431,157 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
-  Widget _notificationPanel() {
-    return _FloatingPanel(
-      title: 'Notifications',
-      action: 'Mark all read',
-      children: const [
-        _NotificationItem(
-          icon: Icons.auto_awesome_rounded,
-          title: 'New project match',
-          body: 'Fintech Mobile Experience matches 94% of your profile.',
-          time: '5 min',
-        ),
-        _NotificationItem(
-          icon: Icons.star_rounded,
-          title: 'You were shortlisted',
-          body: 'NovaPay moved your application to Shortlisted.',
-          time: '2 h',
-        ),
-        _NotificationItem(
-          icon: Icons.schedule_rounded,
-          title: 'Deadline approaching',
-          body: 'UI prototype is due today.',
-          time: '4 h',
-        ),
-      ],
-    );
+ Widget _notificationPanel() {
+  return StreamBuilder<List<NotificationModel>>(
+    stream: _notificationService.watchMyNotifications(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return _FloatingPanel(
+          title: 'Notifications',
+          action: 'Mark all read',
+          onAction: null,
+          children: const [
+            Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Unable to load notifications.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _AppColors.muted,
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      if (snapshot.connectionState ==
+          ConnectionState.waiting) {
+        return _FloatingPanel(
+          title: 'Notifications',
+          action: 'Mark all read',
+          onAction: null,
+          children: const [
+            Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      final notifications =
+          snapshot.data ?? <NotificationModel>[];
+
+      return _FloatingPanel(
+        title: 'Notifications',
+        action: 'Mark all read',
+        onAction: notifications.any(
+          (notification) => notification.isUnread,
+        )
+            ? _markAllNotificationsRead
+            : null,
+        children: notifications.isEmpty
+            ? const [
+                Padding(
+                  padding: EdgeInsets.all(22),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.notifications_none_rounded,
+                        size: 32,
+                        color: _AppColors.muted,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'No notifications yet',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'New updates will appear here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _AppColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ]
+            : notifications
+                .take(8)
+                .map(
+                  (notification) =>
+                      _buildNotificationItem(
+                    notification,
+                  ),
+                )
+                .toList(),
+      );
+    },
+  );
+}
+Future<void> _markNotificationRead(
+  NotificationModel notification,
+) async {
+  if (notification.isRead) {
+    return;
   }
 
+  try {
+    await _notificationService.markAsRead(
+      notification.id,
+    );
+  } catch (error) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Could not update notification: $error',
+        ),
+      ),
+    );
+  }
+}
+Widget _buildNotificationItem(
+  NotificationModel notification,
+) {
+  return _NotificationItem(
+    notification: notification,
+    onTap: () => _markNotificationRead(
+      notification,
+    ),
+  );
+}
+Future<void> _markAllNotificationsRead() async {
+  try {
+    await _notificationService.markAllAsRead();
+  } catch (error) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Could not mark notifications as read: $error',
+        ),
+      ),
+    );
+  }
+}
   Widget _messagePanel() {
     return _FloatingPanel(
       title: 'Messages',
@@ -2822,12 +3006,15 @@ class _QuickActionCard extends StatelessWidget {
 class _FloatingPanel extends StatelessWidget {
   final String title;
   final String action;
-  final List<Widget> children;
-  const _FloatingPanel({
-    required this.title,
-    required this.action,
-    required this.children,
-  });
+final List<Widget> children;
+final VoidCallback? onAction;
+
+const _FloatingPanel({
+  required this.title,
+  required this.action,
+  required this.children,
+  this.onAction,
+});
 
   @override
   Widget build(BuildContext context) {
@@ -2858,9 +3045,17 @@ class _FloatingPanel extends StatelessWidget {
               ),
               const Spacer(),
               TextButton(
-                onPressed: () {},
-                child: Text(action, style: const TextStyle(fontSize: 10)),
-              ),
+  onPressed: onAction,
+  child: Text(
+    action,
+    style: TextStyle(
+      fontSize: 10,
+      color: onAction == null
+          ? _AppColors.muted
+          : _AppColors.primary,
+    ),
+  ),
+),
             ],
           ),
           const Divider(height: 1),
@@ -2872,38 +3067,172 @@ class _FloatingPanel extends StatelessWidget {
 }
 
 class _NotificationItem extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String body;
-  final String time;
+  final NotificationModel notification;
+  final VoidCallback onTap;
+
   const _NotificationItem({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.time,
+    required this.notification,
+    required this.onTap,
   });
+
+  IconData _iconForType(String type) {
+    switch (type.trim().toLowerCase()) {
+      case 'project_match':
+        return Icons.auto_awesome_rounded;
+
+      case 'shortlisted':
+        return Icons.star_rounded;
+
+      case 'accepted':
+        return Icons.check_circle_rounded;
+
+      case 'rejected':
+        return Icons.cancel_rounded;
+
+      case 'application':
+        return Icons.assignment_rounded;
+
+      case 'team':
+        return Icons.groups_2_rounded;
+
+      case 'deadline':
+        return Icons.schedule_rounded;
+
+      case 'message':
+        return Icons.chat_bubble_rounded;
+
+      default:
+        return Icons.notifications_rounded;
+    }
+  }
+
+  String _timeAgo(DateTime? dateTime) {
+    if (dateTime == null) {
+      return '';
+    }
+
+    final difference =
+        DateTime.now().difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'now';
+    }
+
+    if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} min';
+    }
+
+    if (difference.inHours < 24) {
+      return '${difference.inHours} h';
+    }
+
+    if (difference.inDays < 7) {
+      return '${difference.inDays} d';
+    }
+
+    return '${dateTime.day}/${dateTime.month}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      leading: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: const Color(0xFFEFF4FF),
-          borderRadius: BorderRadius.circular(11),
+    final unread = notification.isUnread;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          vertical: 7,
+          horizontal: 4,
         ),
-        child: Icon(icon, size: 18, color: _AppColors.primary),
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-      ),
-      subtitle: Text(body, style: const TextStyle(fontSize: 10, height: 1.35)),
-      trailing: Text(
-        time,
-        style: const TextStyle(fontSize: 8.5, color: _AppColors.muted),
+        decoration: BoxDecoration(
+          color: unread
+              ? const Color(0xFFF8FAFF)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF4FF),
+                borderRadius:
+                    BorderRadius.circular(11),
+              ),
+              child: Icon(
+                _iconForType(notification.type),
+                size: 18,
+                color: _AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          notification.title,
+                          maxLines: 1,
+                          overflow:
+                              TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: unread
+                                ? FontWeight.w900
+                                : FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      if (unread)
+                        Container(
+                          width: 6,
+                          height: 6,
+                          margin:
+                              const EdgeInsets.only(
+                            left: 5,
+                          ),
+                          decoration:
+                              const BoxDecoration(
+                            color:
+                                _AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    notification.body,
+                    maxLines: 2,
+                    overflow:
+                        TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      height: 1.35,
+                      color: _AppColors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _timeAgo(notification.createdAt),
+                    style: const TextStyle(
+                      fontSize: 8.5,
+                      color: _AppColors.muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
