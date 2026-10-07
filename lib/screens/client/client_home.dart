@@ -1,13 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../localization/app_localizations.dart';
+import '../../localization/language_provider.dart';
+
+import '../../services/payment_service.dart';
+import '../settings/settings_screen.dart';
 import 'create_project_screen.dart';
 import 'my_projects_screen.dart';
 import 'client_profile_screen.dart';
 import 'client_messages_screen.dart';
 import 'client_notifications_screen.dart';
 import 'project_details_screen.dart';
+import 'hire_developer_screen.dart';
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -18,17 +25,23 @@ class ClientHome extends StatefulWidget {
 
 class _ClientHomeState extends State<ClientHome>
     with SingleTickerProviderStateMixin {
+  final PaymentService _paymentService = PaymentService();
+
   int _selectedNav = 0;
 
   late final AnimationController _pageController;
 
-  final List<_ClientNavItem> _navItems = const [
-    _ClientNavItem(Icons.grid_view_rounded, 'Dashboard'),
-    _ClientNavItem(Icons.folder_copy_rounded, 'My Projects'),
-    _ClientNavItem(Icons.chat_bubble_rounded, 'Messages'),
-    _ClientNavItem(Icons.notifications_rounded, 'Notifications'),
-    _ClientNavItem(Icons.person_rounded, 'My Profile'),
-  ];
+  List<_ClientNavItem> _navItems(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
+    return [
+      _ClientNavItem(Icons.grid_view_rounded, l10n.dashboard),
+      _ClientNavItem(Icons.folder_copy_rounded, l10n.myProjects),
+      _ClientNavItem(Icons.chat_bubble_rounded, l10n.messages),
+      _ClientNavItem(Icons.notifications_rounded, l10n.notifications),
+      _ClientNavItem(Icons.person_rounded, l10n.myProfile),
+    ];
+  }
 
   @override
   void initState() {
@@ -42,6 +55,7 @@ class _ClientHomeState extends State<ClientHome>
 
   @override
   void dispose() {
+    _paymentService.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -59,14 +73,15 @@ class _ClientHomeState extends State<ClientHome>
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final l10n = AppLocalizations.of(context);
 
     if (user == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF6F8FC),
+      return Scaffold(
+        backgroundColor: const Color(0xFFF6F8FC),
         body: Center(
           child: Text(
-            'Please login again.',
-            style: TextStyle(
+            l10n.loginAgain,
+            style: const TextStyle(
               color: Color(0xFF64748B),
               fontWeight: FontWeight.w600,
             ),
@@ -205,10 +220,10 @@ class _ClientHomeState extends State<ClientHome>
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              itemCount: _navItems.length,
+              itemCount: _navItems(context).length,
               separatorBuilder: (_, _) => const SizedBox(height: 3),
               itemBuilder: (context, index) {
-                final item = _navItems[index];
+                final item = _navItems(context)[index];
 
                 final badgeCount = index == 2
                     ? unreadMessageCount
@@ -233,7 +248,7 @@ class _ClientHomeState extends State<ClientHome>
               padding: const EdgeInsets.all(12),
               child: IconButton(
                 onPressed: () => _selectNav(4),
-                tooltip: 'Profile',
+                tooltip: AppLocalizations.of(context).profile,
                 icon: const Icon(
                   Icons.person_outline_rounded,
                   color: Color(0xFF64748B),
@@ -246,6 +261,8 @@ class _ClientHomeState extends State<ClientHome>
   }
 
   Widget _buildTopBar({required bool mobile}) {
+    final l10n = AppLocalizations.of(context);
+
     return Padding(
       padding: EdgeInsets.fromLTRB(mobile ? 14 : 20, 14, mobile ? 14 : 20, 4),
       child: Container(
@@ -275,7 +292,7 @@ class _ClientHomeState extends State<ClientHome>
                   borderRadius: BorderRadius.circular(13),
                 ),
                 child: Icon(
-                  _navItems[_selectedNav].icon,
+                  _navItems(context)[_selectedNav].icon,
                   color: const Color(0xFF2563EB),
                   size: 21,
                 ),
@@ -290,7 +307,7 @@ class _ClientHomeState extends State<ClientHome>
                     children: [
                       Flexible(
                         child: Text(
-                          _navItems[_selectedNav].label,
+                          _navItems(context)[_selectedNav].label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -311,9 +328,9 @@ class _ClientHomeState extends State<ClientHome>
                           color: const Color(0xFFEAF2FF),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Text(
-                          'CLIENT',
-                          style: TextStyle(
+                        child: Text(
+                          l10n.client.toUpperCase(),
+                          style: const TextStyle(
                             fontSize: 8.5,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 0.7,
@@ -324,9 +341,9 @@ class _ClientHomeState extends State<ClientHome>
                     ],
                   ),
                   const SizedBox(height: 3),
-                  const Text(
-                    'SkillBridge Workspace',
-                    style: TextStyle(
+                  Text(
+                    l10n.skillBridgeWorkspace,
+                    style: const TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF667085),
@@ -336,8 +353,15 @@ class _ClientHomeState extends State<ClientHome>
               ),
             ),
             const SizedBox(width: 4),
+            IconButton(
+              tooltip: l10n.selectLanguage,
+              onPressed: () {
+                _showLanguageMenu(context);
+              },
+              icon: const Icon(Icons.language_rounded, size: 22),
+            ),
             PopupMenuButton<String>(
-              tooltip: 'Account',
+              tooltip: l10n.clientAccount,
               offset: const Offset(0, 56),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -347,18 +371,38 @@ class _ClientHomeState extends State<ClientHome>
                   _selectNav(4);
                 }
 
+                if (value == 'settings') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                }
+
                 if (value == 'logout') {
                   _logout();
                 }
               },
-              itemBuilder: (context) => const [
+              itemBuilder: (context) => [
                 PopupMenuItem(
                   value: 'profile',
                   child: Row(
                     children: [
-                      Icon(Icons.person_outline_rounded, size: 19),
-                      SizedBox(width: 10),
-                      Text('My Profile'),
+                      const Icon(Icons.person_outline_rounded, size: 19),
+                      const SizedBox(width: 10),
+                      Text(l10n.myProfile),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.settings_outlined,
+                        size: 20,
+                      ),
+                      SizedBox(width: 12),
+                      Text('Settings'),
                     ],
                   ),
                 ),
@@ -366,9 +410,9 @@ class _ClientHomeState extends State<ClientHome>
                   value: 'logout',
                   child: Row(
                     children: [
-                      Icon(Icons.logout_rounded, size: 19),
-                      SizedBox(width: 10),
-                      Text('Logout'),
+                      const Icon(Icons.logout_rounded, size: 19),
+                      const SizedBox(width: 10),
+                      Text(l10n.logout),
                     ],
                   ),
                 ),
@@ -413,6 +457,8 @@ class _ClientHomeState extends State<ClientHome>
     required int unreadMessageCount,
     required int unreadNotificationCount,
   }) {
+    final l10n = AppLocalizations.of(context);
+
     if (MediaQuery.of(context).size.width >= 760) {
       return const SizedBox.shrink();
     }
@@ -467,15 +513,15 @@ class _ClientHomeState extends State<ClientHome>
             onDestinationSelected: _selectNav,
             labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
             destinations: [
-              const NavigationDestination(
-                icon: Icon(Icons.grid_view_outlined),
-                selectedIcon: Icon(Icons.grid_view_rounded),
-                label: 'Home',
+              NavigationDestination(
+                icon: const Icon(Icons.grid_view_outlined),
+                selectedIcon: const Icon(Icons.grid_view_rounded),
+                label: l10n.home,
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.folder_outlined),
-                selectedIcon: Icon(Icons.folder_rounded),
-                label: 'Projects',
+              NavigationDestination(
+                icon: const Icon(Icons.folder_outlined),
+                selectedIcon: const Icon(Icons.folder_rounded),
+                label: l10n.projects,
               ),
               NavigationDestination(
                 icon: _BottomBadgeIcon(
@@ -486,7 +532,7 @@ class _ClientHomeState extends State<ClientHome>
                   icon: Icons.chat_bubble_rounded,
                   count: unreadMessageCount,
                 ),
-                label: 'Messages',
+                label: l10n.messages,
               ),
               NavigationDestination(
                 icon: _BottomBadgeIcon(
@@ -497,12 +543,12 @@ class _ClientHomeState extends State<ClientHome>
                   icon: Icons.notifications_rounded,
                   count: unreadNotificationCount,
                 ),
-                label: 'Alerts',
+                label: l10n.alerts,
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.person_outline_rounded),
-                selectedIcon: Icon(Icons.person_rounded),
-                label: 'Profile',
+              NavigationDestination(
+                icon: const Icon(Icons.person_outline_rounded),
+                selectedIcon: const Icon(Icons.person_rounded),
+                label: l10n.profile,
               ),
             ],
           ),
@@ -586,15 +632,23 @@ class _ClientDashboardSection extends StatelessWidget {
     );
   }
 
+  void _openHireDeveloper(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const HireDeveloperScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final l10n = AppLocalizations.of(context);
 
     if (user == null) {
-      return const Center(
+      return Center(
         child: Text(
-          'Please login again.',
-          style: TextStyle(
+          l10n.loginAgain,
+          style: const TextStyle(
             color: Color(0xFF667085),
             fontWeight: FontWeight.w600,
           ),
@@ -630,7 +684,7 @@ class _ClientDashboardSection extends StatelessWidget {
                   padding: const EdgeInsets.all(20),
                   child: _ErrorCard(
                     message:
-                        'Unable to load dashboard data.\n'
+                        '${l10n.somethingWentWrong}\n'
                         '${projectSnapshot.error}',
                   ),
                 ),
@@ -673,13 +727,11 @@ class _ClientDashboardSection extends StatelessWidget {
                       _CreateProjectBanner(
                         onTap: () => _openCreateProject(context),
                       ),
-                      const SizedBox(height: 27),
-                      const _SectionHeading(
-                        eyebrow: 'OVERVIEW',
-                        title: 'Your workspace',
-                        subtitle: 'A quick look at your project activity.',
+                      const SizedBox(height: 14),
+                      _HireDeveloperBanner(
+                        onTap: () => _openHireDeveloper(context),
                       ),
-                      const SizedBox(height: 13),
+                      const SizedBox(height: 27),
                       _StatsGrid(
                         totalProjects: totalProjects,
                         activeProjects: activeProjects,
@@ -712,10 +764,10 @@ class _ClientDashboardSection extends StatelessWidget {
                         ),
                       if (projects.isNotEmpty) ...[
                         const SizedBox(height: 19),
-                        const _SectionHeading(
-                          eyebrow: 'QUICK ACTIONS',
-                          title: 'Continue where you left off',
-                          subtitle: 'Jump directly to your workspace.',
+                        _SectionHeading(
+                          eyebrow: l10n.quickActions,
+                          title: l10n.continueWhereLeft,
+                          subtitle: l10n.jumpWorkspace,
                         ),
                         const SizedBox(height: 13),
                         _QuickActions(
@@ -751,6 +803,8 @@ class _DashboardWelcome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(23),
@@ -801,9 +855,9 @@ class _DashboardWelcome extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Welcome back',
-                  style: TextStyle(
+                Text(
+                  l10n.welcomeBack,
+                  style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF667085),
@@ -811,7 +865,7 @@ class _DashboardWelcome extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  name.isEmpty ? 'Client' : name,
+                  name.isEmpty ? l10n.client : name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -822,10 +876,10 @@ class _DashboardWelcome extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 5),
-                const Text(
-                  'Everything for your software projects, in one place.',
+                Text(
+                  l10n.softwareProjectsDescription,
                   maxLines: 2,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
                     height: 1.45,
                     color: Color(0xFF667085),
@@ -854,7 +908,7 @@ class _DashboardWelcome extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  projectCount == 1 ? 'Project' : 'Projects',
+                  projectCount == 1 ? l10n.project : l10n.projectsPlural,
                   style: const TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
@@ -877,6 +931,8 @@ class _CreateProjectBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -919,24 +975,24 @@ class _CreateProjectBanner extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Create a New Project',
-                      style: TextStyle(
+                      l10n.createNewProject,
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
                       ),
                     ),
-                    SizedBox(height: 5),
+                    const SizedBox(height: 5),
                     Text(
-                      'Share your idea and requirements with SkillBridge.',
+                      l10n.shareIdea,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12.5,
                         height: 1.4,
                         color: Color(0xFFE5EDFF),
@@ -956,6 +1012,103 @@ class _CreateProjectBanner extends StatelessWidget {
                 child: const Icon(
                   Icons.arrow_forward_rounded,
                   color: Colors.white,
+                  size: 21,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HireDeveloperBanner extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _HireDeveloperBanner({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.all(21),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFE0E7FF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x080F172A),
+                blurRadius: 22,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFEFF6FF), Color(0xFFE0E7FF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                child: const Icon(
+                  Icons.person_search_rounded,
+                  color: Color(0xFF4F46E5),
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.hireDeveloper,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF101828),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      l10n.findDevelopers,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.4,
+                        color: Color(0xFF667085),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                width: 43,
+                height: 43,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: Color(0xFF4F46E5),
                   size: 21,
                 ),
               ),
@@ -1029,26 +1182,28 @@ class _StatsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final cards = [
           _StatCard(
             icon: Icons.folder_copy_rounded,
-            title: 'Total Projects',
+            title: l10n.totalProjects,
             value: totalProjects.toString(),
             color: const Color(0xFF2563EB),
             background: const Color(0xFFEFF6FF),
           ),
           _StatCard(
             icon: Icons.autorenew_rounded,
-            title: 'Active Projects',
+            title: l10n.activeProjects,
             value: activeProjects.toString(),
             color: const Color(0xFFD97706),
             background: const Color(0xFFFFF7E8),
           ),
           _StatCard(
             icon: Icons.task_alt_rounded,
-            title: 'Completed',
+            title: l10n.completed,
             value: completedProjects.toString(),
             color: const Color(0xFF16A34A),
             background: const Color(0xFFECFDF3),
@@ -1179,21 +1334,23 @@ class _RecentProjectsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        const Expanded(
+        Expanded(
           child: _SectionHeading(
-            eyebrow: 'PROJECTS',
-            title: 'Recent Projects',
-            subtitle: 'Your latest project activity.',
+            eyebrow: l10n.projects,
+            title: l10n.recentProjects,
+            subtitle: l10n.latestProjectActivity,
           ),
         ),
         if (hasProjects)
           TextButton.icon(
             onPressed: onViewAll,
             icon: const Icon(Icons.arrow_forward_rounded, size: 15),
-            label: const Text('View all'),
+            label: Text(l10n.viewAll),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF2563EB),
               textStyle: const TextStyle(
@@ -1213,22 +1370,24 @@ class _ProjectCard extends StatelessWidget {
 
   const _ProjectCard({required this.project, required this.projectId});
 
-  String _formatStatus(String status) {
+  String _formatStatus(BuildContext context, String status) {
+    final l10n = AppLocalizations.of(context);
+
     switch (status) {
       case 'requirement':
-        return 'Requirement';
+        return l10n.requirement;
       case 'team_formation':
-        return 'Team Formation';
+        return l10n.teamFormation;
       case 'development':
-        return 'Development';
+        return l10n.development;
       case 'testing':
-        return 'Testing';
+        return l10n.testing;
       case 'client_review':
-        return 'Client Review';
+        return l10n.clientReview;
       case 'completed':
-        return 'Completed';
+        return l10n.completed;
       case 'cancelled':
-        return 'Cancelled';
+        return l10n.cancelled;
       default:
         return status;
     }
@@ -1274,7 +1433,9 @@ class _ProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = project['title']?.toString() ?? 'Untitled Project';
+    final l10n = AppLocalizations.of(context);
+
+    final title = project['title']?.toString() ?? l10n.project;
 
     final category = project['category']?.toString() ?? '';
 
@@ -1397,7 +1558,7 @@ class _ProjectCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      _formatStatus(status),
+                      _formatStatus(context, status),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
@@ -1429,50 +1590,50 @@ class _QuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 560) {
-          return Column(
-            children: [
-              _QuickActionCard(
-                icon: Icons.folder_rounded,
-                title: 'My Projects',
-                subtitle: 'Open your project workspace',
-                onTap: onProjects,
-              ),
-              const SizedBox(height: 10),
-              _QuickActionCard(
-                icon: Icons.chat_rounded,
-                title: 'Messages',
-                subtitle: 'Continue your conversations',
-                onTap: onMessages,
-              ),
-            ],
-          );
-        }
+    final l10n = AppLocalizations.of(context);
 
-        return Row(
-          children: [
-            Expanded(
-              child: _QuickActionCard(
-                icon: Icons.folder_rounded,
-                title: 'My Projects',
-                subtitle: 'Open your project workspace',
-                onTap: onProjects,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _QuickActionCard(
-                icon: Icons.chat_rounded,
-                title: 'Messages',
-                subtitle: 'Continue your conversations',
-                onTap: onMessages,
-              ),
-            ),
-          ],
-        );
-      },
+    if (MediaQuery.of(context).size.width < 560) {
+      return Column(
+        children: [
+          _QuickActionCard(
+            icon: Icons.folder_rounded,
+            title: l10n.myProjects,
+            subtitle: l10n.openProjectWorkspace,
+            onTap: onProjects,
+          ),
+          const SizedBox(height: 10),
+          _QuickActionCard(
+            icon: Icons.chat_rounded,
+            title: l10n.messages,
+            subtitle: l10n.continueConversations,
+            onTap: onMessages,
+          ),
+          const SizedBox(height: 10),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: _QuickActionCard(
+            icon: Icons.folder_rounded,
+            title: l10n.myProjects,
+            subtitle: l10n.openProjectWorkspace,
+            onTap: onProjects,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _QuickActionCard(
+            icon: Icons.chat_rounded,
+            title: l10n.messages,
+            subtitle: l10n.continueConversations,
+            onTap: onMessages,
+          ),
+        ),
+        const SizedBox(width: 12),
+      ],
     );
   }
 }
@@ -1559,6 +1720,8 @@ class _EmptyProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 46),
@@ -1583,19 +1746,19 @@ class _EmptyProjectCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'No projects yet',
-            style: TextStyle(
+          Text(
+            l10n.noProjectsYet,
+            style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w900,
               color: Color(0xFF101828),
             ),
           ),
           const SizedBox(height: 7),
-          const Text(
-            'Create your first project and it will appear here.',
+          Text(
+            l10n.createFirstProject,
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 13,
               height: 1.5,
               color: Color(0xFF667085),
@@ -1814,8 +1977,10 @@ class _SidebarAccount extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final l10n = AppLocalizations.of(context);
 
-    final name = user?.displayName ?? user?.email?.split('@').first ?? 'Client';
+    final name =
+        user?.displayName ?? user?.email?.split('@').first ?? l10n.client;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -1851,9 +2016,9 @@ class _SidebarAccount extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        const Text(
-                          'Client account',
-                          style: TextStyle(
+                        Text(
+                          l10n.clientAccount,
+                          style: const TextStyle(
                             fontSize: 10,
                             color: Color(0xFF667085),
                           ),
@@ -1876,7 +2041,7 @@ class _SidebarAccount extends StatelessWidget {
               Expanded(
                 child: IconButton(
                   onPressed: onProfile,
-                  tooltip: 'Profile',
+                  tooltip: l10n.profile,
                   icon: const Icon(Icons.settings_outlined, size: 19),
                   style: IconButton.styleFrom(
                     foregroundColor: const Color(0xFF667085),
@@ -1889,7 +2054,7 @@ class _SidebarAccount extends StatelessWidget {
               Expanded(
                 child: IconButton(
                   onPressed: onLogout,
-                  tooltip: 'Logout',
+                  tooltip: l10n.logout,
                   icon: const Icon(Icons.logout_rounded, size: 19),
                   style: IconButton.styleFrom(
                     foregroundColor: const Color(0xFF667085),
@@ -1915,8 +2080,9 @@ class _UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final l10n = AppLocalizations.of(context);
 
-    final name = user?.displayName ?? user?.email ?? 'Client';
+    final name = user?.displayName ?? user?.email ?? l10n.client;
 
     final initial = name.trim().isEmpty ? 'C' : name.trim()[0].toUpperCase();
 
@@ -2034,4 +2200,144 @@ class _ClientProfileSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return const ClientProfileScreen();
   }
+}
+
+void _showLanguageMenu(BuildContext context) {
+  final provider = context.read<LanguageProvider>();
+  final l10n = AppLocalizations.of(context);
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      final currentLanguage = provider.locale.languageCode;
+
+      return Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.language_rounded,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    l10n.selectLanguage,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF101828),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            _languageOption(
+              context: sheetContext,
+              provider: provider,
+              title: l10n.english,
+              subtitle: l10n.english,
+              locale: const Locale('en'),
+              selected: currentLanguage == 'en',
+            ),
+            _languageOption(
+              context: sheetContext,
+              provider: provider,
+              title: l10n.marathi,
+              subtitle: l10n.marathi,
+              locale: const Locale('mr'),
+              selected: currentLanguage == 'mr',
+            ),
+            _languageOption(
+              context: sheetContext,
+              provider: provider,
+              title: l10n.hindi,
+              subtitle: l10n.hindi,
+              locale: const Locale('hi'),
+              selected: currentLanguage == 'hi',
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Widget _languageOption({
+  required BuildContext context,
+  required LanguageProvider provider,
+  required String title,
+  required String subtitle,
+  required Locale locale,
+  required bool selected,
+}) {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 9),
+    decoration: BoxDecoration(
+      color: selected ? const Color(0xFFEFF4FF) : const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(
+        color: selected ? const Color(0xFFBFDBFE) : const Color(0xFFE5E7EB),
+      ),
+    ),
+    child: ListTile(
+      onTap: () {
+        provider.changeLanguage(locale);
+        Navigator.pop(context);
+      },
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFDBEAFE) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          Icons.language_rounded,
+          color: selected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+        ),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          color: selected ? const Color(0xFF2563EB) : const Color(0xFF101828),
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(fontSize: 11, color: Color(0xFF667085)),
+      ),
+      trailing: selected
+          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB))
+          : const Icon(Icons.chevron_right_rounded, color: Color(0xFF98A2B3)),
+    ),
+  );
 }

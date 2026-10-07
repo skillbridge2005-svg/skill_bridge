@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../localization/app_localizations.dart';
+
 class CreateProjectScreen extends StatefulWidget {
   const CreateProjectScreen({super.key});
 
@@ -15,10 +17,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _requirementsController = TextEditingController();
-  final _budgetController = TextEditingController();
-  final _timelineController = TextEditingController();
 
-  String _selectedCategory = 'Web Application';
+  List<String> _selectedCategories = [];
   bool _isLoading = false;
 
   final List<String> _categories = [
@@ -36,13 +36,81 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _titleController.dispose();
     _descriptionController.dispose();
     _requirementsController.dispose();
-    _budgetController.dispose();
-    _timelineController.dispose();
     super.dispose();
   }
 
+  String _categoryLabel(BuildContext context, String category) {
+    final language = AppLocalizations.of(context);
+
+    switch (category) {
+      case 'Web Application':
+        return language.locale.languageCode == 'hi'
+            ? 'वेब एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'वेब ॲप्लिकेशन'
+            : 'Web Application';
+
+      case 'Mobile Application':
+        return language.locale.languageCode == 'hi'
+            ? 'मोबाइल एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'मोबाइल ॲप्लिकेशन'
+            : 'Mobile Application';
+
+      case 'Desktop Application':
+        return language.locale.languageCode == 'hi'
+            ? 'डेस्कटॉप एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'डेस्कटॉप ॲप्लिकेशन'
+            : 'Desktop Application';
+
+      case 'Software System':
+        return language.locale.languageCode == 'hi'
+            ? 'सॉफ्टवेयर सिस्टम'
+            : language.locale.languageCode == 'mr'
+            ? 'सॉफ्टवेअर सिस्टम'
+            : 'Software System';
+
+      case 'E-Commerce':
+        return language.locale.languageCode == 'hi'
+            ? 'ई-कॉमर्स'
+            : language.locale.languageCode == 'mr'
+            ? 'ई-कॉमर्स'
+            : 'E-Commerce';
+
+      case 'Business Application':
+        return language.locale.languageCode == 'hi'
+            ? 'बिजनेस एप्लिकेशन'
+            : language.locale.languageCode == 'mr'
+            ? 'बिझनेस ॲप्लिकेशन'
+            : 'Business Application';
+
+      case 'Other':
+        return language.locale.languageCode == 'hi'
+            ? 'अन्य'
+            : language.locale.languageCode == 'mr'
+            ? 'इतर'
+            : 'Other';
+
+      default:
+        return category;
+    }
+  }
+
   Future<void> _createProject() async {
+    final l10n = AppLocalizations.of(context);
+
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (_selectedCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.category),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
 
@@ -50,8 +118,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please login again.'),
+        SnackBar(
+          content: Text(l10n.loginAgain),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -71,11 +139,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         'projectId': projectRef.id,
         'clientId': user.uid,
         'title': _titleController.text.trim(),
-        'category': _selectedCategory,
+        'categories': _selectedCategories,
         'description': _descriptionController.text.trim(),
         'requirements': _requirementsController.text.trim(),
-        'budget': _budgetController.text.trim(),
-        'timeline': _timelineController.text.trim(),
         'status': 'requirement',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -88,8 +154,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           .doc(user.uid)
           .collection('notifications')
           .add({
-            'title': 'Project Created',
-            'message': 'Your project has been created successfully.',
+            'title': 'Get Project Estimate',
+            'message': l10n.projectGeneratedSuccessfully,
             'type': 'project',
             'isRead': false,
             'createdAt': FieldValue.serverTimestamp(),
@@ -98,8 +164,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Project created successfully.'),
+        SnackBar(
+          content: Text(l10n.projectGeneratedSuccessfully),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -110,7 +176,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Firestore error: ${e.message ?? e.code}'),
+          content: Text(
+            '${l10n.somethingWentWrong}\n'
+            '${e.message ?? e.code}',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -119,7 +188,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Something went wrong: $e'),
+          content: Text('${l10n.somethingWentWrong}\n$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -172,8 +241,39 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
+  Widget _aiGenerateButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F3FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE0E7FF)),
+      ),
+      child: TextButton.icon(
+        onPressed: () {},
+        icon: const Icon(
+          Icons.auto_awesome_rounded,
+          size: 17,
+          color: Color(0xFF4F46E5),
+        ),
+        label: const Text(
+          'Generate with AI',
+          style: TextStyle(
+            color: Color(0xFF4F46E5),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
@@ -183,7 +283,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         titleSpacing: 20,
         iconTheme: const IconThemeData(color: Color(0xFF111827)),
         title: const Text(
-          'Create Project',
+          'Get Project Estimate',
           style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
@@ -241,7 +341,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   ),
                                 ),
                                 child: const Icon(
-                                  Icons.add_business_rounded,
+                                  Icons.auto_awesome_rounded,
                                   color: Color(0xFFA5B4FC),
                                   size: 27,
                                 ),
@@ -252,7 +352,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'NEW PROJECT',
+                                      'PROJECT ESTIMATE',
                                       style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.w900,
@@ -262,7 +362,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                     ),
                                     SizedBox(height: 5),
                                     Text(
-                                      'Tell us about your project',
+                                      'Get Project Estimate',
                                       style: TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,
@@ -272,7 +372,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                     ),
                                     SizedBox(height: 4),
                                     Text(
-                                      'Add your requirements so SkillBridge can understand your project.',
+                                      'Tell us about your project and let AI help prepare an initial estimate.',
                                       style: TextStyle(
                                         fontSize: 11.5,
                                         height: 1.45,
@@ -305,9 +405,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'PROJECT DETAILS',
-                                style: TextStyle(
+                              Text(
+                                l10n.projectDetails.toUpperCase(),
+                                style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 1.2,
@@ -316,7 +416,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                               ),
                               const SizedBox(height: 5),
                               const Text(
-                                'Basic information',
+                                'Project Information',
                                 style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
@@ -330,13 +430,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 controller: _titleController,
                                 textInputAction: TextInputAction.next,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Title',
-                                  hint: 'Example: Online Billing System',
+                                  label: l10n.projectTitle,
+                                  hint: l10n.exampleProjectIdea,
                                   icon: Icons.title_rounded,
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project title';
+                                    return l10n.projectTitle;
                                   }
 
                                   return null;
@@ -345,38 +445,104 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                               const SizedBox(height: 16),
 
-                              DropdownButtonFormField<String>(
-                                initialValue: _selectedCategory,
-                                decoration: _fieldDecoration(
-                                  label: 'Project Type',
-                                  hint: 'Select project type',
-                                  icon: Icons.category_outlined,
+                              Text(
+                                l10n.category,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF344054),
                                 ),
-                                dropdownColor: Colors.white,
-                                borderRadius: BorderRadius.circular(15),
-                                items: _categories
-                                    .map(
-                                      (category) => DropdownMenuItem<String>(
-                                        value: category,
-                                        child: Text(
-                                          category,
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF344054),
-                                          ),
+                              ),
+
+                              const SizedBox(height: 8),
+
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(15),
+                                  border: Border.all(
+                                    color: const Color(0xFFE5E7EB),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: _categories.map((category) {
+                                    final selected = _selectedCategories
+                                        .contains(category);
+
+                                    return CheckboxListTile(
+                                      value: selected,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          if (value == true) {
+                                            _selectedCategories.add(category);
+                                          } else {
+                                            _selectedCategories.remove(
+                                              category,
+                                            );
+                                          }
+                                        });
+                                      },
+                                      title: Text(
+                                        _categoryLabel(context, category),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF344054),
                                         ),
                                       ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  if (value == null) return;
-
-                                  setState(() {
-                                    _selectedCategory = value;
-                                  });
-                                },
+                                      activeColor: const Color(0xFF4F46E5),
+                                      controlAffinity:
+                                          ListTileControlAffinity.leading,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                      dense: true,
+                                    );
+                                  }).toList(),
+                                ),
                               ),
+
+                              if (_selectedCategories.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 7,
+                                  runSpacing: 7,
+                                  children: _selectedCategories
+                                      .map(
+                                        (category) => Chip(
+                                          label: Text(
+                                            _categoryLabel(context, category),
+                                          ),
+                                          deleteIcon: const Icon(
+                                            Icons.close,
+                                            size: 16,
+                                          ),
+                                          onDeleted: () {
+                                            setState(() {
+                                              _selectedCategories.remove(
+                                                category,
+                                              );
+                                            });
+                                          },
+                                          backgroundColor: const Color(
+                                            0xFFEEF2FF,
+                                          ),
+                                          side: BorderSide.none,
+                                          labelStyle: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF4338CA),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -400,25 +566,35 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'DESCRIPTION',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.2,
-                                  color: Color(0xFF4F46E5),
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      l10n.description.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                        color: Color(0xFF4F46E5),
+                                      ),
+                                    ),
+                                  ),
+                                  _aiGenerateButton(),
+                                ],
                               ),
+
                               const SizedBox(height: 5),
-                              const Text(
-                                'Explain what you need',
-                                style: TextStyle(
+
+                              Text(
+                                l10n.describeProject,
+                                style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
                                   color: Color(0xFF111827),
                                   letterSpacing: -0.3,
                                 ),
                               ),
+
                               const SizedBox(height: 18),
 
                               TextFormField(
@@ -426,77 +602,46 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                 maxLines: 5,
                                 textInputAction: TextInputAction.newline,
                                 decoration: _fieldDecoration(
-                                  label: 'Project Description',
-                                  hint: 'Explain what software you want to build.',
+                                  label: l10n.projectDescription,
+                                  hint: l10n.describeProject,
                                   icon: Icons.description_outlined,
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project description';
+                                    return l10n.projectDescription;
                                   }
 
                                   if (value.trim().length < 20) {
-                                    return 'Please provide more details';
+                                    return l10n.requirements;
                                   }
 
                                   return null;
                                 },
                               ),
 
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20),
 
-                              TextFormField(
-                                controller: _requirementsController,
-                                maxLines: 6,
-                                textInputAction: TextInputAction.newline,
-                                decoration: _fieldDecoration(
-                                  label: 'Project Requirements',
-                                  hint: 'List the important features or requirements.',
-                                  icon: Icons.checklist_rounded,
-                                ),
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Enter project requirements';
-                                  }
-
-                                  return null;
-                                },
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      l10n.requirements.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                        color: Color(0xFF4F46E5),
+                                      ),
+                                    ),
+                                  ),
+                                  _aiGenerateButton(),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
 
-                        const SizedBox(height: 14),
-
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x060F172A),
-                                blurRadius: 18,
-                                offset: Offset(0, 6),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'PLANNING',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.2,
-                                  color: Color(0xFF4F46E5),
-                                ),
-                              ),
                               const SizedBox(height: 5),
+
                               const Text(
-                                'Budget & timeline',
+                                'Project Requirements & Features',
                                 style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w900,
@@ -504,93 +649,24 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                   letterSpacing: -0.3,
                                 ),
                               ),
+
                               const SizedBox(height: 18),
 
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  if (constraints.maxWidth < 600) {
-                                    return Column(
-                                      children: [
-                                        TextFormField(
-                                          controller: _budgetController,
-                                          keyboardType: TextInputType.number,
-                                          decoration: _fieldDecoration(
-                                            label: 'Budget',
-                                            hint: 'Expected budget',
-                                            icon: Icons.currency_rupee_rounded,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return 'Enter budget';
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                        const SizedBox(height: 16),
-                                        TextFormField(
-                                          controller: _timelineController,
-                                          decoration: _fieldDecoration(
-                                            label: 'Expected Timeline',
-                                            hint: 'Example: 4 weeks',
-                                            icon: Icons.schedule_outlined,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return 'Enter timeline';
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ],
-                                    );
+                              TextFormField(
+                                controller: _requirementsController,
+                                maxLines: 6,
+                                textInputAction: TextInputAction.newline,
+                                decoration: _fieldDecoration(
+                                  label: l10n.requirements,
+                                  hint: l10n.requirements,
+                                  icon: Icons.checklist_rounded,
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.trim().isEmpty) {
+                                    return l10n.requirements;
                                   }
 
-                                  return Row(
-                                    children: [
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _budgetController,
-                                          keyboardType: TextInputType.number,
-                                          decoration: _fieldDecoration(
-                                            label: 'Budget',
-                                            hint: 'Expected budget',
-                                            icon: Icons.currency_rupee_rounded,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return 'Enter budget';
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _timelineController,
-                                          decoration: _fieldDecoration(
-                                            label: 'Expected Timeline',
-                                            hint: 'Example: 4 weeks',
-                                            icon: Icons.schedule_outlined,
-                                          ),
-                                          validator: (value) {
-                                            if (value == null ||
-                                                value.trim().isEmpty) {
-                                              return 'Enter timeline';
-                                            }
-
-                                            return null;
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  );
+                                  return null;
                                 },
                               ),
                             ],
@@ -615,12 +691,12 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 180),
                               child: _isLoading
-                                  ? const Row(
-                                      key: ValueKey('loading'),
+                                  ? Row(
+                                      key: const ValueKey('loading'),
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        SizedBox(
+                                        const SizedBox(
                                           width: 21,
                                           height: 21,
                                           child: CircularProgressIndicator(
@@ -628,10 +704,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                             color: Colors.white,
                                           ),
                                         ),
-                                        SizedBox(width: 11),
+                                        const SizedBox(width: 11),
                                         Text(
-                                          'Creating Project...',
-                                          style: TextStyle(
+                                          l10n.loading,
+                                          style: const TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
                                           ),
@@ -639,17 +715,17 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                       ],
                                     )
                                   : const Row(
-                                      key: ValueKey('create'),
+                                      key: ValueKey('estimate'),
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
                                         Icon(
-                                          Icons.add_business_rounded,
+                                          Icons.auto_awesome_rounded,
                                           size: 21,
                                         ),
                                         SizedBox(width: 9),
                                         Text(
-                                          'Create Project',
+                                          'Get Project Estimate',
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
@@ -663,10 +739,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                         const SizedBox(height: 10),
 
-                        const Text(
-                          'Your project will be created with Requirement status.',
+                        Text(
+                          l10n.requirement,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 10.5,
                             color: Color(0xFF98A2B3),
                             fontWeight: FontWeight.w500,

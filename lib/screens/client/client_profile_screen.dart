@@ -1,169 +1,57 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../localization/app_localizations.dart';
 import 'client_payments_screen.dart';
 
 class ClientProfileScreen extends StatelessWidget {
   const ClientProfileScreen({super.key});
 
   Future<void> _editName(BuildContext context, String currentName) async {
-    final controller = TextEditingController(text: currentName);
-
-    final formKey = GlobalKey<FormState>();
+    final l10n = AppLocalizations.of(context);
 
     final newName = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(22),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEEF2FF),
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: const Icon(
-                          Icons.edit_rounded,
-                          color: Color(0xFF4F46E5),
-                          size: 21,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Edit Name',
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF111827),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: controller,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'Full Name',
-                      hintText: 'Enter your full name',
-                      prefixIcon: const Icon(
-                        Icons.person_outline_rounded,
-                        color: Color(0xFF6B7280),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: const BorderSide(color: Color(0xFF818CF8)),
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Enter your name';
-                      }
-
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF6B7280),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                        ),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () {
-                          if (!formKey.currentState!.validate()) {
-                            return;
-                          }
-
-                          Navigator.pop(dialogContext, controller.text.trim());
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF4F46E5),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(13),
-                          ),
-                        ),
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+      barrierDismissible: false,
+      builder: (_) => _EditNameDialog(initialName: currentName),
     );
 
-    controller.dispose();
-
-    if (newName == null || newName.isEmpty) {
+    if (!context.mounted || newName == null || newName.trim().isEmpty) {
       return;
     }
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.loginAgain),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
       return;
     }
 
-    try {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
-        {'name': newName},
-      );
+    final updatedName = newName.trim();
 
-      await user.updateDisplayName(newName);
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'name': updatedName,
+      }, SetOptions(merge: true));
+
+      await user.updateDisplayName(updatedName);
 
       if (!context.mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated successfully.'),
+        SnackBar(
+          content: Text(l10n.update),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -173,24 +61,38 @@ class ClientProfileScreen extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to update profile.\n'
+            '${l10n.somethingWentWrong}\n'
             '${e.message ?? e.code}',
           ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.somethingWentWrong}\n$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
     }
   }
 
-  String _formatRole(String role) {
+  String _formatRole(BuildContext context, String role) {
+    final l10n = AppLocalizations.of(context);
+
     if (role.trim().isEmpty) {
-      return 'Client';
+      return l10n.client;
     }
 
-    return role.trim().replaceFirst(
-      role.trim()[0],
-      role.trim()[0].toUpperCase(),
-    );
+    final value = role.trim().toLowerCase();
+
+    if (value == 'client') {
+      return l10n.client;
+    }
+
+    return value.replaceFirst(value[0], value[0].toUpperCase());
   }
 
   String _initial(String name) {
@@ -201,15 +103,172 @@ class ClientProfileScreen extends StatelessWidget {
     return name.trim()[0].toUpperCase();
   }
 
+  Future<void> _openInstagram(BuildContext context) async {
+    final uri = Uri.parse('https://www.instagram.com/skillbridge_9t9');
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Instagram.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open Instagram.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openYouTube(BuildContext context) async {
+    final uri = Uri.parse('https://www.youtube.com/@SkillBridge-nt9');
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open YouTube.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open YouTube.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openEmail(BuildContext context) async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'skillbridge2005@gmail.com',
+      queryParameters: {'subject': 'SkillBridge Support'},
+    );
+
+    try {
+      final launched = await launchUrl(uri);
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No email app is available.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open email app.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showInformationDialog(
+    BuildContext context, {
+    required String title,
+    required String content,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: SingleChildScrollView(
+            child: Text(
+              content,
+              style: const TextStyle(fontSize: 13.5, height: 1.55),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showHelpAndSupport(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(
+            'Help & Support',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: const Text(
+            'Need help with SkillBridge?\n\n'
+            'For support, questions, or reporting an issue, '
+            'contact us through email.\n\n'
+            'Email: skillbridge2005@gmail.com',
+            style: TextStyle(fontSize: 13.5, height: 1.55),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _openEmail(context);
+              },
+              child: const Text('Contact Us'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Center(
+      return Center(
         child: Text(
-          'Please login again.',
-          style: TextStyle(
+          l10n.loginAgain,
+          style: const TextStyle(
             color: Color(0xFF64748B),
             fontWeight: FontWeight.w600,
           ),
@@ -242,7 +301,7 @@ class ClientProfileScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(24),
                     child: _ProfileErrorCard(
                       message:
-                          'Unable to load profile.\n'
+                          '${l10n.somethingWentWrong}\n'
                           '${snapshot.error}',
                     ),
                   ),
@@ -250,10 +309,10 @@ class ClientProfileScreen extends StatelessWidget {
               }
 
               if (!snapshot.hasData || !snapshot.data!.exists) {
-                return const Center(
+                return Center(
                   child: Text(
-                    'Profile not found.',
-                    style: TextStyle(
+                    l10n.projectNotFound,
+                    style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontWeight: FontWeight.w600,
                     ),
@@ -264,10 +323,10 @@ class ClientProfileScreen extends StatelessWidget {
               final data = snapshot.data!.data();
 
               if (data == null) {
-                return const Center(
+                return Center(
                   child: Text(
-                    'Profile data is empty.',
-                    style: TextStyle(
+                    l10n.noData,
+                    style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontWeight: FontWeight.w600,
                     ),
@@ -276,9 +335,7 @@ class ClientProfileScreen extends StatelessWidget {
               }
 
               final name = data['name']?.toString() ?? '';
-
               final email = data['email']?.toString() ?? user.email ?? '';
-
               final role = data['role']?.toString() ?? '';
 
               return SingleChildScrollView(
@@ -314,19 +371,100 @@ class ClientProfileScreen extends StatelessWidget {
                         _ProfileInfoCard(
                           icon: Icons.person_outline_rounded,
                           title: 'Full Name',
-                          value: name.isEmpty ? 'Not available' : name,
+                          value: name.isEmpty ? l10n.noData : name,
                         ),
                         const SizedBox(height: 12),
                         _ProfileInfoCard(
                           icon: Icons.email_outlined,
                           title: 'Email Address',
-                          value: email.isEmpty ? 'Not available' : email,
+                          value: email.isEmpty ? l10n.noData : email,
                         ),
                         const SizedBox(height: 12),
                         _ProfileInfoCard(
                           icon: Icons.badge_outlined,
                           title: 'Account Type',
-                          value: _formatRole(role),
+                          value: _formatRole(context, role),
+                        ),
+                        const SizedBox(height: 30),
+
+                        const _ProfileSectionTitle(title: 'SUPPORT & LEGAL'),
+                        const SizedBox(height: 12),
+
+                        _ProfileLinkCard(
+                          icon: Icons.description_outlined,
+                          title: 'Terms & Conditions',
+                          onTap: () {
+                            _showInformationDialog(
+                              context,
+                              title: 'Terms & Conditions',
+                              content:
+                                  'By using SkillBridge, you agree to use '
+                                  'the platform responsibly and provide '
+                                  'accurate information.\n\n'
+                                  'Users are responsible for their '
+                                  'projects, communication, agreements, '
+                                  'and activities performed through the '
+                                  'platform.\n\n'
+                                  'SkillBridge may update these terms '
+                                  'when necessary to improve the service '
+                                  'or comply with applicable requirements.',
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.privacy_tip_outlined,
+                          title: 'Privacy Policy',
+                          onTap: () {
+                            _showInformationDialog(
+                              context,
+                              title: 'Privacy Policy',
+                              content:
+                                  'SkillBridge may collect information '
+                                  'such as your name, email address, '
+                                  'profile information, project-related '
+                                  'information, and other data required '
+                                  'to provide the platform services.\n\n'
+                                  'This information is used to provide '
+                                  'authentication, project services, '
+                                  'communication, payments, and platform '
+                                  'functionality.\n\n'
+                                  'We aim to protect user information '
+                                  'and do not use personal information '
+                                  'for purposes unrelated to providing '
+                                  'the service without appropriate '
+                                  'authorization.',
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.help_outline_rounded,
+                          title: 'Help & Support',
+                          onTap: () {
+                            _showHelpAndSupport(context);
+                          },
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        const _ProfileSectionTitle(title: 'FOLLOW US'),
+                        const SizedBox(height: 14),
+
+                        _FollowUsCard(
+                          onInstagram: () {
+                            _openInstagram(context);
+                          },
+                          onYouTube: () {
+                            _openYouTube(context);
+                          },
+                          onEmail: () {
+                            _openEmail(context);
+                          },
                         ),
                       ],
                     ),
@@ -356,6 +494,8 @@ class _ProfileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(23),
@@ -413,9 +553,9 @@ class _ProfileHero extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'CLIENT PROFILE',
-                  style: TextStyle(
+                Text(
+                  l10n.client.toUpperCase(),
+                  style: const TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 1.2,
@@ -424,7 +564,7 @@ class _ProfileHero extends StatelessWidget {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  name.isEmpty ? 'Client' : name,
+                  name.isEmpty ? l10n.client : name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -436,7 +576,7 @@ class _ProfileHero extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  email.isEmpty ? 'No email available' : email,
+                  email.isEmpty ? l10n.noData : email,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -456,7 +596,7 @@ class _ProfileHero extends StatelessWidget {
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
             child: Text(
-              role.isEmpty ? 'CLIENT' : role.toUpperCase(),
+              role.isEmpty ? l10n.client.toUpperCase() : role.toUpperCase(),
               style: const TextStyle(
                 fontSize: 8.5,
                 fontWeight: FontWeight.w900,
@@ -479,12 +619,14 @@ class _ProfileActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Row(
       children: [
         Expanded(
           child: _ProfileActionButton(
             icon: Icons.edit_rounded,
-            title: 'Edit Profile',
+            title: l10n.edit,
             onTap: onEdit,
           ),
         ),
@@ -492,7 +634,7 @@ class _ProfileActionCard extends StatelessWidget {
         Expanded(
           child: _ProfileActionButton(
             icon: Icons.account_balance_wallet_rounded,
-            title: 'Payments',
+            title: l10n.payments,
             onTap: onPayments,
           ),
         ),
@@ -574,34 +716,170 @@ class _ProfileSectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final l10n = AppLocalizations.of(context);
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'ACCOUNT',
-          style: TextStyle(
+          l10n.client.toUpperCase(),
+          style: const TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.25,
             color: Color(0xFF4F46E5),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Your information',
-          style: TextStyle(
+          l10n.myProfile,
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
             color: Color(0xFF111827),
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
-          'Your basic SkillBridge account information.',
-          style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF6B7280)),
+          l10n.clientAccount,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Color(0xFF6B7280),
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _ProfileSectionTitle extends StatelessWidget {
+  final String title;
+
+  const _ProfileSectionTitle({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.2,
+        color: Color(0xFF4F46E5),
+      ),
+    );
+  }
+}
+
+class _ProfileLinkCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  const _ProfileLinkCard({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: const Color(0xFF4F46E5), size: 20),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF344054),
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 15,
+                color: Color(0xFF98A2B3),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FollowUsCard extends StatelessWidget {
+  final VoidCallback onInstagram;
+  final VoidCallback onYouTube;
+  final VoidCallback onEmail;
+
+  const _FollowUsCard({
+    required this.onInstagram,
+    required this.onYouTube,
+    required this.onEmail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        _SocialIconButton(icon: FontAwesomeIcons.instagram, onTap: onInstagram),
+        const SizedBox(width: 18),
+        _SocialIconButton(icon: FontAwesomeIcons.youtube, onTap: onYouTube),
+        const SizedBox(width: 18),
+        _SocialIconButton(icon: FontAwesomeIcons.envelope, onTap: onEmail),
+      ],
+    );
+  }
+}
+
+class _SocialIconButton extends StatelessWidget {
+  final FaIconData icon;
+  final VoidCallback onTap;
+
+  const _SocialIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF292929),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Center(child: FaIcon(icon, size: 22, color: Colors.white)),
+        ),
+      ),
     );
   }
 }
@@ -766,5 +1044,178 @@ class _ProfileAmbientPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ProfileAmbientPainter oldDelegate) {
     return false;
+  }
+}
+
+class _EditNameDialog extends StatefulWidget {
+  final String initialName;
+
+  const _EditNameDialog({required this.initialName});
+
+  @override
+  State<_EditNameDialog> createState() => _EditNameDialogState();
+}
+
+class _EditNameDialogState extends State<_EditNameDialog> {
+  String _name = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _name = widget.initialName;
+  }
+
+  void _save() {
+    final name = _name.trim();
+
+    if (name.isEmpty) {
+      return;
+    }
+
+    if (name.length < 2) {
+      return;
+    }
+
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 450),
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Icon(
+                      Icons.edit_rounded,
+                      color: Color(0xFF4F46E5),
+                      size: 21,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      l10n.edit,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Color(0xFF667085),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                initialValue: widget.initialName,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                onChanged: (value) {
+                  _name = value;
+                },
+                onFieldSubmitted: (_) {
+                  _save();
+                },
+                decoration: InputDecoration(
+                  labelText: l10n.projectTitle,
+                  hintText: l10n.projectTitle,
+                  prefixIcon: const Icon(
+                    Icons.person_outline_rounded,
+                    color: Color(0xFF4F46E5),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 16,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF4F46E5),
+                      width: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    child: Text(
+                      l10n.cancel,
+                      style: const TextStyle(
+                        color: Color(0xFF667085),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                    ),
+                    child: Text(
+                      l10n.save,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
