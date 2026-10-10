@@ -81,50 +81,58 @@ class LanguageScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFFEEF2FF)
-                : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(14),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 6,
           ),
-          child: Icon(
-            Icons.language_rounded,
-            color: isSelected
-                ? const Color(0xFF4F46E5)
-                : const Color(0xFF6B7280),
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFFEEF2FF)
+                  : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              Icons.language_rounded,
+              color: isSelected
+                  ? const Color(0xFF4F46E5)
+                  : const Color(0xFF6B7280),
+            ),
           ),
+          title: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              subtitle,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+            ),
+          ),
+          trailing: isSelected
+              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4F46E5))
+              : const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: Color(0xFF9CA3AF),
+                ),
+          onTap: () {
+            context.read<LanguageProvider>().changeLanguage(locale);
+            Navigator.pop(context);
+          },
         ),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF111827),
-          ),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 3),
-          child: Text(
-            subtitle,
-            style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-          ),
-        ),
-        trailing: isSelected
-            ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4F46E5))
-            : const Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: Color(0xFF9CA3AF),
-              ),
-        onTap: () {
-          context.read<LanguageProvider>().changeLanguage(locale);
-          Navigator.pop(context);
-        },
       ),
     );
   }

@@ -2306,38 +2306,49 @@ Widget _languageOption({
         color: selected ? const Color(0xFFBFDBFE) : const Color(0xFFE5E7EB),
       ),
     ),
-    child: ListTile(
-      onTap: () {
-        provider.changeLanguage(locale);
-        Navigator.pop(context);
-      },
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFFDBEAFE) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
+    child: Material(
+      color: selected ? const Color(0xFFEFF4FF) : const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        onTap: () {
+          provider.changeLanguage(locale);
+          Navigator.pop(context);
+        },
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFDBEAFE) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.language_rounded,
+            color: selected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+          ),
         ),
-        child: Icon(
-          Icons.language_rounded,
-          color: selected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: selected ? const Color(0xFF2563EB) : const Color(0xFF101828),
+          ),
         ),
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w800,
-          color: selected ? const Color(0xFF2563EB) : const Color(0xFF101828),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(fontSize: 11, color: Color(0xFF667085)),
         ),
+        trailing: selected
+            ? const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF2563EB),
+              )
+            : const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF98A2B3),
+              ),
       ),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(fontSize: 11, color: Color(0xFF667085)),
-      ),
-      trailing: selected
-          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB))
-          : const Icon(Icons.chevron_right_rounded, color: Color(0xFF98A2B3)),
     ),
   );
 }
