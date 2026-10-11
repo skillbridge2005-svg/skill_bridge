@@ -16,11 +16,15 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Connect Firebase Cloud Functions to the local emulator
-  // during development/testing on a physical Android phone.
+  // In debug builds, call the local Functions emulator.
+  // Android emulators reach the host via 10.0.2.2; desktop/web use localhost.
   if (kDebugMode) {
+    final host = (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+        ? '10.0.2.2'
+        : '127.0.0.1';
+
     FirebaseFunctions.instanceFor(region: 'us-central1')
-        .useFunctionsEmulator('10.44.128.192', 5001);
+        .useFunctionsEmulator(host, 5001);
   }
 
   runApp(

@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyB_MAAYO97zEuyd6szgUZmUYCbwU-mdno8',
-    appId: '1:980367306545:android:b25056de240afa374c8a10',
+    appId: '1:980367306545:android:957b625eaab610104c8a10',
     messagingSenderId: '980367306545',
     projectId: 'skill-bridge-e8366',
     storageBucket: 'skill-bridge-e8366.firebasestorage.app',

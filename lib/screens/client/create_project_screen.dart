@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../localization/app_localizations.dart';
+import 'ai_project_assistant_screen.dart';
 
 class CreateProjectScreen extends StatefulWidget {
   const CreateProjectScreen({super.key});
@@ -20,6 +24,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   List<String> _selectedCategories = [];
   bool _isLoading = false;
+  XFile? _designImage;
+  Uint8List? _designImageBytes;
+  bool _isPickingDesign = false;
 
   final List<String> _categories = [
     'Web Application',
@@ -94,6 +101,58 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       default:
         return category;
+    }
+  }
+
+  Future<void> _pickDesignImage() async {
+    if (_isPickingDesign) return;
+
+    setState(() {
+      _isPickingDesign = true;
+    });
+
+    try {
+      final picker = ImagePicker();
+
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+      );
+
+      if (!mounted || image == null) return;
+
+      final bytes = await image.readAsBytes();
+
+      if (!mounted) return;
+
+      setState(() {
+        _designImage = image;
+        _designImageBytes = bytes;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Project design selected successfully.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to select the design image.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      debugPrint('Design image selection error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingDesign = false;
+        });
+      }
     }
   }
 
@@ -241,7 +300,65 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
-  Widget _aiGenerateButton() {
+  Future<void> _openAIAssistant(String target) async {
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter the project title first.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one project category.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (target == 'design' &&
+        _requirementsController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please add project requirements first so AI can design the pages.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final result = await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AIProjectAssistantScreen(
+          title: _titleController.text.trim(),
+          categories: List<String>.from(_selectedCategories),
+          description: _descriptionController.text.trim(),
+          requirements: _requirementsController.text.trim(),
+          initialTarget: target,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    setState(() {
+      _descriptionController.text =
+          result['description'] ?? _descriptionController.text;
+
+      _requirementsController.text =
+          result['requirements'] ?? _requirementsController.text;
+    });
+  }
+
+  Widget _aiGenerateButton(String target) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFF5F3FF),
@@ -249,7 +366,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         border: Border.all(color: const Color(0xFFE0E7FF)),
       ),
       child: TextButton.icon(
-        onPressed: () {},
+        onPressed: () => _openAIAssistant(target),
         icon: const Icon(
           Icons.auto_awesome_rounded,
           size: 17,
@@ -579,7 +696,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                       ),
                                     ),
                                   ),
-                                  _aiGenerateButton(),
+                                  _aiGenerateButton('description'),
                                 ],
                               ),
 
@@ -634,7 +751,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                       ),
                                     ),
                                   ),
-                                  _aiGenerateButton(),
+                                  _aiGenerateButton('requirements'),
                                 ],
                               ),
 
@@ -668,6 +785,218 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                                   return null;
                                 },
+                              ),
+
+                              const SizedBox(height: 22),
+
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFE0E7FF),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Row(
+                                      children: [
+                                        Icon(
+                                          Icons.design_services_rounded,
+                                          color: Color(0xFF4F46E5),
+                                          size: 22,
+                                        ),
+                                        SizedBox(width: 9),
+                                        Expanded(
+                                          child: Text(
+                                            'Project Design',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF111827),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 7),
+
+                                    const Text(
+                                      'Upload a UI design, or generate a multi-page software '
+                                      'mockup from your requirements with AI.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.5,
+                                        color: Color(0xFF667085),
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 15),
+
+                                    if (_designImageBytes != null) ...[
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.memory(
+                                          _designImageBytes!,
+                                          width: double.infinity,
+                                          height: 200,
+                                          fit: BoxFit.contain,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return const SizedBox(
+                                                  height: 100,
+                                                  child: Center(
+                                                    child: Text(
+                                                      'Unable to preview this image.',
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                        ),
+                                      ),
+
+                                      const SizedBox(height: 12),
+                                    ],
+
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 46,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _isPickingDesign
+                                            ? null
+                                            : _pickDesignImage,
+                                        icon: _isPickingDesign
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : Icon(
+                                                _designImage == null
+                                                    ? Icons
+                                                          .cloud_upload_outlined
+                                                    : Icons.edit_outlined,
+                                              ),
+                                        label: Text(
+                                          _isPickingDesign
+                                              ? 'Selecting Design...'
+                                              : _designImage == null
+                                              ? 'Upload Project Design'
+                                              : 'Change Design',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(
+                                            0xFF4F46E5,
+                                          ),
+                                          side: const BorderSide(
+                                            color: Color(0xFF818CF8),
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 10),
+
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 46,
+                                      child: FilledButton.icon(
+                                        onPressed: () =>
+                                            _openAIAssistant('design'),
+                                        icon: const Icon(
+                                          Icons.auto_awesome_rounded,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          'Generate Design with AI',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: const Color(
+                                            0xFF4F46E5,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+
+                                    if (_designImage != null) ...[
+                                      const SizedBox(height: 8),
+
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: TextButton.icon(
+                                          onPressed: () {
+                                            setState(() {
+                                              _designImage = null;
+                                              _designImageBytes = null;
+                                            });
+                                          },
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Remove Design'),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: const Color(
+                                              0xFFDC2626,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 14),
+
+                              SizedBox(
+                                width: double.infinity,
+                                height: 50,
+                                child: OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _openAIAssistant('requirements'),
+                                  icon: const Icon(
+                                    Icons.auto_awesome_rounded,
+                                    size: 20,
+                                  ),
+                                  label: const Text(
+                                    'Generate with AI',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF4F46E5),
+                                    backgroundColor: const Color(0xFFF5F3FF),
+                                    side: const BorderSide(
+                                      color: Color(0xFFE0E7FF),
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
