@@ -66,19 +66,18 @@ class _ActiveProjectsState extends State<ActiveProjects> {
     return searchableText.contains(_searchQuery);
   }
 
-String _formatBudget(ProjectModel project) {
-  if (project.budgetMin > 0 &&
-      project.budgetMax > 0) {
-    return '₹${_formatAmount(project.budgetMin)} - '
-        '₹${_formatAmount(project.budgetMax)}';
-  }
+  String _formatBudget(ProjectModel project) {
+    if (project.budgetMin > 0 && project.budgetMax > 0) {
+      return '₹${_formatAmount(project.budgetMin)} - '
+          '₹${_formatAmount(project.budgetMax)}';
+    }
 
-  if (project.budget > 0) {
-    return '₹${_formatAmount(project.budget)}';
-  }
+    if (project.budget > 0) {
+      return '₹${_formatAmount(project.budget)}';
+    }
 
-  return 'Budget not specified';
-}
+    return 'Budget not specified';
+  }
 
   String _formatAmount(double amount) {
     if (amount == amount.roundToDouble()) {
@@ -126,7 +125,12 @@ String _formatBudget(ProjectModel project) {
     showDialog<void>(
       context: context,
       builder: (context) {
+        final screenWidth = MediaQuery.sizeOf(context).width;
         return AlertDialog(
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: screenWidth < 600 ? 16 : 40,
+            vertical: 24,
+          ),
           title: Text(
             project.title,
             style: const TextStyle(
@@ -276,11 +280,12 @@ String _formatBudget(ProjectModel project) {
   }
 
   Widget _buildSearchBar() {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        20,
-        20,
-        20,
+      padding: EdgeInsets.fromLTRB(
+        isMobile ? 12 : 20,
+        isMobile ? 12 : 20,
+        isMobile ? 12 : 20,
         12,
       ),
       child: TextField(
@@ -355,11 +360,13 @@ String _formatBudget(ProjectModel project) {
           return _buildEmptyState();
         }
 
+        final isMobile = MediaQuery.sizeOf(context).width < 600;
         return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(
-            20,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(
+            isMobile ? 12 : 20,
             8,
-            20,
+            isMobile ? 12 : 20,
             32,
           ),
           itemCount: activeApplications.length,
@@ -406,6 +413,8 @@ String _formatBudget(ProjectModel project) {
     ProjectModel project,
     ApplicationModel application,
   ) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+
     return Card(
       margin: const EdgeInsets.only(
         bottom: 16,
@@ -420,7 +429,7 @@ String _formatBudget(ProjectModel project) {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(isMobile ? 14 : 20),
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -586,32 +595,42 @@ String _formatBudget(ProjectModel project) {
                     .toList(),
               ),
             const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Accepted on ${_formatDate(application.updatedAt ?? application.createdAt)}',
-                    style:
-                        const TextStyle(
-                      color:
-                          Color(0xFF6B7280),
-                      fontSize: 12,
+            if (isMobile) ...[
+              Text(
+                'Accepted on ${_formatDate(application.updatedAt ?? application.createdAt)}',
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _openProject(project),
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('View Project'),
+                ),
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Accepted on ${_formatDate(application.updatedAt ?? application.createdAt)}',
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                      ),
                     ),
                   ),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    _openProject(project);
-                  },
-                  icon: const Icon(
-                    Icons.visibility_outlined,
-                    size: 18,
+                  OutlinedButton.icon(
+                    onPressed: () => _openProject(project),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('View Project'),
                   ),
-                  label:
-                      const Text('View Project'),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),

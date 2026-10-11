@@ -384,17 +384,15 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return Scaffold(
       backgroundColor: _background,
       floatingActionButton: FloatingActionButton.small(
-    heroTag: 'project-details-back',
-    backgroundColor: Colors.white,
-    foregroundColor: _textPrimary,
-    elevation: 4,
-    onPressed: () {
-      Navigator.of(context).maybePop();
-    },
-    child: const Icon(
-      Icons.arrow_back_rounded,
-    ),
-  ),
+        heroTag: 'project-details-back',
+        backgroundColor: Colors.white,
+        foregroundColor: _textPrimary,
+        elevation: 4,
+        onPressed: () {
+          Navigator.of(context).maybePop();
+        },
+        child: const Icon(Icons.arrow_back_rounded),
+      ),
       body: SafeArea(
         bottom: false,
         child: StreamBuilder<ProjectModel?>(
@@ -618,19 +616,21 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _StatusBadge(status: project.status),
-            const SizedBox(width: 8),
             if (matchPercentage > 0) _MatchBadge(percentage: matchPercentage),
           ],
         ),
         const SizedBox(height: 14),
         Text(
           project.title.isEmpty ? 'Untitled Project' : project.title,
-          style: const TextStyle(
+          style: TextStyle(
             color: _textPrimary,
-            fontSize: 30,
+            fontSize: MediaQuery.sizeOf(context).width < 380 ? 25 : 30,
             height: 1.15,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.7,
@@ -1205,7 +1205,7 @@ class _ProjectDetailsState extends State<ProjectDetails>
         top: false,
         child: Align(
           alignment: Alignment.center,
-
+          heightFactor: 1,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1180),
             child: Padding(
@@ -1232,12 +1232,17 @@ class _ProjectDetailsState extends State<ProjectDetails>
                                 ),
                               ),
                             ),
-                            Text(
-                              _budget(project),
-                              style: const TextStyle(
-                                color: _primary,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 14,
+                            Flexible(
+                              child: Text(
+                                _budget(project),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                                style: const TextStyle(
+                                  color: _primary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
                               ),
                             ),
                           ],
