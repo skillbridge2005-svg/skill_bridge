@@ -6,6 +6,19 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../localization/app_localizations.dart';
+import 'initial_project_estimate_screen.dart';
+
+// ================================================================
+// DESIGN TOKENS — MATCH CLIENT HOME THEME
+// ================================================================
+
+const _kPrimaryBlue = Color(0xFF2563EB);
+const _kSecondaryIndigo = Color(0xFF4F46E5);
+const _kTextDark = Color(0xFF101828);
+const _kTextSecondary = Color(0xFF667085);
+const _kBackground = Color(0xFFF5F7FB);
+const _kCardBorder = Color(0xFFE5EAF2);
+const _kSelectedBackground = Color(0xFFEFF4FF);
 
 class AIProjectAssistantScreen extends StatefulWidget {
   final String title;
@@ -93,7 +106,14 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: _kTextDark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       );
   }
 
@@ -469,14 +489,95 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     }
   }
 
+  // ================================================================
+  // REUSABLE THEME STYLES
+  // ================================================================
+
+  InputDecoration _fieldDecoration({
+    String? labelText,
+    Widget? prefixIcon,
+    Widget? suffixIcon,
+    String? hintText,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      prefixIcon: prefixIcon,
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: Colors.white,
+      alignLabelWithHint: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      labelStyle: const TextStyle(color: _kTextSecondary),
+      hintStyle: const TextStyle(color: Color(0xFF98A2B3)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _kCardBorder),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _kCardBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _kPrimaryBlue, width: 1.6),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFDC2626)),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFDC2626), width: 1.6),
+      ),
+      counterStyle: const TextStyle(color: _kTextSecondary),
+    );
+  }
+
+  ButtonStyle _primaryButtonStyle({
+    double radius = 14,
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 18,
+      vertical: 14,
+    ),
+  }) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: _kPrimaryBlue,
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: const Color(0xFFB8CCF8),
+      disabledForegroundColor: Colors.white,
+      elevation: 0,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+    );
+  }
+
   Widget _sectionTitle(String title, IconData icon) {
     return Row(
       children: [
-        Icon(icon, size: 21, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: _kSelectedBackground,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, size: 21, color: _kPrimaryBlue),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: _kTextDark,
+              letterSpacing: -0.2,
+            ),
+          ),
         ),
       ],
     );
@@ -493,15 +594,20 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+            color: _kTextDark,
+          ),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
           maxLines: maxLines,
-          decoration: InputDecoration(
-            border: const OutlineInputBorder(),
-            alignLabelWithHint: true,
-            contentPadding: const EdgeInsets.all(14),
+          style: const TextStyle(fontSize: 14, height: 1.5, color: _kTextDark),
+          decoration: _fieldDecoration(
             suffixIcon: IconButton(
               onPressed: () {
                 debugPrint('AI DEBUG: Sparkle icon tapped');
@@ -523,29 +629,30 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _kPrimaryBlue,
+                      ),
                     )
-                  : const Icon(Icons.auto_awesome),
+                  : const Icon(Icons.auto_awesome, color: _kPrimaryBlue),
             ),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Row(
           children: [
             Icon(
               isGenerating ? Icons.hourglass_top : Icons.auto_awesome,
               size: 15,
+              color: _kPrimaryBlue,
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: 6),
             Expanded(
               child: Text(
                 isGenerating
                     ? 'Generating with Gemini AI...'
                     : 'Tap the sparkle icon to generate with AI.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                style: const TextStyle(fontSize: 12, color: _kTextSecondary),
               ),
             ),
           ],
@@ -563,13 +670,29 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kCardBorder),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x080F172A),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Theme.of(context).colorScheme.primary),
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _kSelectedBackground,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: _kPrimaryBlue),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -579,11 +702,19 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   title,
                   style: const TextStyle(
                     fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
+                    color: _kTextSecondary,
                   ),
                 ),
-                const SizedBox(height: 5),
-                SelectableText(value, style: const TextStyle(fontSize: 14)),
+                const SizedBox(height: 6),
+                SelectableText(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: _kTextDark,
+                  ),
+                ),
               ],
             ),
           ),
@@ -597,20 +728,32 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: Theme.of(context).colorScheme.secondaryContainer,
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kCardBorder),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x080F172A),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
             children: [
-              Icon(Icons.calculate_outlined),
+              Icon(Icons.calculate_outlined, color: _kPrimaryBlue),
               SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Initial Project Estimate',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: _kTextDark,
+                  ),
                 ),
               ),
             ],
@@ -619,12 +762,26 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
           const Text(
             'Your project has been analyzed. Use the results to help '
             'prepare an initial development estimate.',
+            style: TextStyle(color: _kTextSecondary, height: 1.5),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'This analysis is advisory only. Validate the project scope, '
-            'development effort, and service costs before deciding the final price.',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _kSelectedBackground,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'This analysis is advisory only. Validate the project scope, '
+              'development effort, and service costs before deciding the final price.',
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+                color: _kTextDark,
+              ),
+            ),
           ),
         ],
       ),
@@ -638,452 +795,558 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.aiProjectAssistant)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                gradient: LinearGradient(
-                  colors: [
-                    Theme.of(context).colorScheme.primaryContainer,
-                    Theme.of(context).colorScheme.secondaryContainer,
-                  ],
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Theme.of(context).colorScheme.primary,
+      backgroundColor: _kBackground,
+      appBar: AppBar(
+        title: Text(
+          l10n.aiProjectAssistant,
+          style: const TextStyle(
+            color: _kTextDark,
+            fontWeight: FontWeight.w800,
+            fontSize: 19,
+          ),
+        ),
+        backgroundColor: _kBackground,
+        foregroundColor: _kTextDark,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _AmbientPainter()),
+            ),
+          ),
+          SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(22),
+                    gradient: const LinearGradient(
+                      colors: [_kPrimaryBlue, _kSecondaryIndigo],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                    child: Icon(
-                      Icons.auto_awesome,
-                      color: Theme.of(context).colorScheme.onPrimary,
-                      size: 26,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'AI Project Assistant',
-                    style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create project descriptions, detailed requirements, '
-                    'and technology recommendations using Gemini AI.',
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 25),
-
-            _sectionTitle('Project Information', Icons.description_outlined),
-
-            const SizedBox(height: 14),
-
-            _infoCard(
-              title: 'Selected Categories',
-              value: widget.categories.isEmpty
-                  ? 'No categories selected'
-                  : widget.categories.join(', '),
-              icon: Icons.category_outlined,
-            ),
-
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: _titleController,
-              maxLength: 150,
-              decoration: const InputDecoration(
-                labelText: 'Project Title',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.title),
-              ),
-              onChanged: (_) {
-                if (_analyzed) {
-                  setState(() {
-                    _analyzed = false;
-                    _analysis = '';
-                  });
-                }
-              },
-            ),
-
-            const SizedBox(height: 25),
-
-            _sectionTitle('Project Description', Icons.article_outlined),
-
-            const SizedBox(height: 14),
-
-            _editableField(
-              label: 'Description',
-              controller: _descriptionController,
-              maxLines: 6,
-              onGenerate: _generateDescription,
-              buttonText: 'Generate description with AI',
-              isGenerating: _generatingDescription,
-            ),
-
-            const SizedBox(height: 25),
-
-            _sectionTitle('Project Requirements', Icons.checklist_outlined),
-
-            const SizedBox(height: 14),
-
-            _editableField(
-              label: 'Requirements',
-              controller: _requirementsController,
-              maxLines: 7,
-              onGenerate: _generateRequirements,
-              buttonText: 'Generate requirements with AI',
-              isGenerating: _generatingRequirements,
-            ),
-
-            const SizedBox(height: 12),
-
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: _generatingRequirements
-                    ? null
-                    : _generateRequirements,
-                icon: _generatingRequirements
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.auto_awesome),
-                label: Text(
-                  _generatingRequirements
-                      ? 'Generating Requirements...'
-                      : 'Generate Requirements with AI',
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 25),
-
-            _sectionTitle('Suggested Technologies', Icons.code_outlined),
-
-            const SizedBox(height: 14),
-
-            _editableField(
-              label: 'Technologies / Skills',
-              controller: _technologiesController,
-              maxLines: 5,
-              onGenerate: _generateTechnologies,
-              buttonText: 'Suggest technologies with AI',
-              isGenerating: _generatingTechnologies,
-            ),
-
-            const SizedBox(height: 25),
-
-            _sectionTitle('AI Project Design', Icons.auto_awesome),
-
-            const SizedBox(height: 14),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                color: Theme.of(context).colorScheme.surface,
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(
-                      Icons.palette_outlined,
-                      size: 26,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  const Text(
-                    'Generate Your Project Design',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'AI will turn your requirements into a multi-page software '
-                    'design: several key screens as high-fidelity UI images.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.5,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  if (_generatedPages.isNotEmpty) ...[
-                    Text(
-                      _generatedPages[_designPageIndex].label,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x222563EB),
+                        blurRadius: 24,
+                        offset: Offset(0, 10),
                       ),
-                    ),
-                    if (_generatedPages[_designPageIndex]
-                        .purpose
-                        .isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        _generatedPages[_designPageIndex].purpose,
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.20),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'AI Project Assistant',
                         style: TextStyle(
-                          fontSize: 12.5,
-                          height: 1.4,
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurfaceVariant,
+                          fontSize: 23,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Create project descriptions, detailed requirements, '
+                        'and technology recommendations using Gemini AI.',
+                        style: TextStyle(
+                          color: Color(0xFFEFF4FF),
+                          fontSize: 14,
+                          height: 1.6,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: 420,
-                      child: PageView.builder(
-                        itemCount: _generatedPages.length,
-                        onPageChanged: (index) {
-                          setState(() {
-                            _designPageIndex = index;
-                          });
-                        },
-                        itemBuilder: (context, index) {
-                          final page = _generatedPages[index];
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: ColoredBox(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest,
-                              child: Image.memory(
-                                page.bytes,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return const Padding(
-                                    padding: EdgeInsets.all(20),
-                                    child: Text(
-                                      'Unable to display this page image.',
-                                    ),
-                                  );
-                                },
-                              ),
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                _sectionTitle(
+                  'Project Information',
+                  Icons.description_outlined,
+                ),
+
+                const SizedBox(height: 14),
+
+                _infoCard(
+                  title: 'Selected Categories',
+                  value: widget.categories.isEmpty
+                      ? 'No categories selected'
+                      : widget.categories.join(', '),
+                  icon: Icons.category_outlined,
+                ),
+
+                const SizedBox(height: 14),
+
+                TextField(
+                  controller: _titleController,
+                  maxLength: 150,
+                  style: const TextStyle(color: _kTextDark, fontSize: 14),
+                  decoration: _fieldDecoration(
+                    labelText: 'Project Title',
+                    prefixIcon: const Icon(Icons.title, color: _kPrimaryBlue),
+                  ),
+                  onChanged: (_) {
+                    if (_analyzed) {
+                      setState(() {
+                        _analyzed = false;
+                        _analysis = '';
+                      });
+                    }
+                  },
+                ),
+
+                const SizedBox(height: 25),
+
+                _sectionTitle('Project Description', Icons.article_outlined),
+
+                const SizedBox(height: 14),
+
+                _editableField(
+                  label: 'Description',
+                  controller: _descriptionController,
+                  maxLines: 6,
+                  onGenerate: _generateDescription,
+                  buttonText: 'Generate description with AI',
+                  isGenerating: _generatingDescription,
+                ),
+
+                const SizedBox(height: 25),
+
+                _sectionTitle('Project Requirements', Icons.checklist_outlined),
+
+                const SizedBox(height: 14),
+
+                _editableField(
+                  label: 'Requirements',
+                  controller: _requirementsController,
+                  maxLines: 7,
+                  onGenerate: _generateRequirements,
+                  buttonText: 'Generate requirements with AI',
+                  isGenerating: _generatingRequirements,
+                ),
+
+                const SizedBox(height: 12),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _generatingRequirements
+                        ? null
+                        : _generateRequirements,
+                    icon: _generatingRequirements
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _kPrimaryBlue,
                             ),
-                          );
-                        },
+                          )
+                        : const Icon(Icons.auto_awesome, color: _kPrimaryBlue),
+                    label: Text(
+                      _generatingRequirements
+                          ? 'Generating Requirements...'
+                          : 'Generate Requirements with AI',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _kPrimaryBlue,
+                      side: const BorderSide(color: _kPrimaryBlue),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(_generatedPages.length, (index) {
-                        final selected = index == _designPageIndex;
-                        return Container(
-                          width: selected ? 18 : 8,
-                          height: 8,
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(
-                                    context,
-                                  ).colorScheme.outlineVariant,
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.check_circle,
-                          color: Colors.green,
-                          size: 20,
+                  ),
+                ),
+
+                const SizedBox(height: 25),
+
+                _sectionTitle('Suggested Technologies', Icons.code_outlined),
+
+                const SizedBox(height: 14),
+
+                _editableField(
+                  label: 'Technologies / Skills',
+                  controller: _technologiesController,
+                  maxLines: 5,
+                  onGenerate: _generateTechnologies,
+                  buttonText: 'Suggest technologies with AI',
+                  isGenerating: _generatingTechnologies,
+                ),
+
+                const SizedBox(height: 25),
+
+                _sectionTitle('AI Project Design', Icons.auto_awesome),
+
+                const SizedBox(height: 14),
+
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(22),
+                    color: Colors.white,
+                    border: Border.all(color: _kCardBorder),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x080F172A),
+                        blurRadius: 16,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: _kSelectedBackground,
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Multi-page design ready • '
-                            '${_designPageIndex + 1} of ${_generatedPages.length}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                        child: const Icon(
+                          Icons.palette_outlined,
+                          size: 26,
+                          color: _kPrimaryBlue,
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      const Text(
+                        'Generate Your Project Design',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: _kTextDark,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      const Text(
+                        'AI will turn your requirements into a multi-page software '
+                        'design: several key screens as high-fidelity UI images.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.6,
+                          color: _kTextSecondary,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      if (_generatedPages.isNotEmpty) ...[
+                        Text(
+                          _generatedPages[_designPageIndex].label,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: _kTextDark,
+                          ),
+                        ),
+                        if (_generatedPages[_designPageIndex]
+                            .purpose
+                            .isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            _generatedPages[_designPageIndex].purpose,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              height: 1.4,
+                              color: _kTextSecondary,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 420,
+                          child: PageView.builder(
+                            itemCount: _generatedPages.length,
+                            onPageChanged: (index) {
+                              setState(() {
+                                _designPageIndex = index;
+                              });
+                            },
+                            itemBuilder: (context, index) {
+                              final page = _generatedPages[index];
+                              return ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: ColoredBox(
+                                  color: const Color(0xFFF8FAFC),
+                                  child: Image.memory(
+                                    page.bytes,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(20),
+                                        child: Text(
+                                          'Unable to display this page image.',
+                                          style: TextStyle(
+                                            color: _kTextSecondary,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(_generatedPages.length, (
+                            index,
+                          ) {
+                            final selected = index == _designPageIndex;
+                            return Container(
+                              width: selected ? 18 : 8,
+                              height: 8,
+                              margin: const EdgeInsets.symmetric(horizontal: 3),
+                              decoration: BoxDecoration(
+                                color: selected ? _kPrimaryBlue : _kCardBorder,
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                            );
+                          }),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.check_circle,
+                              color: Color(0xFF16A34A),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Multi-page design ready • '
+                                '${_designPageIndex + 1} of ${_generatedPages.length}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: _kTextDark,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton.icon(
+                          onPressed: _generatingDesign ? null : _generateDesign,
+                          icon: _generatingDesign
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  _generatedPages.isEmpty
+                                      ? Icons.auto_awesome
+                                      : Icons.refresh,
+                                ),
+                          label: Text(
+                            _generatingDesign
+                                ? 'Generating Multi-page Design...'
+                                : _generatedPages.isEmpty
+                                ? 'Generate Design with AI'
+                                : 'Regenerate Pages',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: _primaryButtonStyle(
+                            radius: 14,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      if (_generatingDesign) ...[
+                        const SizedBox(height: 12),
+                        const LinearProgressIndicator(
+                          color: _kPrimaryBlue,
+                          backgroundColor: _kSelectedBackground,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'AI is designing multiple software pages from your '
+                          'requirements. This can take a minute.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.5,
+                            color: _kTextSecondary,
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 25),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton.icon(
+                    onPressed:
+                        _analyzing ||
+                            _generatingDescription ||
+                            _generatingRequirements ||
+                            _generatingTechnologies ||
+                            _generatingDesign
+                        ? null
+                        : _analyzeProject,
+                    icon: _analyzing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.psychology_outlined),
+                    label: Text(
+                      _analyzing
+                          ? 'Analyzing Requirements...'
+                          : 'Analyze Project with AI',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
+                    style: _primaryButtonStyle(radius: 15),
+                  ),
+                ),
+
+                if (_analyzed) ...[
+                  const SizedBox(height: 25),
+
+                  _sectionTitle('AI Analysis', Icons.psychology_outlined),
+
+                  const SizedBox(height: 14),
+
+                  _infoCard(
+                    title: 'AI Project Analysis',
+                    value: _analysis,
+                    icon: Icons.auto_awesome,
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  _estimatePreview(),
+
+                  const SizedBox(height: 20),
 
                   SizedBox(
                     width: double.infinity,
-                    height: 50,
+                    height: 54,
                     child: ElevatedButton.icon(
-                      onPressed: _generatingDesign ? null : _generateDesign,
-                      icon: _generatingDesign
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              _generatedPages.isEmpty
-                                  ? Icons.auto_awesome
-                                  : Icons.refresh,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InitialProjectEstimateScreen(
+                              title: _titleController.text.trim(),
+                              categories: widget.categories,
+                              description: _descriptionController.text.trim(),
+                              requirements: _requirementsController.text.trim(),
+                              technologies: _technologiesController.text.trim(),
+                              analysis: _analysis,
                             ),
-                      label: Text(
-                        _generatingDesign
-                            ? 'Generating Multi-page Design...'
-                            : _generatedPages.isEmpty
-                            ? 'Generate Design with AI'
-                            : 'Regenerate Pages',
-                        style: const TextStyle(
-                          fontSize: 14,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text(
+                        'Continue to Initial Estimate',
+                        style: TextStyle(
+                          fontSize: 16,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      style: _primaryButtonStyle(radius: 15),
                     ),
                   ),
-
-                  if (_generatingDesign) ...[
-                    const SizedBox(height: 12),
-                    const LinearProgressIndicator(),
-                    const SizedBox(height: 8),
-                    Text(
-                      'AI is designing multiple software pages from your '
-                      'requirements. This can take a minute.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ],
-              ),
+
+                const SizedBox(height: 20),
+              ],
             ),
-
-            const SizedBox(height: 25),
-
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton.icon(
-                onPressed:
-                    _analyzing ||
-                        _generatingDescription ||
-                        _generatingRequirements ||
-                        _generatingTechnologies ||
-                        _generatingDesign
-                    ? null
-                    : _analyzeProject,
-                icon: _analyzing
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.psychology_outlined),
-                label: Text(
-                  _analyzing
-                      ? 'Analyzing Requirements...'
-                      : 'Analyze Project with AI',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-
-            if (_analyzed) ...[
-              const SizedBox(height: 25),
-
-              _sectionTitle('AI Analysis', Icons.psychology_outlined),
-
-              const SizedBox(height: 14),
-
-              _infoCard(
-                title: 'AI Project Analysis',
-                value: _analysis,
-                icon: Icons.auto_awesome,
-              ),
-
-              const SizedBox(height: 20),
-
-              _estimatePreview(),
-
-              const SizedBox(height: 20),
-
-              SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    _showMessage(
-                      'Analysis complete. Initial cost estimation '
-                      'integration is not implemented yet.',
-                    );
-                  },
-                  icon: const Icon(Icons.arrow_forward),
-                  label: const Text(
-                    'Continue to Initial Estimate',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 20),
-
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context, {
-                    'description': _descriptionController.text.trim(),
-                    'requirements': _requirementsController.text.trim(),
-                    'technologies': _technologiesController.text.trim(),
-                  });
-                },
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text(
-                  'Use This Content',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _AmbientPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+
+    paint.color = const Color(0x0D2563EB);
+    canvas.drawCircle(
+      Offset(size.width * 0.88, size.height * 0.10),
+      190,
+      paint,
+    );
+
+    paint.color = const Color(0x087C3AED);
+    canvas.drawCircle(
+      Offset(size.width * 0.04, size.height * 0.76),
+      150,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _AmbientPainter oldDelegate) => false;
 }
 
 class _GeneratedDesignPage {
