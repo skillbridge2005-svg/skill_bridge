@@ -1,7 +1,11 @@
 
 require("dotenv").config();
 
-const { initializeApp } = require("firebase-admin/app");
+const {
+  onDocumentCreated,
+} = require("firebase-functions/v2/firestore");
+
+const {initializeApp} = require("firebase-admin/app");
 const {
   FieldValue,
   getFirestore,
@@ -9,7 +13,7 @@ const {
 
 const crypto = require("crypto");
 
-const { setGlobalOptions } = require("firebase-functions");
+const {setGlobalOptions} = require("firebase-functions");
 const {
   onCall,
   HttpsError,
@@ -17,7 +21,7 @@ const {
 
 const logger = require("firebase-functions/logger");
 const Razorpay = require("razorpay");
-const { GoogleGenAI } = require("@google/genai");
+const {GoogleGenAI} = require("@google/genai");
 
 setGlobalOptions({
   maxInstances: 10,
@@ -231,6 +235,13 @@ const razorpay = new Razorpay({
 |--------------------------------------------------------------------------
 */
 
+
+/**
+ * Gets the project payment amount from available fields.
+ *
+ * @param {Object} projectData - Project data with amount fields.
+ * @return {number|null} Positive amount, or null if unavailable.
+ */
 function getProjectAmount(projectData) {
   const possibleAmounts = [
     projectData.budget,
@@ -251,6 +262,7 @@ function getProjectAmount(projectData) {
   return null;
 }
 
+
 /*
 |--------------------------------------------------------------------------
 | Create Razorpay Order
@@ -260,17 +272,17 @@ function getProjectAmount(projectData) {
 exports.createRazorpayOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to create a payment order."
+        "unauthenticated",
+        "You must be logged in to create a payment order.",
     );
   }
 
-  const { projectId } = request.data || {};
+  const {projectId} = request.data || {};
 
   if (!projectId || typeof projectId !== "string") {
     throw new HttpsError(
-      "invalid-argument",
-      "A valid project ID is required."
+        "invalid-argument",
+        "A valid project ID is required.",
     );
   }
 
@@ -278,15 +290,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
   try {
     const projectReference = db
-      .collection("projects")
-      .doc(projectId);
+        .collection("projects")
+        .doc(projectId);
 
     const projectSnapshot = await projectReference.get();
 
     if (!projectSnapshot.exists) {
       throw new HttpsError(
-        "not-found",
-        "The SkillBridge project was not found."
+          "not-found",
+          "The SkillBridge project was not found.",
       );
     }
 
@@ -294,8 +306,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
     if (projectData.clientId !== clientId) {
       throw new HttpsError(
-        "permission-denied",
-        "You are not authorized to make a payment for this project."
+          "permission-denied",
+          "You are not authorized to make a payment for this project.",
       );
     }
 
@@ -307,8 +319,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
       projectAmount <= 0
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The project does not have a valid payment amount."
+          "failed-precondition",
+          "The project does not have a valid payment amount.",
       );
     }
 
@@ -319,15 +331,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
       amountInPaise <= 0
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The project payment amount is invalid."
+          "failed-precondition",
+          "The project payment amount is invalid.",
       );
     }
 
     if (projectData.paymentStatus === "paid") {
       throw new HttpsError(
-        "failed-precondition",
-        "This project has already been paid."
+          "failed-precondition",
+          "This project has already been paid.",
       );
     }
 
@@ -363,8 +375,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      "Unable to create Razorpay order."
+        "internal",
+        "Unable to create Razorpay order.",
     );
   }
 });
@@ -378,8 +390,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 exports.verifyRazorpayPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to verify a payment."
+        "unauthenticated",
+        "You must be logged in to verify a payment.",
     );
   }
 
@@ -398,24 +410,24 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
     !/^[a-fA-F0-9]{64}$/.test(razorpaySignature)
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "Payment verification data is incomplete."
+        "invalid-argument",
+        "Payment verification data is incomplete.",
     );
   }
 
   const clientId = request.auth.uid;
 
   const paymentReference = db
-    .collection("payments")
-    .doc(razorpayPaymentId);
+      .collection("payments")
+      .doc(razorpayPaymentId);
 
   try {
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!keySecret) {
       throw new HttpsError(
-        "internal",
-        "Payment verification is not configured."
+          "internal",
+          "Payment verification is not configured.",
       );
     }
 
@@ -423,13 +435,13 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 1. Verify Razorpay signature.
      */
     const generatedSignature = crypto
-      .createHmac("sha256", keySecret)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest("hex");
+        .createHmac("sha256", keySecret)
+        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+        .digest("hex");
 
     const isValid = crypto.timingSafeEqual(
-      Buffer.from(generatedSignature, "hex"),
-      Buffer.from(razorpaySignature, "hex")
+        Buffer.from(generatedSignature, "hex"),
+        Buffer.from(razorpaySignature, "hex"),
     );
 
     if (!isValid) {
@@ -440,8 +452,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       });
 
       throw new HttpsError(
-        "permission-denied",
-        "Payment verification failed."
+          "permission-denied",
+          "Payment verification failed.",
       );
     }
 
@@ -462,8 +474,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (!matchesVerifiedPayment) {
         throw new HttpsError(
-          "already-exists",
-          "A conflicting payment record already exists."
+            "already-exists",
+            "A conflicting payment record already exists.",
         );
       }
 
@@ -495,8 +507,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       });
 
       throw new HttpsError(
-        "permission-denied",
-        "This payment order does not belong to you."
+          "permission-denied",
+          "This payment order does not belong to you.",
       );
     }
 
@@ -510,8 +522,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       !projectId
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "Project information is missing from the payment order."
+          "failed-precondition",
+          "Project information is missing from the payment order.",
       );
     }
 
@@ -524,8 +536,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       order.currency !== "INR"
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The payment order has an invalid amount or currency."
+          "failed-precondition",
+          "The payment order has an invalid amount or currency.",
       );
     }
 
@@ -533,7 +545,7 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 7. Fetch actual Razorpay payment.
      */
     const payment = await razorpay.payments.fetch(
-      razorpayPaymentId
+        razorpayPaymentId,
     );
 
     /*
@@ -541,8 +553,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.order_id !== razorpayOrderId) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment does not belong to the specified order."
+          "failed-precondition",
+          "Payment does not belong to the specified order.",
       );
     }
 
@@ -551,8 +563,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.status !== "captured") {
       throw new HttpsError(
-        "failed-precondition",
-        `Payment is not captured. Current status: ${payment.status}`
+          "failed-precondition",
+          `Payment is not captured. Current status: ${payment.status}`,
       );
     }
 
@@ -561,8 +573,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.amount !== order.amount) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment amount does not match the order amount."
+          "failed-precondition",
+          "Payment amount does not match the order amount.",
       );
     }
 
@@ -571,8 +583,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.currency !== order.currency) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment currency does not match the order currency."
+          "failed-precondition",
+          "Payment currency does not match the order currency.",
       );
     }
 
@@ -582,8 +594,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 12. Prepare project reference.
      */
     const projectReference = db
-      .collection("projects")
-      .doc(projectId);
+        .collection("projects")
+        .doc(projectId);
 
     /*
      * 13. Atomic Firestore transaction.
@@ -599,8 +611,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (!projectSnapshot.exists) {
         throw new HttpsError(
-          "not-found",
-          "The SkillBridge project was not found."
+            "not-found",
+            "The SkillBridge project was not found.",
         );
       }
 
@@ -608,8 +620,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (projectData.clientId !== clientId) {
         throw new HttpsError(
-          "permission-denied",
-          "You are not authorized to pay for this project."
+            "permission-denied",
+            "You are not authorized to pay for this project.",
         );
       }
 
@@ -617,19 +629,19 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (projectAmount === null) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project does not have a valid payment amount."
+            "failed-precondition",
+            "The project does not have a valid payment amount.",
         );
       }
 
       const expectedAmountInPaise = Math.round(
-        projectAmount * 100
+          projectAmount * 100,
       );
 
       if (expectedAmountInPaise !== order.amount) {
         throw new HttpsError(
-          "failed-precondition",
-          "Payment amount does not match the project amount."
+            "failed-precondition",
+            "Payment amount does not match the project amount.",
         );
       }
 
@@ -649,8 +661,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
         if (!matchesVerifiedPayment) {
           throw new HttpsError(
-            "already-exists",
-            "A conflicting payment record already exists."
+              "already-exists",
+              "A conflicting payment record already exists.",
           );
         }
       } else {
@@ -702,8 +714,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      "Unable to verify and save payment."
+        "internal",
+        "Unable to verify and save payment.",
     );
   }
 });
@@ -715,139 +727,139 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 */
 
 exports.generateProjectContent = onCall(
-  {
-    maxInstances: 5,
-    timeoutSeconds: 120,
-  },
-  async (request) => {
+    {
+      maxInstances: 5,
+      timeoutSeconds: 120,
+    },
+    async (request) => {
     /*
      * 1. Authentication.
      */
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "Please log in to use the AI Project Assistant."
-      );
-    }
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Please log in to use the AI Project Assistant.",
+        );
+      }
 
-    /*
+      /*
      * 2. Read request data.
      */
-    const {
-      title,
-      categories,
-      description,
-      requirements,
-      contentType,
-    } = request.data || {};
+      const {
+        title,
+        categories,
+        description,
+        requirements,
+        contentType,
+      } = request.data || {};
 
-    /*
+      /*
      * 3. Validate title.
      */
-    if (
-      typeof title !== "string" ||
+      if (
+        typeof title !== "string" ||
       !title.trim() ||
       title.trim().length > 150
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter a valid project title."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Enter a valid project title.",
+        );
+      }
 
-    /*
+      /*
      * 4. Validate categories.
      */
-    if (
-      !Array.isArray(categories) ||
+      if (
+        !Array.isArray(categories) ||
       categories.length > 10 ||
       !categories.every(
-        (category) =>
-          typeof category === "string" &&
-          category.length <= 80
+          (category) =>
+            typeof category === "string" &&
+          category.length <= 80,
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project categories are invalid."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project categories are invalid.",
+        );
+      }
 
-    /*
+      /*
      * 5. Validate content type.
      */
-    const supportedTypes = [
-      "description",
-      "requirements",
-      "technologies",
-      "analysis",
-    ];
+      const supportedTypes = [
+        "description",
+        "requirements",
+        "technologies",
+        "analysis",
+      ];
 
-    if (!supportedTypes.includes(contentType)) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Unsupported project content type."
-      );
-    }
+      if (!supportedTypes.includes(contentType)) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Unsupported project content type.",
+        );
+      }
 
-    /*
+      /*
      * 6. Validate optional fields.
      */
-    if (
-      description != null &&
+      if (
+        description != null &&
       (
         typeof description !== "string" ||
         description.length > 5000
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project description is too long."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project description is too long.",
+        );
+      }
 
-    if (
-      requirements != null &&
+      if (
+        requirements != null &&
       (
         typeof requirements !== "string" ||
         requirements.length > 5000
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project requirements are too long."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project requirements are too long.",
+        );
+      }
 
-    /*
+      /*
      * 7. Check Gemini API key.
      */
-    const ai = getGeminiClient();
+      const ai = getGeminiClient();
 
-    if (!ai) {
-      logger.error("GEMINI_API_KEY is not configured.");
+      if (!ai) {
+        logger.error("GEMINI_API_KEY is not configured.");
 
-      throw new HttpsError(
-        "failed-precondition",
-        "AI generation is not configured."
-      );
-    }
+        throw new HttpsError(
+            "failed-precondition",
+            "AI generation is not configured.",
+        );
+      }
 
-    /*
+      /*
      * 8. Prepare common project information.
      */
-    const projectDetails = `
+      const projectDetails = `
 Project title: ${title.trim()}
 Categories: ${categories.join(", ") || "Not specified"}
 Description: ${description || "Not provided"}
 Requirements: ${requirements || "Not provided"}
 `;
 
-    /*
+      /*
      * 9. Prepare prompts for all supported operations.
      */
-    const prompts = {
-      description: `
+      const prompts = {
+        description: `
 You are a professional software project planning assistant.
 
 Based on the following project details, create a clear and
@@ -863,7 +875,7 @@ Make the description specific to this project.
 Return only the project description.
 `,
 
-      requirements: `
+        requirements: `
 You are an experienced software requirements analyst.
 
 Create detailed, realistic requirements for this project.
@@ -880,7 +892,7 @@ Avoid generic filler and unrelated features.
 Return only the numbered requirements.
 `,
 
-      technologies: `
+        technologies: `
 You are an experienced software technology advisor.
 
 Recommend suitable technologies for this project.
@@ -896,7 +908,7 @@ Do not assume Flutter or Firebase is required unless suitable.
 Return a concise, organized list of recommendations.
 `,
 
-      analysis: `
+        analysis: `
 You are an experienced software architect and project analyst.
 
 Analyze the proposed project.
@@ -918,70 +930,70 @@ Do not claim that development or testing has already occurred.
 
 Return the analysis in clear, readable sections.
 `,
-    };
+      };
 
-    /*
+      /*
      * 10. Generate content with Gemini.
      */
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: prompts[contentType],
-        config: {
-          temperature: 0.4,
-          maxOutputTokens: 8192,
-          thinkingConfig: {
-            thinkingLevel: "MINIMAL",
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: prompts[contentType],
+          config: {
+            temperature: 0.4,
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingLevel: "MINIMAL",
+            },
           },
-        },
-      });
-
-      const generatedText = extractGeneratedText(response);
-
-      if (!generatedText) {
-        const finishReason =
-          response?.candidates?.[0]?.finishReason || "unknown";
-
-        logger.error("AI returned empty content", {
-          contentType,
-          finishReason,
         });
 
-        throw new Error(
-          `The AI returned an empty response (${finishReason}).`
+        const generatedText = extractGeneratedText(response);
+
+        if (!generatedText) {
+          const finishReason =
+          response?.candidates?.[0]?.finishReason || "unknown";
+
+          logger.error("AI returned empty content", {
+            contentType,
+            finishReason,
+          });
+
+          throw new Error(
+              `The AI returned an empty response (${finishReason}).`,
+          );
+        }
+
+        logger.info("AI project content generated", {
+          contentType: contentType,
+          userId: request.auth.uid,
+        });
+
+        return {
+          success: true,
+          contentType: contentType,
+          content: generatedText,
+        };
+      } catch (error) {
+        logger.error("AI project content generation failed", {
+          contentType: contentType,
+          errorName: error?.name,
+          message: error?.message,
+          status: error?.status,
+          code: error?.code,
+          stack: error?.stack,
+        });
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError(
+            "internal",
+            "Unable to generate project content. Please try again.",
         );
       }
-
-      logger.info("AI project content generated", {
-        contentType: contentType,
-        userId: request.auth.uid,
-      });
-
-      return {
-        success: true,
-        contentType: contentType,
-        content: generatedText,
-      };
-    } catch (error) {
-      logger.error("AI project content generation failed", {
-        contentType: contentType,
-        errorName: error?.name,
-        message: error?.message,
-        status: error?.status,
-        code: error?.code,
-        stack: error?.stack,
-      });
-
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-
-      throw new HttpsError(
-        "internal",
-        "Unable to generate project content. Please try again."
-      );
-    }
-  }
+    },
 );
 
 /*
@@ -991,102 +1003,102 @@ Return the analysis in clear, readable sections.
 */
 
 exports.generateProjectDesign = onCall(
-  {
-    maxInstances: 5,
-    timeoutSeconds: 240,
-  },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "Please log in to generate a project design."
-      );
-    }
+    {
+      maxInstances: 5,
+      timeoutSeconds: 240,
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Please log in to generate a project design.",
+        );
+      }
 
-    const {
-      title,
-      categories,
-      description,
-      requirements,
-      technologies,
-    } = request.data || {};
+      const {
+        title,
+        categories,
+        description,
+        requirements,
+        technologies,
+      } = request.data || {};
 
-    if (
-      typeof title !== "string" ||
+      if (
+        typeof title !== "string" ||
       !title.trim() ||
       title.trim().length > 150
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter a valid project title."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Enter a valid project title.",
+        );
+      }
 
-    if (
-      !Array.isArray(categories) ||
+      if (
+        !Array.isArray(categories) ||
       categories.length > 10 ||
       !categories.every(
-        (category) =>
-          typeof category === "string" &&
-          category.length <= 80
+          (category) =>
+            typeof category === "string" &&
+          category.length <= 80,
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project categories are invalid."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project categories are invalid.",
+        );
+      }
 
-    const optionalFields = {
-      description,
-      requirements,
-      technologies,
-    };
+      const optionalFields = {
+        description,
+        requirements,
+        technologies,
+      };
 
-    for (const [field, value] of Object.entries(optionalFields)) {
-      if (
-        value != null &&
+      for (const [field, value] of Object.entries(optionalFields)) {
+        if (
+          value != null &&
         (
           typeof value !== "string" ||
           value.length > 5000
         )
+        ) {
+          throw new HttpsError(
+              "invalid-argument",
+              `Project ${field} is invalid or too long.`,
+          );
+        }
+      }
+
+      if (
+        typeof requirements !== "string" ||
+      !requirements.trim()
       ) {
         throw new HttpsError(
-          "invalid-argument",
-          `Project ${field} is invalid or too long.`
+            "invalid-argument",
+            "Enter project requirements before generating a design.",
         );
       }
-    }
 
-    if (
-      typeof requirements !== "string" ||
-      !requirements.trim()
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter project requirements before generating a design."
-      );
-    }
+      const ai = getGeminiClient();
 
-    const ai = getGeminiClient();
+      if (!ai) {
+        logger.error("GEMINI_API_KEY is not configured.");
 
-    if (!ai) {
-      logger.error("GEMINI_API_KEY is not configured.");
+        throw new HttpsError(
+            "failed-precondition",
+            "AI generation is not configured.",
+        );
+      }
 
-      throw new HttpsError(
-        "failed-precondition",
-        "AI generation is not configured."
-      );
-    }
+      const joinedCategories = categories.join(", ") || "Not specified";
+      const isMobile = joinedCategories.toLowerCase().includes("mobile");
+      const aspectRatio = isMobile ? "9:16" : "16:9";
 
-    const joinedCategories = categories.join(", ") || "Not specified";
-    const isMobile = joinedCategories.toLowerCase().includes("mobile");
-    const aspectRatio = isMobile ? "9:16" : "16:9";
-
-    try {
-      const screenResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: `
+      try {
+        const screenResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: `
 You plan software UI screens from project requirements.
 
 Project title: ${title.trim()}
@@ -1102,22 +1114,22 @@ Each object must have:
 
 Choose the 4 most important user-facing pages for this product.
 `,
-        config: {
-          temperature: 0.2,
-          maxOutputTokens: 800,
-          thinkingConfig: {
-            thinkingLevel: "MINIMAL",
+          config: {
+            temperature: 0.2,
+            maxOutputTokens: 800,
+            thinkingConfig: {
+              thinkingLevel: "MINIMAL",
+            },
           },
-        },
-      });
+        });
 
-      const screens = parseProjectScreens(
-          extractGeneratedText(screenResponse),
-          categories
-      );
+        const screens = parseProjectScreens(
+            extractGeneratedText(screenResponse),
+            categories,
+        );
 
-      const images = await Promise.all(screens.map(async (screen) => {
-        const prompt = `
+        const images = await Promise.all(screens.map(async (screen) => {
+          const prompt = `
 Create one polished, realistic software UI mockup image for a single
 application page. Show a complete high-fidelity ${isMobile ?
     "mobile app" : "web or desktop"} screen with readable layout,
@@ -1139,51 +1151,58 @@ Requirements:
 ${requirements}
 `;
 
-        const generated = await generateOneDesignImage(
-            ai,
-            prompt,
-            aspectRatio
-        );
+          const generated = await generateOneDesignImage(
+              ai,
+              prompt,
+              aspectRatio,
+          );
+
+          return {
+            label: screen.name,
+            purpose: screen.purpose,
+            mimeType: generated.mimeType,
+            imageBase64: generated.imageBase64,
+          };
+        }));
+
+        if (!images.length) {
+          throw new Error("The AI returned no generated project pages.");
+        }
+
+        logger.info("AI multi-page project design generated", {
+          userId: request.auth.uid,
+          pageCount: images.length,
+        });
 
         return {
-          label: screen.name,
-          purpose: screen.purpose,
-          mimeType: generated.mimeType,
-          imageBase64: generated.imageBase64,
+          success: true,
+          imageBase64: images[0].imageBase64,
+          images: images,
         };
-      }));
+      } catch (error) {
+        logger.error("AI project design generation failed", {
+          errorName: error?.name,
+          message: error?.message,
+          status: error?.status,
+          code: error?.code,
+          userId: request.auth.uid,
+        });
 
-      if (!images.length) {
-        throw new Error("The AI returned no generated project pages.");
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError(
+            "internal",
+            "Unable to generate the project design. Please try again.",
+        );
       }
+    },
+);
 
-      logger.info("AI multi-page project design generated", {
-        userId: request.auth.uid,
-        pageCount: images.length,
-      });
-
-      return {
-        success: true,
-        imageBase64: images[0].imageBase64,
-        images: images,
-      };
-    } catch (error) {
-      logger.error("AI project design generation failed", {
-        errorName: error?.name,
-        message: error?.message,
-        status: error?.status,
-        code: error?.code,
-        userId: request.auth.uid,
-      });
-
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-
-      throw new HttpsError(
-        "internal",
-        "Unable to generate the project design. Please try again."
-      );
-    }
-  }
+exports.notifyDevelopersOfNewProject = onDocumentCreated(
+    "projects/{projectId}",
+    async (event) => {
+    // Paste the complete notification implementation here.
+    },
 );
