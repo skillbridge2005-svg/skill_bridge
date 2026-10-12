@@ -321,8 +321,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       return;
     }
 
-    if (target == 'design' &&
-        _requirementsController.text.trim().isEmpty) {
+    if (target == 'design' && _requirementsController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -968,36 +967,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                               ),
 
                               const SizedBox(height: 14),
-
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _openAIAssistant('requirements'),
-                                  icon: const Icon(
-                                    Icons.auto_awesome_rounded,
-                                    size: 20,
-                                  ),
-                                  label: const Text(
-                                    'Generate with AI',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF4F46E5),
-                                    backgroundColor: const Color(0xFFF5F3FF),
-                                    side: const BorderSide(
-                                      color: Color(0xFFE0E7FF),
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),
@@ -1007,7 +976,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                         SizedBox(
                           height: 55,
                           child: FilledButton(
-                            onPressed: _isLoading ? null : _createProject,
+                            onPressed: _isLoading
+                                ? null
+                                : () => _openAIAssistant('requirements'),
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFF4F46E5),
                               disabledBackgroundColor: const Color(0xFFA5B4FC),
@@ -1054,7 +1025,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                         ),
                                         SizedBox(width: 9),
                                         Text(
-                                          'Get Project Estimate',
+                                          'Generate with AI',
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,

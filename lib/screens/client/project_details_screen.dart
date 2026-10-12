@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
+import 'client_applications_screen.dart';
 
 class ProjectDetailsScreen extends StatelessWidget {
   final String projectId;
@@ -31,6 +32,19 @@ class ProjectDetailsScreen extends StatelessWidget {
       default:
         return status;
     }
+  }
+
+  String _formatPlanLabel(String value) {
+    return value
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 
   Color _statusColor(String status) {
@@ -88,6 +102,18 @@ class ProjectDetailsScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) =>
             ClientProjectChat(projectId: projectId, projectTitle: projectTitle),
+      ),
+    );
+  }
+
+  void _openApplications(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientApplicationsScreen(
+          projectId: projectId,
+          projectTitle: projectTitle,
+        ),
       ),
     );
   }
@@ -298,13 +324,58 @@ class ProjectDetailsScreen extends StatelessWidget {
 
               final requirements = data['requirements']?.toString() ?? '';
 
-              final budget = data['budget']?.toString() ?? '';
+              final plan = data['plan'] is Map
+                  ? Map<String, dynamic>.from(data['plan'] as Map)
+                  : <String, dynamic>{};
 
-              final timeline = data['timeline']?.toString() ?? '';
+              final estimate = data['estimate'] is Map
+                  ? Map<String, dynamic>.from(data['estimate'] as Map)
+                  : (plan['estimate'] is Map
+                        ? Map<String, dynamic>.from(plan['estimate'] as Map)
+                        : <String, dynamic>{});
 
+              String firstValidValue(List<dynamic> values) {
+                for (final value in values) {
+                  if (value == null) continue;
+
+                  if (value is num && value <= 0) continue;
+
+                  final text = value.toString().trim();
+                  if (text.isNotEmpty && text.toLowerCase() != 'null') {
+                    return text;
+                  }
+                }
+                return '';
+              }
+
+              final budget = firstValidValue([
+                data['budget'],
+                estimate['totalCost'],
+                estimate['totalBudget'],
+                estimate['budget'],
+                estimate['estimatedCost'],
+                estimate['amount'],
+              ]);
+
+              final timeline = firstValidValue([
+                data['timeline'],
+                estimate['timeline'],
+                estimate['duration'],
+                estimate['estimatedDuration'],
+                plan['timeline'],
+                plan['duration'],
+              ]);
               final status = data['status']?.toString() ?? 'requirement';
 
               final statusColor = _statusColor(status);
+
+              final acceptedScope = data['acceptedScope'] is List
+                  ? List<String>.from(
+                      (data['acceptedScope'] as List).map(
+                        (item) => item.toString(),
+                      ),
+                    )
+                  : <String>[];
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -341,6 +412,13 @@ class ProjectDetailsScreen extends StatelessWidget {
                               builder: (context, actionConstraints) {
                                 final buttons = [
                                   _ActionButton(
+                                    icon: Icons.assignment_outlined,
+                                    title: 'View Applications',
+                                    subtitle: 'Review developer applications',
+                                    onTap: () =>
+                                        _openApplications(context, title),
+                                  ),
+                                  _ActionButton(
                                     icon: Icons.groups_outlined,
                                     title: l10n.projectTeam,
                                     subtitle: _teamSubtitle(context),
@@ -356,19 +434,31 @@ class ProjectDetailsScreen extends StatelessWidget {
 
                                 if (actionConstraints.maxWidth > 650) {
                                   return Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Expanded(child: buttons[0]),
-                                      const SizedBox(width: 14),
-                                      Expanded(child: buttons[1]),
+                                      for (
+                                        int i = 0;
+                                        i < buttons.length;
+                                        i++
+                                      ) ...[
+                                        if (i > 0) const SizedBox(width: 14),
+                                        Expanded(child: buttons[i]),
+                                      ],
                                     ],
                                   );
                                 }
 
                                 return Column(
                                   children: [
-                                    buttons[0],
-                                    const SizedBox(height: 14),
-                                    buttons[1],
+                                    for (
+                                      int i = 0;
+                                      i < buttons.length;
+                                      i++
+                                    ) ...[
+                                      if (i > 0) const SizedBox(height: 14),
+                                      buttons[i],
+                                    ],
                                   ],
                                 );
                               },
@@ -458,6 +548,140 @@ class ProjectDetailsScreen extends StatelessWidget {
                                 isStepActive: _isStepActive,
                               ),
                             ),
+                            const SizedBox(height: 14),
+
+                            if (data['acceptedCost'] == true ||
+                                data['acceptedTimeline'] == true ||
+                                data['acceptedTerms'] == true ||
+                                plan.isNotEmpty ||
+                                estimate.isNotEmpty ||
+                                acceptedScope.isNotEmpty)
+                              _DetailsCard(
+                                title: 'Final Accepted Plan & Estimate',
+                                icon: Icons.task_alt_rounded,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if ((plan['projectSummary']?.toString() ??
+                                            '')
+                                        .isNotEmpty) ...[
+                                      const Text(
+                                        'Project Summary',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(plan['projectSummary'].toString()),
+                                      const SizedBox(height: 14),
+                                    ],
+
+                                    if (acceptedScope.isNotEmpty) ...[
+                                      const Text(
+                                        'Accepted Scope',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (final item in acceptedScope)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 6,
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(
+                                                Icons.check_circle_outline,
+                                                size: 18,
+                                                color: Color(0xFF16A34A),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(child: Text(item)),
+                                            ],
+                                          ),
+                                        ),
+                                      const SizedBox(height: 14),
+                                    ],
+
+                                    if (estimate.isNotEmpty) ...[
+                                      const Text(
+                                        'Estimate Details',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (final entry in estimate.entries)
+                                        if (entry.value != null &&
+                                            entry.value is! Map &&
+                                            entry.value is! List)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    _formatPlanLabel(entry.key),
+                                                    style: const TextStyle(
+                                                      color: Color(0xFF667085),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  flex: 3,
+                                                  child: Text(
+                                                    entry.value.toString(),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                    ],
+
+                                    if (plan['deliveryPhases'] is List &&
+                                        (plan['deliveryPhases'] as List)
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 14),
+                                      const Text(
+                                        'Delivery Phases',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (final phase
+                                          in plan['deliveryPhases'] as List)
+                                        if (phase is Map)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
+                                            ),
+                                            child: Text(
+                                              (phase['name'] ??
+                                                      phase['title'] ??
+                                                      phase.toString())
+                                                  .toString(),
+                                            ),
+                                          )
+                                        else
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
+                                            child: Text(phase.toString()),
+                                          ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                           ],
                         ),
                       ),
