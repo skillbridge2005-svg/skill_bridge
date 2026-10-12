@@ -257,10 +257,10 @@ class _MyApplicationsState extends State<MyApplications> {
                     )
                   else
                     SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        MediaQuery.sizeOf(context).width < 600 ? 16 : 24,
+                      padding: const EdgeInsets.fromLTRB(
+                        24,
                         8,
-                        MediaQuery.sizeOf(context).width < 600 ? 16 : 24,
+                        24,
                         32,
                       ),
                       sliver: SliverList(
@@ -316,14 +316,11 @@ class _MyApplicationsState extends State<MyApplications> {
   }
 
   Widget _buildHeader(int totalApplications) {
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final compact = screenWidth < 600;
-
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 24,
-        compact ? 16 : 24,
-        compact ? 16 : 24,
+      padding: const EdgeInsets.fromLTRB(
+        24,
+        24,
+        24,
         18,
       ),
       child: Column(
@@ -341,14 +338,14 @@ class _MyApplicationsState extends State<MyApplications> {
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(
+              const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'My Applications',
                       style: TextStyle(
-                        fontSize: compact ? 24 : 30,
+                        fontSize: 30,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
                         letterSpacing: -0.8,
@@ -358,7 +355,7 @@ class _MyApplicationsState extends State<MyApplications> {
                     Text(
                       'Track every project you have applied to.',
                       style: TextStyle(
-                        fontSize: compact ? 12 : 14,
+                        fontSize: 14,
                         color: Color(0xFF6B7280),
                       ),
                     ),
@@ -369,7 +366,7 @@ class _MyApplicationsState extends State<MyApplications> {
           ),
           const SizedBox(height: 18),
           Container(
-            padding: EdgeInsets.all(compact ? 14 : 18),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
@@ -429,13 +426,11 @@ class _MyApplicationsState extends State<MyApplications> {
   }
 
   Widget _buildFilters() {
-    final compactScreen = MediaQuery.sizeOf(context).width < 600;
-
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        compactScreen ? 16 : 24,
+      padding: const EdgeInsets.fromLTRB(
+        24,
         0,
-        compactScreen ? 16 : 24,
+        24,
         18,
       ),
       child: LayoutBuilder(
@@ -715,10 +710,8 @@ class _ApplicationCard extends StatelessWidget {
                 : _budget(project.effectiveBudgetMin)
             : 'Budget unavailable';
 
-        final compact = MediaQuery.sizeOf(context).width < 600;
-
         return Container(
-          padding: EdgeInsets.all(compact ? 14 : 20),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
@@ -762,8 +755,8 @@ class _ApplicationCard extends StatelessWidget {
                       children: [
                         Text(
                           title,
-                          style: TextStyle(
-                            fontSize: compact ? 16 : 18,
+                          style: const TextStyle(
+                            fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: Color(0xFF111827),
                           ),
@@ -870,90 +863,45 @@ class _ApplicationCard extends StatelessWidget {
                 color: Color(0xFFE5E7EB),
               ),
               const SizedBox(height: 14),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final compactRow = constraints.maxWidth < 480;
-
-                  final proposedBudget = Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.payments_outlined,
-                        size: 18,
-                        color: Color(0xFF6B7280),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.payments_outlined,
+                    size: 18,
+                    color: Color(0xFF6B7280),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Proposed: ₹${application.proposedBudget.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                  const SizedBox(width: 18),
+                  const Icon(
+                    Icons.timelapse_rounded,
+                    size: 18,
+                    color: Color(0xFF6B7280),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      application.estimatedDuration,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF374151),
                       ),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          'Proposed: ₹${application.proposedBudget.toStringAsFixed(0)}',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF374151),
-                          ),
-                        ),
+                    ),
+                  ),
+                  if (onWithdraw != null)
+                    TextButton(
+                      onPressed: onWithdraw,
+                      child: const Text(
+                        'Withdraw',
                       ),
-                    ],
-                  );
-
-                  final duration = Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.timelapse_rounded,
-                        size: 18,
-                        color: Color(0xFF6B7280),
-                      ),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          application.estimatedDuration,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF374151),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-
-                  if (compactRow) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
-                          spacing: 16,
-                          runSpacing: 10,
-                          children: [proposedBudget, duration],
-                        ),
-                        if (onWithdraw != null) ...[
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: onWithdraw,
-                              child: const Text('Withdraw'),
-                            ),
-                          ),
-                        ],
-                      ],
-                    );
-                  }
-
-                  return Row(
-                    children: [
-                      proposedBudget,
-                      const SizedBox(width: 18),
-                      Expanded(child: duration),
-                      if (onWithdraw != null)
-                        TextButton(
-                          onPressed: onWithdraw,
-                          child: const Text('Withdraw'),
-                        ),
-                    ],
-                  );
-                },
+                    ),
+                ],
               ),
             ],
           ),

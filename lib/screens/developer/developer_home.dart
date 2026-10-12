@@ -11,7 +11,7 @@ import 'teams.dart';
 import '../../models/notification_model.dart';
 import '../../services/notification_service.dart';
 import '../settings/settings_screen.dart';
-import 'notifications_screen.dart';
+
 /// SkillBridge Developer Dashboard
 ///
 /// This screen is intentionally self-contained and uses only Flutter + the
@@ -1489,71 +1489,51 @@ if (index == 4) {
         )
             ? _markAllNotificationsRead
             : null,
-        children: [
-          if (notifications.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(22),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.notifications_none_rounded,
-                    size: 32,
-                    color: _AppColors.muted,
+        children: notifications.isEmpty
+            ? const [
+                Padding(
+                  padding: EdgeInsets.all(22),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.notifications_none_rounded,
+                        size: 32,
+                        color: _AppColors.muted,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'No notifications yet',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'New updates will appear here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _AppColors.muted,
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 8),
-                  Text(
-                    'No notifications yet',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
+                ),
+              ]
+            : notifications
+                .take(8)
+                .map(
+                  (notification) =>
+                      _buildNotificationItem(
+                    notification,
                   ),
-                  SizedBox(height: 4),
-                  Text(
-                    'New updates will appear here.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: _AppColors.muted,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...notifications.take(8).map(_buildNotificationItem),
-          const Divider(height: 12),
-          Align(
-            alignment: Alignment.center,
-            child: TextButton.icon(
-              onPressed: _openAllNotifications,
-              icon: const Icon(Icons.open_in_new_rounded, size: 15),
-              label: const Text('View all notifications'),
-              style: TextButton.styleFrom(
-                foregroundColor: _AppColors.primary,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ),
-        ],
+                )
+                .toList(),
       );
     },
   );
 }
-void _openAllNotifications() {
-  setState(() {
-    _notificationsOpen = false;
-    _messagesOpen = false;
-  });
-
-  Navigator.push(
-    context,
-    MaterialPageRoute<void>(
-      builder: (_) => const NotificationsScreen(),
-    ),
-  );
-}
-
 Future<void> _markNotificationRead(
   NotificationModel notification,
 ) async {

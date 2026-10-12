@@ -1,10 +1,10 @@
 import 'dart:async';
 
+import 'project_details.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
-import 'apply_project.dart';
 
 import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
@@ -245,49 +245,63 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     });
   }
 
-  void _applyFilters() {
-    final query = _searchController.text.trim().toLowerCase();
+ void _applyFilters() {
+  final query = _searchController.text.trim().toLowerCase();
 
-    final filtered = _projectService.filterProjects(
-      _allProjects,
-      technology: _selectedTechnology == 'All' ? null : _selectedTechnology,
-      skill: _selectedSkill == 'All' ? null : _selectedSkill,
-      workMode: _selectedWorkMode == 'All' ? null : _selectedWorkMode,
-      projectType: _selectedProjectType == 'All' ? null : _selectedProjectType,
-      duration: _selectedDuration == 'All' ? null : _selectedDuration,
-      minimumBudget: _minimumBudget,
-      maximumBudget: _maximumBudget,
-    );
+  final filtered = _projectService.filterProjects(
+    _allProjects,
+    technology: _selectedTechnology == 'All'
+        ? null
+        : _selectedTechnology,
+    skill: _selectedSkill == 'All'
+        ? null
+        : _selectedSkill,
+    workMode: _selectedWorkMode == 'All'
+        ? null
+        : _selectedWorkMode,
+    projectType: _selectedProjectType == 'All'
+        ? null
+        : _selectedProjectType,
+    duration: _selectedDuration == 'All'
+        ? null
+        : _selectedDuration,
+    minimumBudget: _minimumBudget,
+    maximumBudget: _maximumBudget,
+  );
 
-    final searched = query.isEmpty
-        ? filtered
-        : filtered.where((project) {
-            final searchableText = [
-              project.title,
-              project.description,
-              project.clientName,
-              project.projectType,
-              project.workMode,
-              project.duration,
-              ...project.skills,
-              ...project.technologies,
-            ].join(' ').toLowerCase();
+  final searched = query.isEmpty
+      ? filtered
+      : filtered.where((project) {
+          final searchableText = [
+            project.title,
+            project.description,
+            project.clientName,
+            project.projectType,
+            project.workMode,
+            project.duration,
+            ...project.skills,
+            ...project.technologies,
+          ].join(' ').toLowerCase();
 
-            return searchableText.contains(query);
-          }).toList();
+          return searchableText.contains(query);
+        }).toList();
 
-    final sorted = _projectService.sortProjects(searched, sortBy: _sortBy);
+  final sorted = _projectService.sortProjects(
+    searched,
+    sortBy: _sortBy,
+  );
 
-    _filteredProjects = sorted;
+  _filteredProjects = sorted;
 
-    if (_visibleProjectCount > sorted.length) {
-      _visibleProjectCount = sorted.length;
-    }
-
-    if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
-      _visibleProjectCount = sorted.length < 8 ? sorted.length : 8;
-    }
+  if (_visibleProjectCount > sorted.length) {
+    _visibleProjectCount = sorted.length;
   }
+
+  if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
+    _visibleProjectCount =
+        sorted.length < 8 ? sorted.length : 8;
+  }
+}
 
   void _calculateRecommendations() {
     _recommendations = _projectService.getRecommendedProjects(
@@ -470,6 +484,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   // ===========================================================================
 
   @override
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
@@ -547,35 +562,6 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               child: FadeTransition(
                 opacity: _contentFade,
                 child: _buildEmptyState(context, theme),
-              ),
-            )
-          else if (MediaQuery.sizeOf(context).width < 700)
-            // Mobile: use naturally sized cards in a list. A fixed-height grid
-            // clips the card's budget and action button on narrow screens.
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                _horizontalPadding(context),
-                0,
-                _horizontalPadding(context),
-                32,
-              ),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final project = _filteredProjects[index];
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: _AnimatedProjectCard(
-                      key: ValueKey(project.id),
-                      project: project,
-                      index: index,
-                      isSaved: _savedProjectIds.contains(project.id),
-                      matchPercentage: _getMatchPercentage(project),
-                      onSave: () => _toggleSave(project),
-                      onOpen: () => _openProject(project),
-                    ),
-                  );
-                }, childCount: _visibleProjectCount),
               ),
             )
           else
@@ -1455,45 +1441,40 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _showProjectPreview(project);
   }
 
-  Future<void> _showProjectPreview(ProjectModel project) async {
-    // The preview sheet contains the full project information. Close it first
-    // and then open the existing application form directly.
-    final shouldApply = await showModalBottomSheet<bool>(
+  Future<void> _openFullProject(ProjectModel project) async {
+    Navigator.of(context).pop();
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ProjectDetails(projectId: project.id, initialProject: project),
+      ),
+    );
+  }
+
+  void _showProjectPreview(ProjectModel project) {
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
+      builder: (context) {
         return _ProjectPreviewSheet(
           project: project,
           isSaved: _savedProjectIds.contains(project.id),
           matchPercentage: _getMatchPercentage(project),
           onSave: () async {
-            Navigator.of(sheetContext).pop(false);
+            Navigator.of(context).pop();
             await _toggleSave(project);
           },
-          onApply: () {
-            Navigator.of(sheetContext).pop(true);
+          onViewFullProject: () {
+            _openFullProject(project);
           },
         );
       },
-    );
-
-    if (!mounted || shouldApply != true) return;
-
-    if (!project.isOpen) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This project is no longer accepting applications.'),
-        ),
-      );
-      return;
-    }
-
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            ApplyProject(projectId: project.id, initialProject: project),
-      ),
     );
   }
 
@@ -1956,9 +1937,7 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
                 ],
               ),
 
-              // Keep the card content in normal flow. Spacer requires a
-              // bounded height and can cause overflow in responsive lists.
-              const SizedBox(height: 16),
+              const Spacer(),
 
               if (project.skills.isNotEmpty)
                 SizedBox(
@@ -2260,14 +2239,14 @@ class _ProjectPreviewSheet extends StatelessWidget {
     required this.isSaved,
     required this.matchPercentage,
     required this.onSave,
-    required this.onApply,
+    required this.onViewFullProject,
   });
 
   final ProjectModel project;
   final bool isSaved;
   final int matchPercentage;
   final VoidCallback onSave;
-  final VoidCallback onApply;
+  final VoidCallback onViewFullProject;
 
   @override
   Widget build(BuildContext context) {
@@ -2437,9 +2416,9 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: onApply,
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('Apply Now'),
+                          onPressed: onViewFullProject,
+                          icon: const Icon(Icons.arrow_forward_rounded),
+                          label: const Text('View Full Project'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF4F46E5),
                             foregroundColor: Colors.white,
