@@ -1,0 +1,1 @@
+kill_bridge grep -n _saveResponse\\\|projectEstimateConfirmations\\\|acceptedScope -- lib/\*\*/\*.dart
