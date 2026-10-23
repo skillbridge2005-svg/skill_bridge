@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../services/project_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/project_model.dart';
 import '../../services/application_service.dart';
 
@@ -100,6 +102,86 @@ class _ApplyProjectState extends State<ApplyProject> {
   // SUBMIT
   // ===========================================================================
 
+  Future<bool> _checkProfileCompletion() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      _showMessage(
+        'Please log in before applying.',
+        isError: true,
+      );
+      return false;
+    }
+
+    try {
+      final profileDoc = await FirebaseFirestore.instance
+          .collection('developerProfiles')
+          .doc(user.uid)
+          .get();
+
+      if (!profileDoc.exists) {
+        _showMessage(
+          'Please complete your developer profile to 100% before applying.',
+          isError: true,
+        );
+        return false;
+      }
+
+      final data = profileDoc.data()!;
+      final rawCompletion = data['profileCompletion'];
+
+      int completion;
+
+      if (rawCompletion is num) {
+        completion = rawCompletion.toInt();
+      } else {
+        // Use the same 12 fields as DeveloperProfile.
+        int completed = 0;
+
+        bool hasValue(String key) {
+          return (data[key]?.toString().trim() ?? '').isNotEmpty;
+        }
+
+        bool hasList(String key) {
+          final value = data[key];
+          return value is List && value.isNotEmpty;
+        }
+
+        if (hasValue('name')) completed++;
+        if (hasValue('headline')) completed++;
+        if (hasValue('bio')) completed++;
+        if (hasValue('location')) completed++;
+        if (hasList('skills')) completed++;
+        if (hasList('technologies')) completed++;
+        if (hasValue('experience')) completed++;
+        if (hasValue('education')) completed++;
+        if (hasValue('githubUrl')) completed++;
+        if (hasValue('resumeUrl')) completed++;
+        if (hasValue('availability')) completed++;
+        if (hasValue('projectType')) completed++;
+
+        completion = ((completed / 12) * 100).round();
+      }
+
+      if (completion < 100) {
+        _showMessage(
+          'Your profile is $completion% complete. '
+          'Please complete it to 100% before applying.',
+          isError: true,
+        );
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      _showMessage(
+        'Could not verify your profile. Please try again.',
+        isError: true,
+      );
+      return false;
+    }
+  }
+
   Future<void> _submitApplication() async {
     FocusScope.of(context).unfocus();
 
@@ -107,6 +189,11 @@ class _ApplyProjectState extends State<ApplyProject> {
       _showMessage('You have already applied to this project.', isError: true);
       return;
     }
+final canApply = await _checkProfileCompletion();
+
+if (!canApply || !mounted) {
+  return;
+}
 
     if (!_formKey.currentState!.validate()) {
       return;

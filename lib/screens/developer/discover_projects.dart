@@ -39,13 +39,17 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
   StreamSubscription<Set<String>>? _savedProjectsSubscription;
   StreamSubscription<List<ProjectModel>>? _projectsSubscription;
+StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+    _applicationStatusSubscription;
 
   bool _projectsLoading = true;
+  int? _profileCompletion;
   List<ProjectModel> _allProjects = [];
   List<ProjectModel> _filteredProjects = [];
   List<ProjectRecommendation> _recommendations = [];
 
   Set<String> _savedProjectIds = {};
+  Map<String, String> _applicationStatusByProjectId = {};
 
   List<String> _developerSkills = [];
   List<String> _developerTechnologies = [];
@@ -116,6 +120,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
     _loadDeveloperProfile();
     _listenToSavedProjects();
+  _listenToApplicationStatuses();
+
     void _listenToProjects() {
       _projectsSubscription = _openProjectsStream.listen(
         (projects) {
@@ -141,6 +147,76 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _listenToProjects();
   }
 
+
+void _listenToApplicationStatuses() {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+
+  if (uid == null) {
+    setState(() {
+      _applicationStatusByProjectId = {};
+    });
+    return;
+  }
+
+  _applicationStatusSubscription?.cancel();
+
+  _applicationStatusSubscription = FirebaseFirestore.instance
+      .collection('applications')
+      .where('developerId', isEqualTo: uid)
+      .snapshots()
+      .listen(
+    (snapshot) {
+      if (!mounted) return;
+
+      // Sort newest application updates first.
+      final docs = [...snapshot.docs];
+
+      DateTime timestampOf(
+        QueryDocumentSnapshot<Map<String, dynamic>> doc,
+      ) {
+        final data = doc.data();
+        final value = data['updatedAt'] ?? data['createdAt'];
+
+        if (value is Timestamp) return value.toDate();
+        if (value is DateTime) return value;
+
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+
+      docs.sort(
+        (a, b) => timestampOf(b).compareTo(timestampOf(a)),
+      );
+
+      final statusByProjectId = <String, String>{};
+
+      for (final doc in docs) {
+        final data = doc.data();
+        final projectId = data['projectId']?.toString();
+
+        if (projectId == null ||
+            projectId.isEmpty ||
+            statusByProjectId.containsKey(projectId)) {
+          continue;
+        }
+
+        statusByProjectId[projectId] =
+            (data['status'] ?? 'pending')
+                .toString()
+                .trim()
+                .toLowerCase();
+      }
+
+      setState(() {
+        _applicationStatusByProjectId = statusByProjectId;
+      });
+    },
+    onError: (Object error) {
+      debugPrint('Unable to listen to application statuses: $error');
+    },
+  );
+}
+
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -149,6 +225,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _contentController.dispose();
     _savedProjectsSubscription?.cancel();
     _projectsSubscription?.cancel();
+    _applicationStatusSubscription?.cancel();
     super.dispose();
   }
 
@@ -180,6 +257,12 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       final profileData = profileSnapshot.data() ?? <String, dynamic>{};
 
       final userData = userSnapshot.data() ?? <String, dynamic>{};
+      final completionValue =
+          profileData['profileCompletion'] ?? userData['profileCompletion'];
+
+      final int? profileCompletion = completionValue is num
+          ? completionValue.toInt()
+          : null;
 
       _developerSkills = _readStringList(profileData['skills']);
 
@@ -196,6 +279,11 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       _developerDuration =
           _readString(profileData['projectDuration']) ??
           _readString(profileData['duration']);
+      if (!mounted) return;
+
+      setState(() {
+        _profileCompletion = profileCompletion;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -469,6 +557,62 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   // UI
   // ===========================================================================
 
+  Widget _buildProfileCompletionBanner(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        _horizontalPadding(context),
+        12,
+        _horizontalPadding(context),
+        4,
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.person_outline_rounded,
+              color: Color(0xFFD97706),
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Complete your developer profile',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF92400E),
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Please complete and save your developer '
+                    'profile to 100% before applying for projects.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: Color(0xFF92400E),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -519,7 +663,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               child: _buildSearchSection(context, theme),
             ),
           ),
-
+          if (_profileCompletion == null || _profileCompletion! < 100)
+            SliverToBoxAdapter(child: _buildProfileCompletionBanner(context)),
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _contentFade,
@@ -1466,6 +1611,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
         return _ProjectPreviewSheet(
           project: project,
           isSaved: _savedProjectIds.contains(project.id),
+          isApplied: _applicationStatusByProjectId.containsKey(project.id) &&
+              _applicationStatusByProjectId[project.id] != 'withdrawn',
+          applicationStatus: _applicationStatusByProjectId[project.id],
           matchPercentage: _getMatchPercentage(project),
           onSave: () async {
             Navigator.of(sheetContext).pop(false);
@@ -2261,6 +2409,8 @@ class _ProjectPreviewSheet extends StatelessWidget {
     required this.matchPercentage,
     required this.onSave,
     required this.onApply,
+    required this.isApplied,
+    required this.applicationStatus,
   });
 
   final ProjectModel project;
@@ -2268,6 +2418,8 @@ class _ProjectPreviewSheet extends StatelessWidget {
   final int matchPercentage;
   final VoidCallback onSave;
   final VoidCallback onApply;
+  final bool isApplied;
+  final String? applicationStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -2437,12 +2589,47 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: onApply,
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('Apply Now'),
+                          onPressed: isApplied ? null : onApply,
+                          icon: Icon(
+                            isApplied
+                                ? (applicationStatus == 'shortlisted'
+                                    ? Icons.star_rounded
+                                    : applicationStatus == 'rejected'
+                                        ? Icons.cancel_outlined
+                                        : applicationStatus == 'accepted'
+                                            ? Icons.verified_rounded
+                                            : Icons.hourglass_top_rounded)
+                                : Icons.send_rounded,
+                          ),
+                          label: Text(
+                            !isApplied
+                                ? 'Apply Now'
+                                : switch (applicationStatus) {
+                                    'shortlisted' => 'Shortlisted',
+                                    'rejected' => 'Application Rejected',
+                                    'accepted' => 'Application Accepted',
+                                    'pending' => 'Application Pending',
+                                    'withdrawn' => 'Apply Again',
+                                    _ => 'Application Submitted',
+                                  },
+                          ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4F46E5),
+                            backgroundColor: !isApplied
+                                ? const Color(0xFF4F46E5)
+                                : applicationStatus == 'rejected'
+                                    ? const Color(0xFFDC2626)
+                                    : applicationStatus == 'shortlisted' ||
+                                            applicationStatus == 'accepted'
+                                        ? const Color(0xFF16A34A)
+                                        : const Color(0xFF64748B),
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: applicationStatus == 'rejected'
+                                ? const Color(0xFFDC2626)
+                                : applicationStatus == 'shortlisted' ||
+                                        applicationStatus == 'accepted'
+                                    ? const Color(0xFF16A34A)
+                                    : const Color(0xFF64748B),
+                            disabledForegroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(13),
