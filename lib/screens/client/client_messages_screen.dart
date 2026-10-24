@@ -452,84 +452,106 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(76),
+        preferredSize: const Size.fromHeight(82),
         child: Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x080F172A),
-                blurRadius: 18,
-                offset: Offset(0, 5),
-              ),
-            ],
-          ),
+          color: const Color(0xFFF5F7FB),
           child: SafeArea(
+            bottom: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(14),
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+              child: Container(
+                height: 64,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.96),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE5EAF2)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x070F172A),
+                      blurRadius: 18,
+                      offset: Offset(0, 7),
                     ),
-                    child: const Icon(
-                      Icons.chat_bubble_rounded,
-                      color: Color(0xFF4F46E5),
-                      size: 21,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.projectTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF111827),
-                            letterSpacing: -0.25,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          l10n.project,
-                          style: const TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                    ),
-                    child: IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      padding: EdgeInsets.zero,
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        size: 20,
-                        color: Color(0xFF475569),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    // Chat icon
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF4FF),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(
+                        Icons.chat_bubble_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 21,
                       ),
                     ),
-                  ),
-                ],
+
+                    const SizedBox(width: 12),
+
+                    // Project title and subtitle
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.projectTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF111827),
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            l10n.project,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1,
+                              color: Color(0xFF667085),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    // Close button
+                    Material(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(13),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(13),
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(13),
+                            border: Border.all(color: const Color(0xFFE5EAF2)),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 20,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

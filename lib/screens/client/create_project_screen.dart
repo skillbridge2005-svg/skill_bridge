@@ -22,7 +22,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _descriptionController = TextEditingController();
   final _requirementsController = TextEditingController();
 
-  List<String> _selectedCategories = [];
+  final List<String> _selectedCategories = [];
   bool _isLoading = false;
   XFile? _designImage;
   Uint8List? _designImageBytes;
@@ -394,18 +394,104 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: const Text(
-          'Get Project Estimate',
-          style: TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.add_business_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 21,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Get Project Estimate',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'CREATE YOUR PROJECT',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

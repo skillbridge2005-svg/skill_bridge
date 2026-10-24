@@ -5,7 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import 'project_estimate_result_screen.dart';
 
-import 'package:skill_bridge/services/supabase_storage_service.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 const _kPrimaryBlue = Color(0xFF2563EB);
 const _kSecondaryIndigo = Color(0xFF4F46E5);
@@ -187,15 +187,106 @@ class _InitialProjectEstimateScreenState
     return Scaffold(
       backgroundColor: _kBackground,
       appBar: AppBar(
-        title: const Text(
-          'Initial Project Estimate',
-          style: TextStyle(color: _kTextDark, fontWeight: FontWeight.w800),
-        ),
-        backgroundColor: _kBackground,
-        foregroundColor: _kTextDark,
+        toolbarHeight: 82,
         elevation: 0,
         scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
         surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Estimate icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.calculate_outlined,
+                    color: Color(0xFF2563EB),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Initial Project Estimate',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _kTextDark,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'PROJECT COST & TIMELINE',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -490,11 +581,12 @@ class _InitialProjectEstimateScreenState
     );
   }
 
-  static String _displayValue(dynamic value) {
+  static String _displayValue(dynamic value, {int depth = 0}) {
     if (value == null) return 'Not available';
 
     if (value is String) {
-      return value.trim().isEmpty ? 'Not available' : value;
+      final text = value.trim();
+      return text.isEmpty ? 'Not available' : text;
     }
 
     if (value is List) {
@@ -503,12 +595,24 @@ class _InitialProjectEstimateScreenState
       return value
           .map((item) {
             if (item is Map) {
-              return item.entries
-                  .map((entry) => '${entry.key}: ${entry.value}')
-                  .join('\n');
+              final formattedItem = item.entries
+                  .map((entry) {
+                    final key = _formatKey(entry.key.toString());
+                    final itemValue = entry.value;
+
+                    if (itemValue is Map || itemValue is List) {
+                      return '**$key:**\n${_displayValue(itemValue, depth: depth + 1)}';
+                    }
+
+                    return '**$key:** ${_displayValue(itemValue, depth: depth + 1)}';
+                  })
+                  .join('\n\n');
+
+              return '${'  ' * depth}- $formattedItem';
             }
 
-            return item.toString();
+            final itemText = _displayValue(item, depth: depth + 1);
+            return '${'  ' * depth}- $itemText';
           })
           .join('\n\n');
     }
@@ -518,18 +622,34 @@ class _InitialProjectEstimateScreenState
 
       return value.entries
           .map((entry) {
+            final key = _formatKey(entry.key.toString());
             final item = entry.value;
 
             if (item is Map || item is List) {
-              return '${entry.key}:\n${_displayValue(item)}';
+              return '**$key**\n\n${_displayValue(item, depth: depth + 1)}';
             }
 
-            return '${entry.key}: ${item ?? 'Not available'}';
+            return '**$key:** ${_displayValue(item, depth: depth + 1)}';
           })
           .join('\n\n');
     }
 
     return value.toString();
+  }
+
+  static String _formatKey(String key) {
+    final spaced = key
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .trim();
+
+    if (spaced.isEmpty) return spaced;
+
+    return spaced[0].toUpperCase() + spaced.substring(1);
   }
 
   static Widget _sectionTitle(String title, IconData icon) {
@@ -601,12 +721,47 @@ class _InitialProjectEstimateScreenState
                   ),
                 ),
                 const SizedBox(height: 6),
-                SelectableText(
-                  value.trim().isEmpty ? 'Not provided' : value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: _kTextDark,
+                MarkdownBody(
+                  data: value.trim().isEmpty ? 'Not provided' : value,
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet(
+                    p: const TextStyle(
+                      fontSize: 14,
+                      height: 1.7,
+                      color: _kTextDark,
+                    ),
+                    h1: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      color: _kTextDark,
+                    ),
+                    h2: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: _kTextDark,
+                    ),
+                    h3: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: _kTextDark,
+                    ),
+                    strong: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: _kTextDark,
+                    ),
+                    listBullet: const TextStyle(
+                      fontSize: 14,
+                      color: _kPrimaryBlue,
+                    ),
+                    code: const TextStyle(
+                      fontSize: 13,
+                      color: _kSecondaryIndigo,
+                      backgroundColor: _kSelectedBackground,
+                    ),
+                    pPadding: const EdgeInsets.only(bottom: 8),
+                    h1Padding: const EdgeInsets.only(top: 8, bottom: 8),
+                    h2Padding: const EdgeInsets.only(top: 8, bottom: 6),
+                    h3Padding: const EdgeInsets.only(top: 6, bottom: 4),
                   ),
                 ),
               ],

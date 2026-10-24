@@ -1,17 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'package:flutter/material.dart';
-
 import '../../models/notification_model.dart';
-import '../../services/notification_service.dart';
 
 class NotificationService {
-  NotificationService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  NotificationService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -31,17 +26,17 @@ class NotificationService {
         .where('developerId', isEqualTo: developerId)
         .snapshots()
         .map((snapshot) {
-      final notifications = _documentsToNotifications(snapshot);
-      notifications.sort((a, b) {
-        final aDate = a.createdAt;
-        final bDate = b.createdAt;
-        if (aDate == null && bDate == null) return 0;
-        if (aDate == null) return 1;
-        if (bDate == null) return -1;
-        return bDate.compareTo(aDate);
-      });
-      return notifications;
-    });
+          final notifications = _documentsToNotifications(snapshot);
+          notifications.sort((a, b) {
+            final aDate = a.createdAt;
+            final bDate = b.createdAt;
+            if (aDate == null && bDate == null) return 0;
+            if (aDate == null) return 1;
+            if (bDate == null) return -1;
+            return bDate.compareTo(aDate);
+          });
+          return notifications;
+        });
   }
 
   Stream<int> watchUnreadCount() {
@@ -51,12 +46,12 @@ class NotificationService {
   }
 
   Stream<NotificationModel?> watchNotification(String notificationId) {
-    return _notificationsCollection.doc(notificationId).snapshots().map(
-      (snapshot) {
-        if (!snapshot.exists) return null;
-        return NotificationModel.fromFirestore(snapshot);
-      },
-    );
+    return _notificationsCollection.doc(notificationId).snapshots().map((
+      snapshot,
+    ) {
+      if (!snapshot.exists) return null;
+      return NotificationModel.fromFirestore(snapshot);
+    });
   }
 
   Future<List<NotificationModel>> getMyNotifications() async {
@@ -96,9 +91,7 @@ class NotificationService {
     String? applicationId,
   }) async {
     if (developerId.trim().isEmpty) {
-      throw const NotificationServiceException(
-        'Developer ID cannot be empty.',
-      );
+      throw const NotificationServiceException('Developer ID cannot be empty.');
     }
     if (title.trim().isEmpty) {
       throw const NotificationServiceException(
@@ -140,9 +133,7 @@ class NotificationService {
         'You cannot update this notification.',
       );
     }
-    await _notificationsCollection.doc(notificationId).update({
-      'isRead': true,
-    });
+    await _notificationsCollection.doc(notificationId).update({'isRead': true});
   }
 
   Future<void> markAsUnread(String notificationId) async {

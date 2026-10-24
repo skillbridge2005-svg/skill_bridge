@@ -89,6 +89,49 @@ class ProjectDetailsScreen extends StatelessWidget {
     }
   }
 
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 5,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  );
+                },
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openTeam(BuildContext context) {
     Navigator.push(
       context,
@@ -242,19 +285,106 @@ class ProjectDetailsScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
+
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: Text(
-          l10n.projectDetails,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.folder_copy_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 21,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppLocalizations.of(context).projectDetails,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'PROJECT OVERVIEW',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -368,6 +498,12 @@ class ProjectDetailsScreen extends StatelessWidget {
               final status = data['status']?.toString() ?? 'requirement';
 
               final statusColor = _statusColor(status);
+              final designImages = data['designImageUrls'] is List
+                  ? (data['designImageUrls'] as List)
+                        .whereType<String>()
+                        .where((url) => url.startsWith('https://'))
+                        .toList()
+                  : <String>[];
 
               final acceptedScope = data['acceptedScope'] is List
                   ? List<String>.from(
@@ -405,6 +541,65 @@ class ProjectDetailsScreen extends StatelessWidget {
                               statusIcon: _statusIcon(status),
                               statusText: _formatStatus(context, status),
                             ),
+                            if (designImages.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              _DetailsCard(
+                                title: 'Project Design Images',
+                                icon: Icons.image_outlined,
+                                child: SizedBox(
+                                  height: 190,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: designImages.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 12),
+                                    itemBuilder: (context, index) {
+                                      final imageUrl = designImages[index];
+
+                                      return GestureDetector(
+                                        onTap: () =>
+                                            _showFullImage(context, imageUrl),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          child: Image.network(
+                                            imageUrl,
+                                            width: 250,
+                                            height: 190,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder:
+                                                (context, child, progress) {
+                                                  if (progress == null)
+                                                    return child;
+                                                  return const SizedBox(
+                                                    width: 250,
+                                                    child: Center(
+                                                      child:
+                                                          CircularProgressIndicator(),
+                                                    ),
+                                                  );
+                                                },
+                                            errorBuilder: (_, _, _) =>
+                                                Container(
+                                                  width: 250,
+                                                  color: const Color(
+                                                    0xFFF1F5F9,
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.broken_image_outlined,
+                                                    size: 40,
+                                                  ),
+                                                ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
 
                             const SizedBox(height: 16),
 

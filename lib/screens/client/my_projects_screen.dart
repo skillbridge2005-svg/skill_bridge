@@ -353,6 +353,60 @@ class _ProjectCard extends StatelessWidget {
     }
   }
 
+  List<String> get _designImages {
+    final value = project['designImageUrls'];
+
+    if (value is! List) return [];
+
+    return value
+        .whereType<String>()
+        .where((url) => url.startsWith('https://'))
+        .toList();
+  }
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 5,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  );
+                },
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -363,6 +417,7 @@ class _ProjectCard extends StatelessWidget {
     final timeline = project['timeline']?.toString() ?? '';
     final status = project['status']?.toString() ?? 'requirement';
     final statusColor = _statusColor(status);
+    final images = _designImages;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -479,6 +534,40 @@ class _ProjectCard extends StatelessWidget {
                   ],
                 ],
               ),
+              if (images.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 145,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: images.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      return GestureDetector(
+                        onTap: () => _showFullImage(context, images[index]),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.network(
+                            images[index],
+                            width: 190,
+                            height: 145,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                Container(
+                                  width: 190,
+                                  color: const Color(0xFFF1F5F9),
+                                  child: const Icon(
+                                    Icons.broken_image_outlined,
+                                  ),
+                                ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
               if (category.isNotEmpty) ...[
                 const SizedBox(height: 13),
                 Container(
