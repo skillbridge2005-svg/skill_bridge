@@ -1,7 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import 'project_estimate_result_screen.dart';
+
+import 'package:skill_bridge/services/supabase_storage_service.dart';
 
 const _kPrimaryBlue = Color(0xFF2563EB);
 const _kSecondaryIndigo = Color(0xFF4F46E5);
@@ -19,6 +23,11 @@ class InitialProjectEstimateScreen extends StatefulWidget {
   final String requirements;
   final String technologies;
   final dynamic analysis;
+  final List<String> designImageUrls;
+  final List<Uint8List> generatedDesignImageBytes;
+  final List<Uint8List> referenceImageBytesList;
+  final List<String> referenceImageNames;
+  final List<String> referenceImageMimeTypes;
 
   const InitialProjectEstimateScreen({
     super.key,
@@ -29,6 +38,11 @@ class InitialProjectEstimateScreen extends StatefulWidget {
     required this.requirements,
     required this.technologies,
     required this.analysis,
+    this.designImageUrls = const [],
+    this.generatedDesignImageBytes = const [],
+    this.referenceImageBytesList = const [],
+    this.referenceImageNames = const [],
+    this.referenceImageMimeTypes = const [],
   });
 
   @override
@@ -52,6 +66,18 @@ class _InitialProjectEstimateScreenState
       // Existing backend call: intentionally unchanged.
       final callable = FirebaseFunctions.instance.httpsCallable(
         'generateAIProjectPlan',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 300)),
+      );
+
+      final analysisText = widget.analysis?.toString() ?? '';
+
+      debugPrint(
+        'INITIAL ESTIMATE INPUT LENGTHS: '
+        'title=${widget.title.length}, '
+        'description=${widget.description.length}, '
+        'requirements=${widget.requirements.length}, '
+        'technologies=${widget.technologies.length}, '
+        'analysis=${analysisText.length}',
       );
 
       final result = await callable.call({
@@ -61,7 +87,7 @@ class _InitialProjectEstimateScreenState
         'description': widget.description,
         'requirements': widget.requirements,
         'technologies': widget.technologies,
-        'analysis': widget.analysis.toString(),
+        'analysis': analysisText,
       });
 
       debugPrint('INITIAL ESTIMATE RESPONSE: ${result.data}');
@@ -102,7 +128,6 @@ class _InitialProjectEstimateScreenState
 
       // NEW: Open the client-facing page after successful generation.
       // If no real project ID exists, retain the old screen behavior.
-      final projectId = widget.projectId?.trim();
 
       if (!mounted) return;
 
@@ -117,6 +142,11 @@ class _InitialProjectEstimateScreenState
             technologies: widget.technologies,
             plan: plan,
             planId: data['planId']?.toString(),
+            designImageUrls: widget.designImageUrls,
+            generatedDesignImageBytes: widget.generatedDesignImageBytes,
+            referenceImageBytesList: widget.referenceImageBytesList,
+            referenceImageNames: widget.referenceImageNames,
+            referenceImageMimeTypes: widget.referenceImageMimeTypes,
           ),
         ),
       );

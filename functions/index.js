@@ -1,7 +1,11 @@
 
 require("dotenv").config();
 
-const { initializeApp } = require("firebase-admin/app");
+const { jsonrepair } = require("jsonrepair");
+
+const {getAuth} = require("firebase-admin/auth");
+
+const {initializeApp} = require("firebase-admin/app");
 const {
   FieldValue,
   getFirestore,
@@ -9,7 +13,7 @@ const {
 
 const crypto = require("crypto");
 
-const { setGlobalOptions } = require("firebase-functions");
+const {setGlobalOptions} = require("firebase-functions");
 const {
   onCall,
   HttpsError,
@@ -17,7 +21,7 @@ const {
 
 const logger = require("firebase-functions/logger");
 const Razorpay = require("razorpay");
-const { GoogleGenAI } = require("@google/genai");
+const {GoogleGenAI} = require("@google/genai");
 
 setGlobalOptions({
   maxInstances: 10,
@@ -42,52 +46,55 @@ function getGeminiClient() {
 }
 
 /**
- * Read an image payload from a Gemini Interactions response.
- * @param {object} interaction Gemini interactions response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
+ * Extract useful diagnostic fields from a provider API error.
+ * @param {Error} error Provider error.
+ * @return {object} Sanitized error diagnostics.
  */
-function extractInteractionImage(interaction) {
-  const candidates = [
-    interaction?.output_image,
-    interaction?.outputImage,
-    interaction?.outputs?.find?.((item) => item?.type === "image"),
-  ];
 
-  for (const image of candidates) {
-    const imageBase64 = image?.data || image?.imageBytes || image?.b64_json;
-    if (typeof imageBase64 === "string" && imageBase64.trim()) {
-      return {
-        imageBase64: imageBase64.trim(),
-        mimeType: image.mime_type || image.mimeType || "image/png",
-      };
-    }
+function getProviderErrorFields(error) {
+  const body =
+    error?.error ??
+    error?.response?.data?.error ??
+    error?.response?.data ??
+    error?.response?.body ??
+    null;
+
+  const bodyObject =
+    body && typeof body === "object" ? body : null;
+
+  let providerDetails = null;
+
+  try {
+    providerDetails = body == null ?
+      null :
+      (
+          typeof body === "string" ?
+            body :
+            JSON.stringify(body)
+      ).slice(0, 1500);
+  } catch (_) {
+    providerDetails = "Unable to serialize provider details";
   }
 
-  return null;
-}
-
-/**
- * Read an inline image from a Gemini generateContent response.
- * @param {object} response Gemini SDK response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
- */
-function extractInlineImage(response) {
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return null;
-  }
-
-  for (const part of parts) {
-    const data = part.inlineData || part.inline_data;
-    if (data && typeof data.data === "string" && data.data.trim()) {
-      return {
-        imageBase64: data.data.trim(),
-        mimeType: data.mimeType || data.mime_type || "image/png",
-      };
-    }
-  }
-
-  return null;
+  return {
+    providerErrorName: error?.name ?? null,
+    providerHttpStatus:
+      error?.status ??
+      error?.statusCode ??
+      error?.response?.status ??
+      null,
+    providerErrorCode:
+      bodyObject?.status ??
+      bodyObject?.code ??
+      error?.code ??
+      null,
+    providerMessage: String(
+        bodyObject?.message ??
+      error?.message ??
+      "No provider error message returned",
+    ).slice(0, 1500),
+    providerDetails,
+  };
 }
 
 /**
@@ -97,47 +104,188 @@ function extractInlineImage(response) {
  * @param {string} aspectRatio Aspect ratio such as 16:9 or 9:16.
  * @return {Promise<{imageBase64: string, mimeType: string}>} Image payload.
  */
-async function generateOneDesignImage(ai, prompt, aspectRatio) {
-  try {
-    const interaction = await ai.interactions.create({
-      model: "gemini-nano-banana-2.1",
-      input: prompt,
-      generation_config: {
-        image_config: {
-          aspect_ratio: aspectRatio,
-          image_size: "1K",
-        },
-      },
-    });
 
-    const fromInteraction = extractInteractionImage(interaction);
-    if (fromInteraction) {
-      return fromInteraction;
-    }
-  } catch (error) {
-    logger.warn("Interactions image generation failed", {
-      message: error?.message,
-    });
+/**
+ * Generate a UI mockup using Cloudflare Workers AI.
+ *
+ * @param {*} _ai Retained for compatibility with existing callers.
+ * @param {string} prompt The screen-specific image prompt.
+ * @param {string} aspectRatio The requested image aspect ratio.
+ * @return {Promise<{imageBase64: string, mimeType: string}>}
+ *   The generated image payload.
+ */
+async function generateOneDesignImage(_ai, prompt, aspectRatio) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !apiToken) {
+    throw new Error(
+        "Cloudflare Workers AI credentials are not configured.",
+    );
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image",
-    contents: prompt,
-    config: {
-      responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: {
-        aspectRatio: aspectRatio,
-        imageSize: "1K",
-      },
+  const source = String(prompt || "").trim();
+
+  const clipText = (value, maxLength) => {
+    const text = String(value || "").trim();
+
+    if (text.length <= maxLength) return text;
+    if (maxLength <= 1) return text.slice(0, maxLength);
+
+    const startLength = Math.ceil((maxLength - 1) / 2);
+    const endLength = Math.floor((maxLength - 1) / 2);
+
+    return (
+      text.slice(0, startLength) +
+      "…" +
+      text.slice(-endLength)
+    );
+  };
+
+  const readLine = (label, maxLength) => {
+    const match = source.match(
+        new RegExp("^" + label + ":\\s*(.*)$", "mi"),
+    );
+
+    return clipText(match?.[1] || "", maxLength);
+  };
+
+  const screenName =
+    source.match(
+        /^This image is page\s+(.+?)\s+of a multi-page product design\./mi,
+    )?.[1] || "Main Screen";
+
+  const screenPurpose =
+    source.match(/^Screen purpose:\s*(.*)$/mi)?.[1] ||
+    "Primary user-facing application screen";
+
+  const requirementIndex =
+    source.toLowerCase().lastIndexOf("requirements:");
+
+  const requirements =
+    requirementIndex >= 0 ?
+      source.slice(requirementIndex + "requirements:".length).trim() :
+      source;
+
+  const fixedPrompt = [
+    "Act as a principal product designer at a world-class technology company.",
+    "Create ONE premium, enterprise-grade, high-fidelity software UI screen.",
+    aspectRatio === "9:16" ?
+      "MOBILE: portrait layout, touch-friendly controls, mobile navigation. " +
+        "Fill the canvas with the app interface only. Never draw a phone." :
+      "LAPTOP: landscape desktop layout, professional top or side navigation, " +
+        "spacious content panels. Fill the canvas with the interface only. " +
+        "Never draw a laptop or device frame.",
+    "DESIGN SYSTEM: establish a distinctive identity appropriate to the product.",
+    "Use consistent spacing, typography, colors, component sizes, alignment,",
+    "border radii, icon styles, shadows, and accessible color contrast.",
+    "VISUAL HIERARCHY: clear page title, section headings, key information,",
+    "well-grouped content, whitespace, and one obvious primary action.",
+    "COMPONENTS: use realistic buttons, forms, cards, tables, filters, charts,",
+    "tabs, navigation, and status indicators only when relevant to the project.",
+    "CONTENT: use concise, believable English labels and realistic domain data.",
+    "Avoid placeholder gibberish, excessive tiny text, dense paragraphs, and clutter.",
+    "UX QUALITY: make the main workflow intuitive, accessible, and easy to scan.",
+    "CONSISTENCY: screens from the same project must share the same design language.",
+    "Follow the stated requirements. Do not invent unrelated features.",
+    "Show ONE complete, straight-on application interface with key content visible.",
+    "Never produce collages, device mockups, presentation slides, wireframes,",
+    "watermarks, decorative backgrounds, or fake hardware.",
+    `Technologies: ${readLine("Suggested technologies", 60)}`,
+    `Project: ${readLine("Project title", 100)}`,
+    `Categories: ${readLine("Categories", 100)}`,
+    `Description: ${readLine("Description", 220)}`,
+    `Screen: ${clipText(screenName, 100)}`,
+    `Purpose: ${clipText(screenPurpose, 180)}`,
+    "Essential project requirements:",
+  ].join("\n");
+
+  // FLUX.1 schnell's 2048-character limit.
+  const maxPromptLength = 2048;
+
+  // Reserve space for project requirements.
+  const requirementsBudget = Math.min(requirements.length, 850);
+  const fixedPromptBudget =
+    maxPromptLength - requirementsBudget - 1;
+
+  // Shorten the design instructions too, if necessary.
+  const promptPrefix = fixedPrompt.slice(0, fixedPromptBudget);
+
+  // Calculate the remaining space after the design instructions.
+  const remaining = Math.max(
+      0,
+      maxPromptLength - promptPrefix.length - 1,
+  );
+
+  const finalPrompt = (
+    promptPrefix + "\n" + clipText(requirements, remaining)
+  ).slice(0, maxPromptLength);
+
+  const url =
+  "https://api.cloudflare.com/client/v4/accounts/" +
+  encodeURIComponent(accountId) +
+  "/ai/run/@cf/black-forest-labs/flux-2-klein-4b";
+
+  // Use a larger output image for sharper design details.
+  const width = aspectRatio === "9:16" ? 720 : 1536;
+  const height = aspectRatio === "9:16" ? 1280 : 864;
+
+  const formData = new FormData();
+  formData.set("prompt", finalPrompt);
+  formData.set("width", String(width));
+  formData.set("height", String(height));
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
     },
+    body: formData,
   });
 
-  const fromContent = extractInlineImage(response);
-  if (fromContent) {
-    return fromContent;
+  const responseText = await response.text();
+
+  let body = null;
+  try {
+    body = JSON.parse(responseText);
+  } catch (_) {
+    // The response may contain a non-JSON provider error.
   }
 
-  throw new Error("The AI returned no generated project image.");
+  if (!response.ok || body?.success === false) {
+    logger.error("Cloudflare image generation failed", {
+      status: response.status,
+      errors: body?.errors ?? null,
+      details: responseText.slice(0, 1200),
+    });
+
+    const error = new Error(
+        `Cloudflare image generation failed (HTTP ${response.status}).`,
+    );
+
+    error.status = response.status;
+    throw error;
+  }
+
+  const imageBase64 = body?.result?.image;
+
+  if (
+    typeof imageBase64 !== "string" ||
+    imageBase64.length === 0
+  ) {
+    logger.error("Cloudflare returned no image data", {
+      responseKeys: Object.keys(body?.result ?? {}),
+    });
+
+    throw new Error(
+        "Cloudflare returned no generated image.",
+    );
+  }
+
+  return {
+    imageBase64,
+    mimeType: "image/jpeg",
+  };
 }
 
 /**
@@ -260,17 +408,17 @@ function getProjectAmount(projectData) {
 exports.createRazorpayOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to create a payment order."
+        "unauthenticated",
+        "You must be logged in to create a payment order.",
     );
   }
 
-  const { projectId } = request.data || {};
+  const {projectId} = request.data || {};
 
   if (!projectId || typeof projectId !== "string") {
     throw new HttpsError(
-      "invalid-argument",
-      "A valid project ID is required."
+        "invalid-argument",
+        "A valid project ID is required.",
     );
   }
 
@@ -278,15 +426,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
   try {
     const projectReference = db
-      .collection("projects")
-      .doc(projectId);
+        .collection("projects")
+        .doc(projectId);
 
     const projectSnapshot = await projectReference.get();
 
     if (!projectSnapshot.exists) {
       throw new HttpsError(
-        "not-found",
-        "The SkillBridge project was not found."
+          "not-found",
+          "The SkillBridge project was not found.",
       );
     }
 
@@ -294,8 +442,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
     if (projectData.clientId !== clientId) {
       throw new HttpsError(
-        "permission-denied",
-        "You are not authorized to make a payment for this project."
+          "permission-denied",
+          "You are not authorized to make a payment for this project.",
       );
     }
 
@@ -307,8 +455,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
       projectAmount <= 0
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The project does not have a valid payment amount."
+          "failed-precondition",
+          "The project does not have a valid payment amount.",
       );
     }
 
@@ -319,15 +467,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
       amountInPaise <= 0
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The project payment amount is invalid."
+          "failed-precondition",
+          "The project payment amount is invalid.",
       );
     }
 
     if (projectData.paymentStatus === "paid") {
       throw new HttpsError(
-        "failed-precondition",
-        "This project has already been paid."
+          "failed-precondition",
+          "This project has already been paid.",
       );
     }
 
@@ -363,8 +511,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      "Unable to create Razorpay order."
+        "internal",
+        "Unable to create Razorpay order.",
     );
   }
 });
@@ -378,8 +526,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 exports.verifyRazorpayPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to verify a payment."
+        "unauthenticated",
+        "You must be logged in to verify a payment.",
     );
   }
 
@@ -398,24 +546,24 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
     !/^[a-fA-F0-9]{64}$/.test(razorpaySignature)
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "Payment verification data is incomplete."
+        "invalid-argument",
+        "Payment verification data is incomplete.",
     );
   }
 
   const clientId = request.auth.uid;
 
   const paymentReference = db
-    .collection("payments")
-    .doc(razorpayPaymentId);
+      .collection("payments")
+      .doc(razorpayPaymentId);
 
   try {
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!keySecret) {
       throw new HttpsError(
-        "internal",
-        "Payment verification is not configured."
+          "internal",
+          "Payment verification is not configured.",
       );
     }
 
@@ -423,13 +571,13 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 1. Verify Razorpay signature.
      */
     const generatedSignature = crypto
-      .createHmac("sha256", keySecret)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest("hex");
+        .createHmac("sha256", keySecret)
+        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+        .digest("hex");
 
     const isValid = crypto.timingSafeEqual(
-      Buffer.from(generatedSignature, "hex"),
-      Buffer.from(razorpaySignature, "hex")
+        Buffer.from(generatedSignature, "hex"),
+        Buffer.from(razorpaySignature, "hex"),
     );
 
     if (!isValid) {
@@ -440,8 +588,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       });
 
       throw new HttpsError(
-        "permission-denied",
-        "Payment verification failed."
+          "permission-denied",
+          "Payment verification failed.",
       );
     }
 
@@ -462,8 +610,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (!matchesVerifiedPayment) {
         throw new HttpsError(
-          "already-exists",
-          "A conflicting payment record already exists."
+            "already-exists",
+            "A conflicting payment record already exists.",
         );
       }
 
@@ -495,8 +643,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       });
 
       throw new HttpsError(
-        "permission-denied",
-        "This payment order does not belong to you."
+          "permission-denied",
+          "This payment order does not belong to you.",
       );
     }
 
@@ -510,8 +658,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       !projectId
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "Project information is missing from the payment order."
+          "failed-precondition",
+          "Project information is missing from the payment order.",
       );
     }
 
@@ -524,8 +672,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       order.currency !== "INR"
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The payment order has an invalid amount or currency."
+          "failed-precondition",
+          "The payment order has an invalid amount or currency.",
       );
     }
 
@@ -533,7 +681,7 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 7. Fetch actual Razorpay payment.
      */
     const payment = await razorpay.payments.fetch(
-      razorpayPaymentId
+        razorpayPaymentId,
     );
 
     /*
@@ -541,8 +689,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.order_id !== razorpayOrderId) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment does not belong to the specified order."
+          "failed-precondition",
+          "Payment does not belong to the specified order.",
       );
     }
 
@@ -551,8 +699,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.status !== "captured") {
       throw new HttpsError(
-        "failed-precondition",
-        `Payment is not captured. Current status: ${payment.status}`
+          "failed-precondition",
+          `Payment is not captured. Current status: ${payment.status}`,
       );
     }
 
@@ -561,8 +709,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.amount !== order.amount) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment amount does not match the order amount."
+          "failed-precondition",
+          "Payment amount does not match the order amount.",
       );
     }
 
@@ -571,8 +719,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      */
     if (payment.currency !== order.currency) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment currency does not match the order currency."
+          "failed-precondition",
+          "Payment currency does not match the order currency.",
       );
     }
 
@@ -582,8 +730,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
      * 12. Prepare project reference.
      */
     const projectReference = db
-      .collection("projects")
-      .doc(projectId);
+        .collection("projects")
+        .doc(projectId);
 
     /*
      * 13. Atomic Firestore transaction.
@@ -599,8 +747,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (!projectSnapshot.exists) {
         throw new HttpsError(
-          "not-found",
-          "The SkillBridge project was not found."
+            "not-found",
+            "The SkillBridge project was not found.",
         );
       }
 
@@ -608,8 +756,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (projectData.clientId !== clientId) {
         throw new HttpsError(
-          "permission-denied",
-          "You are not authorized to pay for this project."
+            "permission-denied",
+            "You are not authorized to pay for this project.",
         );
       }
 
@@ -617,19 +765,19 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (projectAmount === null) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project does not have a valid payment amount."
+            "failed-precondition",
+            "The project does not have a valid payment amount.",
         );
       }
 
       const expectedAmountInPaise = Math.round(
-        projectAmount * 100
+          projectAmount * 100,
       );
 
       if (expectedAmountInPaise !== order.amount) {
         throw new HttpsError(
-          "failed-precondition",
-          "Payment amount does not match the project amount."
+            "failed-precondition",
+            "Payment amount does not match the project amount.",
         );
       }
 
@@ -649,8 +797,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
         if (!matchesVerifiedPayment) {
           throw new HttpsError(
-            "already-exists",
-            "A conflicting payment record already exists."
+              "already-exists",
+              "A conflicting payment record already exists.",
           );
         }
       } else {
@@ -702,8 +850,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      "Unable to verify and save payment."
+        "internal",
+        "Unable to verify and save payment.",
     );
   }
 });
@@ -715,139 +863,139 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 */
 
 exports.generateProjectContent = onCall(
-  {
-    maxInstances: 5,
-    timeoutSeconds: 120,
-  },
-  async (request) => {
+    {
+      maxInstances: 5,
+      timeoutSeconds: 120,
+    },
+    async (request) => {
     /*
      * 1. Authentication.
      */
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "Please log in to use the AI Project Assistant."
-      );
-    }
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Please log in to use the AI Project Assistant.",
+        );
+      }
 
-    /*
+      /*
      * 2. Read request data.
      */
-    const {
-      title,
-      categories,
-      description,
-      requirements,
-      contentType,
-    } = request.data || {};
+      const {
+        title,
+        categories,
+        description,
+        requirements,
+        contentType,
+      } = request.data || {};
 
-    /*
+      /*
      * 3. Validate title.
      */
-    if (
-      typeof title !== "string" ||
+      if (
+        typeof title !== "string" ||
       !title.trim() ||
       title.trim().length > 150
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter a valid project title."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Enter a valid project title.",
+        );
+      }
 
-    /*
+      /*
      * 4. Validate categories.
      */
-    if (
-      !Array.isArray(categories) ||
+      if (
+        !Array.isArray(categories) ||
       categories.length > 10 ||
       !categories.every(
-        (category) =>
-          typeof category === "string" &&
-          category.length <= 80
+          (category) =>
+            typeof category === "string" &&
+          category.length <= 80,
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project categories are invalid."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project categories are invalid.",
+        );
+      }
 
-    /*
+      /*
      * 5. Validate content type.
      */
-    const supportedTypes = [
-      "description",
-      "requirements",
-      "technologies",
-      "analysis",
-    ];
+      const supportedTypes = [
+        "description",
+        "requirements",
+        "technologies",
+        "analysis",
+      ];
 
-    if (!supportedTypes.includes(contentType)) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Unsupported project content type."
-      );
-    }
+      if (!supportedTypes.includes(contentType)) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Unsupported project content type.",
+        );
+      }
 
-    /*
+      /*
      * 6. Validate optional fields.
      */
-    if (
-      description != null &&
+      if (
+        description != null &&
       (
         typeof description !== "string" ||
         description.length > 5000
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project description is too long."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project description is too long.",
+        );
+      }
 
-    if (
-      requirements != null &&
+      if (
+        requirements != null &&
       (
         typeof requirements !== "string" ||
         requirements.length > 5000
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project requirements are too long."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project requirements are too long.",
+        );
+      }
 
-    /*
+      /*
      * 7. Check Gemini API key.
      */
-    const ai = getGeminiClient();
+      const ai = getGeminiClient();
 
-    if (!ai) {
-      logger.error("GEMINI_API_KEY is not configured.");
+      if (!ai) {
+        logger.error("GEMINI_API_KEY is not configured.");
 
-      throw new HttpsError(
-        "failed-precondition",
-        "AI generation is not configured."
-      );
-    }
+        throw new HttpsError(
+            "failed-precondition",
+            "AI generation is not configured.",
+        );
+      }
 
-    /*
+      /*
      * 8. Prepare common project information.
      */
-    const projectDetails = `
+      const projectDetails = `
 Project title: ${title.trim()}
 Categories: ${categories.join(", ") || "Not specified"}
 Description: ${description || "Not provided"}
 Requirements: ${requirements || "Not provided"}
 `;
 
-    /*
+      /*
      * 9. Prepare prompts for all supported operations.
      */
-    const prompts = {
-      description: `
+      const prompts = {
+        description: `
 You are a professional software project planning assistant.
 
 Based on the following project details, create a clear and
@@ -863,7 +1011,7 @@ Make the description specific to this project.
 Return only the project description.
 `,
 
-      requirements: `
+        requirements: `
 You are an experienced software requirements analyst.
 
 Create detailed, realistic requirements for this project.
@@ -880,7 +1028,7 @@ Avoid generic filler and unrelated features.
 Return only the numbered requirements.
 `,
 
-      technologies: `
+        technologies: `
 You are an experienced software technology advisor.
 
 Recommend suitable technologies for this project.
@@ -896,7 +1044,7 @@ Do not assume Flutter or Firebase is required unless suitable.
 Return a concise, organized list of recommendations.
 `,
 
-      analysis: `
+        analysis: `
 You are an experienced software architect and project analyst.
 
 Analyze the proposed project.
@@ -918,70 +1066,70 @@ Do not claim that development or testing has already occurred.
 
 Return the analysis in clear, readable sections.
 `,
-    };
+      };
 
-    /*
+      /*
      * 10. Generate content with Gemini.
      */
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: prompts[contentType],
-        config: {
-          temperature: 0.4,
-          maxOutputTokens: 8192,
-          thinkingConfig: {
-            thinkingLevel: "MINIMAL",
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: prompts[contentType],
+          config: {
+            temperature: 0.4,
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingLevel: "MINIMAL",
+            },
           },
-        },
-      });
-
-      const generatedText = extractGeneratedText(response);
-
-      if (!generatedText) {
-        const finishReason =
-          response?.candidates?.[0]?.finishReason || "unknown";
-
-        logger.error("AI returned empty content", {
-          contentType,
-          finishReason,
         });
 
-        throw new Error(
-          `The AI returned an empty response (${finishReason}).`
+        const generatedText = extractGeneratedText(response);
+
+        if (!generatedText) {
+          const finishReason =
+          response?.candidates?.[0]?.finishReason || "unknown";
+
+          logger.error("AI returned empty content", {
+            contentType,
+            finishReason,
+          });
+
+          throw new Error(
+              `The AI returned an empty response (${finishReason}).`,
+          );
+        }
+
+        logger.info("AI project content generated", {
+          contentType: contentType,
+          userId: request.auth.uid,
+        });
+
+        return {
+          success: true,
+          contentType: contentType,
+          content: generatedText,
+        };
+      } catch (error) {
+        logger.error("AI project content generation failed", {
+          contentType: contentType,
+          errorName: error?.name,
+          message: error?.message,
+          status: error?.status,
+          code: error?.code,
+          stack: error?.stack,
+        });
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError(
+            "internal",
+            "Unable to generate project content. Please try again.",
         );
       }
-
-      logger.info("AI project content generated", {
-        contentType: contentType,
-        userId: request.auth.uid,
-      });
-
-      return {
-        success: true,
-        contentType: contentType,
-        content: generatedText,
-      };
-    } catch (error) {
-      logger.error("AI project content generation failed", {
-        contentType: contentType,
-        errorName: error?.name,
-        message: error?.message,
-        status: error?.status,
-        code: error?.code,
-        stack: error?.stack,
-      });
-
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-
-      throw new HttpsError(
-        "internal",
-        "Unable to generate project content. Please try again."
-      );
-    }
-  }
+    },
 );
 
 /*
@@ -991,102 +1139,119 @@ Return the analysis in clear, readable sections.
 */
 
 exports.generateProjectDesign = onCall(
-  {
-    maxInstances: 5,
-    timeoutSeconds: 240,
-  },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "Please log in to generate a project design."
-      );
-    }
+    {
+      maxInstances: 5,
+      timeoutSeconds: 540,
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Please log in to generate a project design.",
+        );
+      }
 
-    const {
-      title,
-      categories,
-      description,
-      requirements,
-      technologies,
-    } = request.data || {};
+      const {
+        title,
+        categories,
+        description,
+        requirements,
+        technologies,
+      } = request.data || {};
 
-    if (
-      typeof title !== "string" ||
+      if (
+        typeof title !== "string" ||
       !title.trim() ||
       title.trim().length > 150
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter a valid project title."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Enter a valid project title.",
+        );
+      }
 
-    if (
-      !Array.isArray(categories) ||
+      if (
+        !Array.isArray(categories) ||
       categories.length > 10 ||
       !categories.every(
-        (category) =>
-          typeof category === "string" &&
-          category.length <= 80
+          (category) =>
+            typeof category === "string" &&
+          category.length <= 80,
       )
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Project categories are invalid."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Project categories are invalid.",
+        );
+      }
 
-    const optionalFields = {
-      description,
-      requirements,
-      technologies,
-    };
+      const optionalFields = {
+        description,
+        requirements,
+        technologies,
+      };
 
-    for (const [field, value] of Object.entries(optionalFields)) {
-      if (
-        value != null &&
+      for (const [field, value] of Object.entries(optionalFields)) {
+        if (
+          value != null &&
         (
           typeof value !== "string" ||
           value.length > 5000
         )
+        ) {
+          throw new HttpsError(
+              "invalid-argument",
+              `Project ${field} is invalid or too long.`,
+          );
+        }
+      }
+
+      if (
+        typeof requirements !== "string" ||
+      !requirements.trim()
       ) {
         throw new HttpsError(
-          "invalid-argument",
-          `Project ${field} is invalid or too long.`
+            "invalid-argument",
+            "Enter project requirements before generating a design.",
         );
       }
-    }
 
-    if (
-      typeof requirements !== "string" ||
-      !requirements.trim()
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Enter project requirements before generating a design."
-      );
-    }
+      const ai = getGeminiClient();
 
-    const ai = getGeminiClient();
+      if (!ai) {
+        logger.error("GEMINI_API_KEY is not configured.");
 
-    if (!ai) {
-      logger.error("GEMINI_API_KEY is not configured.");
+        throw new HttpsError(
+            "failed-precondition",
+            "AI generation is not configured.",
+        );
+      }
 
-      throw new HttpsError(
-        "failed-precondition",
-        "AI generation is not configured."
-      );
-    }
+      const joinedCategories =
+        categories.join(", ") || "Not specified";
 
-    const joinedCategories = categories.join(", ") || "Not specified";
-    const isMobile = joinedCategories.toLowerCase().includes("mobile");
-    const aspectRatio = isMobile ? "9:16" : "16:9";
-
-    try {
-      const screenResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: `
+      const designPlatforms = [
+        {
+          name: "Mobile",
+          aspectRatio: "9:16",
+          instructions:
+            "Create a portrait mobile app interface filling the image. " +
+            "Use touch-friendly controls and mobile navigation. " +
+            "Show the UI only; no phone hardware, frame, or device mockup.",
+        },
+        {
+          name: "Laptop",
+          aspectRatio: "16:9",
+          instructions:
+            "Create a landscape laptop or desktop web app interface filling " +
+            "the image. Use a professional desktop layout and wider content. " +
+            "Show the UI only; no laptop hardware, frame, or device mockup.",
+        },
+      ];
+      try {
+        const screenResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: `
 You plan software UI screens from project requirements.
 
 Project title: ${title.trim()}
@@ -1102,90 +1267,123 @@ Each object must have:
 
 Choose the 4 most important user-facing pages for this product.
 `,
-        config: {
-          temperature: 0.2,
-          maxOutputTokens: 800,
-          thinkingConfig: {
-            thinkingLevel: "MINIMAL",
+          config: {
+            temperature: 0.2,
+            maxOutputTokens: 800,
+            thinkingConfig: {
+              thinkingLevel: "MINIMAL",
+            },
           },
-        },
-      });
+        });
 
-      const screens = parseProjectScreens(
-          extractGeneratedText(screenResponse),
-          categories
-      );
-
-      const images = await Promise.all(screens.map(async (screen) => {
-        const prompt = `
-Create one polished, realistic software UI mockup image for a single
-application page. Show a complete high-fidelity ${isMobile ?
-    "mobile app" : "web or desktop"} screen with readable layout,
-consistent branding, and production-quality visual design.
-
-This image is page ${screen.name} of a multi-page product design.
-Screen purpose: ${screen.purpose}
-
-Use the project requirements below so the layout, features, labels,
-and content match this software. Show only this one full page. Do not
-create a collage, extra device frames, watermarks, or captions outside
-the UI.
-
-Project title: ${title.trim()}
-Categories: ${joinedCategories}
-Description: ${description || "Not provided"}
-Suggested technologies: ${technologies || "Not provided"}
-Requirements:
-${requirements}
-`;
-
-        const generated = await generateOneDesignImage(
-            ai,
-            prompt,
-            aspectRatio
+        const screens = parseProjectScreens(
+            extractGeneratedText(screenResponse),
+            categories,
         );
 
+        const images = [];
+
+        for (const screen of screens) {
+          const platformImages = await Promise.all(
+              designPlatforms.map(async (platform) => {
+                const prompt = `
+                  PROJECT: ${title.trim()}
+
+                  PROJECT CATEGORY:
+                  ${joinedCategories}
+
+                  PROJECT DESCRIPTION:
+                  ${description || "Not provided"}
+
+                  TARGET PLATFORM:
+                  ${platform.name}
+
+                  SCREEN NAME:
+                  ${screen.name}
+
+                  SCREEN PURPOSE:
+                  ${screen.purpose}
+
+                  ACTUAL USER REQUIREMENTS:
+                  ${requirements}
+
+                  SUGGESTED TECHNOLOGIES:
+                  ${technologies || "Not provided"}
+
+                  DESIGN INSTRUCTIONS:
+                  First understand the exact product described above.
+                  Identify its target users, main task, and essential features.
+                  Design this specific screen exclusively for this product.
+                  Every heading, card, button, form, navigation item, and sample
+                  data must be relevant to the stated project and screen purpose.
+                  Follow the actual requirements instead of inventing generic features.
+
+                  For example, a food delivery app should show relevant food,
+                  restaurant, menu, cart, and order-tracking elements when required.
+                  A learning app should show relevant courses, lessons, and progress.
+                  A project management app should show relevant tasks and workflows.
+                  These are examples only; do not use them unless they match this project.
+
+                  PLATFORM:
+                  ${platform.instructions}
+
+                  VISUAL QUALITY:
+                  Premium enterprise UI/UX, coherent design system, refined typography,
+                  clear hierarchy, realistic content, balanced spacing, accessible contrast,
+                  and a professional implementation-ready layout.
+
+                  Generate exactly ONE screen. Fill the image with the interface itself.
+                  No device mockups, unrelated dashboards, collages, or watermarks.
+                  `;
+
+                const generated = await generateOneDesignImage(
+                    ai,
+                    prompt,
+                    platform.aspectRatio,
+                );
+
+                return {
+                  label: `${screen.name} - ${platform.name}`,
+                  purpose: `${screen.purpose} (${platform.name} layout)`,
+                  mimeType: generated.mimeType,
+                  imageBase64: generated.imageBase64,
+                };
+              }),
+          );
+
+          images.push(...platformImages);
+        }
+
+        if (!images.length) {
+          throw new Error("The AI returned no generated project pages.");
+        }
+
+        logger.info("AI multi-page project design generated", {
+          userId: request.auth.uid,
+          pageCount: images.length,
+        });
+
         return {
-          label: screen.name,
-          purpose: screen.purpose,
-          mimeType: generated.mimeType,
-          imageBase64: generated.imageBase64,
+          success: true,
+          imageBase64: images[0].imageBase64,
+          images: images,
         };
-      }));
+      } catch (error) {
+        logger.error("AI project design generation failed", {
+          ...getProviderErrorFields(error),
+          userId: request.auth.uid,
+        });
 
-      if (!images.length) {
-        throw new Error("The AI returned no generated project pages.");
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError(
+            "internal",
+            "Unable to generate the project design. Please try again.",
+        );
       }
-
-      logger.info("AI multi-page project design generated", {
-        userId: request.auth.uid,
-        pageCount: images.length,
-      });
-
-      return {
-        success: true,
-        imageBase64: images[0].imageBase64,
-        images: images,
-      };
-    } catch (error) {
-      logger.error("AI project design generation failed", {
-        errorName: error?.name,
-        message: error?.message,
-        status: error?.status,
-        code: error?.code,
-        userId: request.auth.uid,
-      });
-
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-
-      throw new HttpsError(
-        "internal",
-        "Unable to generate the project design. Please try again."
-      );
-    }
-  }
+    },
 );
 
 /* --------------------------------------------------------------------------
@@ -1194,23 +1392,66 @@ ${requirements}
  * Requires TAVILY_API_KEY in functions/.env.
  * -------------------------------------------------------------------------- */
 
-function validatePlanText(value, maxLength = 10000) {
+function validatePlanText(value, maxLength = 10000, fieldName = "unknown") {
   if (value == null) return "";
+
   if (typeof value !== "string" || value.length > maxLength) {
+    logger.error("AI PLAN INPUT VALIDATION FAILED", {
+      field: fieldName,
+      actualType: typeof value,
+      actualLength: typeof value === "string" ?
+        value.length :
+        null,
+      maxLength,
+    });
+
     throw new HttpsError(
-      "invalid-argument",
-      "One or more project fields are invalid or too long."
+        "invalid-argument",
+        "One or more project fields are invalid or too long.",
     );
   }
+
   return value.trim();
 }
 
+/**
+ * Retry Gemini requests when the service is temporarily unavailable.
+ * @param {Function} request Function that performs the Gemini request.
+ * @param {number} maxAttempts Maximum number of attempts.
+ * @return {Promise<object>} Gemini response.
+ */
+async function generateContentWithRetry(request, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await request();
+    } catch (error) {
+      const message = String(error?.message || error);
+      const retryable =
+        /503|UNAVAILABLE|high demand|429|RESOURCE_EXHAUSTED|500|INTERNAL/i
+          .test(message);
+
+      if (!retryable || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = 1000 * (2 ** (attempt - 1));
+      console.warn(
+        `Gemini request failed (attempt ${attempt}/${maxAttempts}); ` +
+        `retrying in ${delayMs}ms: ${message}`
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error("Gemini request failed after retries.");
+}
 
 function parseJsonObject(text) {
   const cleaned = String(text || "")
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "");
 
   try {
     const result = JSON.parse(cleaned);
@@ -1225,39 +1466,58 @@ function parseJsonObject(text) {
 
     return result;
   } catch (error) {
+    // Try repairing malformed JSON returned by the AI.
+    try {
+      const repaired = JSON.parse(jsonrepair(cleaned));
+
+      if (
+        repaired &&
+        typeof repaired === "object" &&
+        !Array.isArray(repaired)
+      ) {
+        console.warn("AI JSON repaired successfully.");
+        return repaired;
+      }
+    } catch (repairError) {
+      console.error(
+          "AI JSON REPAIR ERROR:",
+          repairError.message,
+      );
+    }
+
     console.error("AI JSON PARSE ERROR:", error.message);
     console.error("AI JSON LENGTH:", cleaned.length);
 
     const positionMatch = String(error.message).match(
-      /position\s+(\d+)/i
+        /position\s+(\d+)/i,
     );
-    const errorPosition = positionMatch
-      ? Number(positionMatch[1])
-      : -1;
+    const errorPosition = positionMatch ?
+      Number(positionMatch[1]) :
+      -1;
 
     if (errorPosition >= 0) {
       const lines = cleaned.split("\n");
       const errorLine = cleaned
-        .slice(0, errorPosition)
-        .split("\n").length;
+          .slice(0, errorPosition)
+          .split("\n").length;
 
       console.error("AI JSON ERROR POSITION:", errorPosition);
       console.error("AI JSON ERROR LINE:", errorLine);
       console.error(
-        "AI JSON ERROR LINE CONTENT:",
-        JSON.stringify(lines[errorLine - 1])
+          "AI JSON ERROR LINE CONTENT:",
+          JSON.stringify(lines[errorLine - 1]),
       );
       console.error(
-        "AI JSON BEFORE ERROR:",
-        JSON.stringify(
-          cleaned.slice(Math.max(0, errorPosition - 300), errorPosition)
-        )
+          "AI JSON BEFORE ERROR:",
+          JSON.stringify(
+              cleaned.slice(Math.max(0, errorPosition - 300), errorPosition),
+          ),
       );
       console.error(
-        "AI JSON AFTER ERROR:",
-        JSON.stringify(
-          cleaned.slice(errorPosition, errorPosition + 500)
-        )
+          "AI JSON AFTER ERROR:",
+          JSON.stringify(
+              cleaned.slice(errorPosition, errorPosition + 500),
+          ),
       );
     }
 
@@ -1267,7 +1527,7 @@ function parseJsonObject(text) {
     if (jsonStart >= 0 && jsonEnd > jsonStart) {
       try {
         const extracted = JSON.parse(
-          cleaned.slice(jsonStart, jsonEnd + 1)
+            cleaned.slice(jsonStart, jsonEnd + 1),
         );
 
         if (
@@ -1280,14 +1540,14 @@ function parseJsonObject(text) {
         }
       } catch (fallbackError) {
         console.error(
-          "AI JSON EXTRACTED PARSE ERROR:",
-          fallbackError.message
+            "AI JSON EXTRACTED PARSE ERROR:",
+            fallbackError.message,
         );
       }
     }
 
     throw new Error(
-      `The AI returned invalid structured JSON: ${error.message}`
+        `The AI returned invalid structured JSON: ${error.message}`,
     );
   }
 }
@@ -1295,11 +1555,12 @@ function parseJsonObject(text) {
 function asStringArray(value, maxItems = 15) {
   if (!Array.isArray(value)) return [];
   return value
-    .filter((item) => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, maxItems);
+      .filter((item) => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, maxItems);
 }
+
 
 async function searchProjectResearch(query) {
   const apiKey = process.env.TAVILY_API_KEY;
@@ -1307,31 +1568,74 @@ async function searchProjectResearch(query) {
   if (!apiKey) {
     throw new HttpsError(
       "failed-precondition",
-      "Web research is not configured. Add TAVILY_API_KEY to functions/.env."
+      "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
     );
   }
 
-  const response = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      search_depth: "advanced",
-      max_results: 5,
-      include_answer: false,
-      include_raw_content: false,
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
+  let response;
+  const maxAttempts = 3;
 
-  if (!response.ok) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: "advanced",
+          max_results: 5,
+          include_answer: false,
+          include_raw_content: false,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (
+        response.ok ||
+        (response.status !== 429 && response.status < 500)
+      ) {
+        break;
+      }
+
+      if (attempt === maxAttempts) {
+        break;
+      }
+
+      console.warn(
+        `Tavily HTTP ${response.status}; retrying ` +
+        `(${attempt}/${maxAttempts}).`,
+      );
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        logger.error("Tavily request failed after retries", {
+          attempt,
+          errorName: error.name,
+          message: error.message,
+        });
+        throw new Error(
+          "The external research service could not be reached after retries.",
+        );
+      }
+
+      console.warn(
+        `Tavily network request failed (${attempt}/${maxAttempts}): ` +
+        `${error.message}`,
+      );
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1000 * attempt),
+    );
+  }
+
+  if (!response || !response.ok) {
     logger.error("Project research search failed", {
-      status: response.status,
+      status: response?.status ?? null,
     });
-    throw new Error("The external research service failed.");
+    throw new Error("The external research service failed after retries.");
   }
 
   const data = await response.json();
@@ -1343,114 +1647,132 @@ async function searchProjectResearch(query) {
       content: String(item.content || "").slice(0, 2500),
       score: Number.isFinite(item.score) ? item.score : null,
     }))
-    .filter((item) => item.url.startsWith("https://") ||
-                      item.url.startsWith("http://"));
+    .filter(
+      (item) =>
+        item.url.startsWith("https://") ||
+        item.url.startsWith("http://"),
+    );
 }
 
 exports.generateAIProjectPlan = onCall(
-  {
-    maxInstances: 3,
-    timeoutSeconds: 300,
-    memory: "1GiB",
-  },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "Please log in to create an AI project plan."
-      );
-    }
+    {
+      maxInstances: 3,
+      timeoutSeconds: 300,
+      memory: "1GiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Please log in to create an AI project plan.",
+        );
+      }
 
-    const data = request.data || {};
+      const data = request.data || {};
 
-    const title = validatePlanText(data.title, 150);
-    if (!title) {
-      throw new HttpsError(
-        "invalid-argument",
-        "A project title is required."
-      );
-    }
+      const title = validatePlanText(data.title, 150, "title");
+      if (!title) {
+        throw new HttpsError(
+            "invalid-argument",
+            "A project title is required.",
+        );
+      }
 
-    const categories = Array.isArray(data.categories)
-      ? data.categories
+      const categories = Array.isArray(data.categories) ?
+      data.categories
           .filter((item) => typeof item === "string")
           .map((item) => item.trim())
           .filter(Boolean)
-          .slice(0, 10)
-      : [];
+          .slice(0, 10) :
+      [];
 
-    const description = validatePlanText(data.description, 5000);
-    const requirements = validatePlanText(data.requirements, 8000);
-    const technologies = validatePlanText(data.technologies, 5000);
-    const analysis = validatePlanText(data.analysis, 8000);
+      const description = validatePlanText(
+          data.description, 5000, "description",
+      );
 
-    // Optional: design output can be screen descriptions or text metadata.
-    // Do not send large base64 image payloads in this field.
-    const designInformation = validatePlanText(
-      data.designInformation,
-      5000
-    );
+      const requirements = validatePlanText(
+          data.requirements, 8000, "requirements",
+      );
 
-    const mode = data.mode === "replan" ? "replan" : "initial";
+      const technologies = validatePlanText(
+          data.technologies, 5000, "technologies",
+      );
 
-    const constraints = {
-      budgetMin: Number.isFinite(data.budgetMin) &&
+      const analysis = validatePlanText(
+        data.analysis,
+        12000,
+        "analysis",
+      );
+      // Optional: design output can be screen descriptions or text metadata.
+      // Do not send large base64 image payloads in this field.
+      const designInformation = validatePlanText(
+          data.designInformation,
+          5000,
+          "designInformation",
+      );
+
+      const mode = data.mode === "replan" ? "replan" : "initial";
+
+      const constraints = {
+        budgetMin: Number.isFinite(data.budgetMin) &&
         data.budgetMin >= 0 ? data.budgetMin : null,
-      budgetMax: Number.isFinite(data.budgetMax) &&
+        budgetMax: Number.isFinite(data.budgetMax) &&
         data.budgetMax >= 0 ? data.budgetMax : null,
-      deadline: validatePlanText(data.deadline, 50),
-      clientFeedback: validatePlanText(data.clientFeedback, 3000),
-      previousPlan: data.previousPlan || null,
-    };
+        deadline: validatePlanText(data.deadline, 50, "deadline"),
 
-    if (
-      constraints.budgetMin != null &&
+        clientFeedback: validatePlanText(
+            data.clientFeedback, 3000, "clientFeedback",
+        ),
+        previousPlan: data.previousPlan || null,
+      };
+
+      if (
+        constraints.budgetMin != null &&
       constraints.budgetMax != null &&
       constraints.budgetMin > constraints.budgetMax
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Minimum budget cannot exceed maximum budget."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Minimum budget cannot exceed maximum budget.",
+        );
+      }
 
-    if (
-      constraints.previousPlan != null &&
+      if (
+        constraints.previousPlan != null &&
       JSON.stringify(constraints.previousPlan).length > 25000
-    ) {
-      throw new HttpsError(
-        "invalid-argument",
-        "The previous plan is too large."
-      );
-    }
+      ) {
+        throw new HttpsError(
+            "invalid-argument",
+            "The previous plan is too large.",
+        );
+      }
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      throw new HttpsError(
-        "failed-precondition",
-        "AI generation is not configured."
-      );
-    }
+      const ai = getGeminiClient();
+      if (!ai) {
+        throw new HttpsError(
+            "failed-precondition",
+            "AI generation is not configured.",
+        );
+      }
 
-    const projectInput = {
-      title,
-      categories,
-      description,
-      requirements,
-      technologies,
-      analysis,
-      designInformation,
-    };
+      const projectInput = {
+        title,
+        categories,
+        description,
+        requirements,
+        technologies,
+        analysis,
+        designInformation,
+      };
 
-    try {
-      
-/*
+      try {
+        /*
  * Stage 1: Understand the client's project requirements.
  */
-const analysisResponse = await ai.models.generateContent({
-  model: "gemini-3.5-flash-lite",
-  
-contents: `
+        const analysisResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+
+          contents: `
 # SKILLBRIDGE — ENTERPRISE PROJECT DISCOVERY & BUSINESS ANALYSIS
 
 ## 1. YOUR PROFESSIONAL ROLE
@@ -2144,23 +2466,24 @@ Do not fabricate facts to fill the schema.
 CLIENT PROJECT INFORMATION:
 ${JSON.stringify(projectInput)}
 `,
-  config: {
-    temperature: 0.2,
-    maxOutputTokens: 16384,
-  },
-});
+          config: {
+            temperature: 0.2,
+            maxOutputTokens: 16384,
+          },
+        });
 
 
-const analysisText = extractGeneratedText(analysisResponse);
+        const analysisText = extractGeneratedText(analysisResponse);
 
-console.log("AI ANALYSIS RESPONSE LENGTH:", analysisText?.length);
-console.log("AI ANALYSIS RESPONSE END:", analysisText?.slice(-500));
+        console.log("AI ANALYSIS RESPONSE LENGTH:", analysisText?.length);
+        console.log("AI ANALYSIS RESPONSE END:", analysisText?.slice(-500));
 
-const projectAnalysis = parseJsonObject(analysisText);
+        const projectAnalysis = parseJsonObject(analysisText);
 
-      const queryResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: `
+        const queryResponse = await generateContentWithRetry(() =>
+  ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: `
 You are SkillBridge's Principal Software Research Analyst, Solution Architect, and Technical Due-Diligence Specialist.
 
 Your responsibility is to prepare high-quality, evidence-oriented web research queries that help SkillBridge produce a technically credible, commercially realistic, secure, and implementation-ready software project plan and estimate.
@@ -2241,60 +2564,88 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
 ]
 }
 `,
-        config: {
-          temperature: 0.2,
-          maxOutputTokens: 1500,
-        },
-      });
-      
-      const queryText = extractGeneratedText(queryResponse);
-
-      console.log("AI QUERY RESPONSE LENGTH:", queryText?.length);
-      console.log("AI QUERY RESPONSE:", queryText);
-
-      const queryData = parseJsonObject(queryText);
-
-      const queries = asStringArray(queryData.queries, 6)
-        .filter((query, index, allQueries) =>
-          allQueries.findIndex(
-            (item) => item.toLowerCase() === query.toLowerCase()
-          ) === index
-        );
-
-      if (queries.length !== 6) {
-        throw new HttpsError(
-          "internal",
-          "The AI did not produce exactly six distinct research queries. Please try again."
-        );
-      }
-
-
-      /*
-       * Stage 2: Perform actual external web searches.
-       */
-      const researchBatches = await Promise.all(
-        queries.map((query) => searchProjectResearch(query))
+          config: {
+            temperature: 0.2,
+            maxOutputTokens: 1500,
+          },
+        })
       );
 
-      const uniqueSources = new Map();
-      for (const results of researchBatches) {
-        for (const result of results) {
-          if (!uniqueSources.has(result.url)) {
-            uniqueSources.set(result.url, result);
+        const queryText = extractGeneratedText(queryResponse);
+
+        console.log("AI QUERY RESPONSE LENGTH:", queryText?.length);
+        console.log("AI QUERY RESPONSE:", queryText);
+
+        const queryData = parseJsonObject(queryText);
+
+        const queries = asStringArray(queryData.queries, 6)
+            .filter((query, index, allQueries) =>
+              allQueries.findIndex(
+                  (item) => item.toLowerCase() === query.toLowerCase(),
+              ) === index,
+            );
+
+        if (queries.length !== 6) {
+          throw new HttpsError(
+              "internal",
+              "The AI did not produce exactly six distinct research queries. Please try again.",
+          );
+        }
+
+
+       
+        /*
+         * Stage 2: Perform external web searches.
+         * Preserve successful results if an individual query fails.
+         */
+        const researchResults = await Promise.allSettled(
+          queries.map((query) => searchProjectResearch(query)),
+        );
+
+        const uniqueSources = new Map();
+        let failedResearchCount = 0;
+
+        for (let i = 0; i < researchResults.length; i++) {
+          const result = researchResults[i];
+
+          if (result.status === "rejected") {
+            failedResearchCount++;
+
+            logger.warn("Project research query failed", {
+              queryIndex: i,
+              errorName: result.reason?.name || "Error",
+              message: result.reason?.message || String(result.reason),
+            });
+
+            continue;
+          }
+
+          for (const source of result.value) {
+            if (!uniqueSources.has(source.url)) {
+              uniqueSources.set(source.url, source);
+            }
           }
         }
-      }
 
-      const sources = Array.from(uniqueSources.values()).slice(0, 30);
+        const sources = Array.from(uniqueSources.values()).slice(0, 30);
 
-      if (!sources.length) {
-        throw new Error("No usable web research sources were returned.");
-      }
+        logger.info("Project research completed", {
+          totalQueries: queries.length,
+          failedQueries: failedResearchCount,
+          successfulQueries: queries.length - failedResearchCount,
+          uniqueSourceCount: sources.length,
+        });
 
-      /*
+        if (!sources.length) {
+          throw new Error(
+            "All project research queries failed or returned no usable sources.",
+          );
+        }
+
+        /*
        * Stage 3: Combine client information and research into a plan.
        */
-     const planningPrompt = `
+        const planningPrompt = `
 You are SkillBridge's Principal Software Architect, Enterprise Business
 Analyst, Technical Research Lead, Software Delivery Planner, and
 Software Estimation Specialist.
@@ -3001,46 +3352,48 @@ Use JSON null when a cost or rate cannot be responsibly calculated.
 Do not place Markdown fences around the JSON.
 `;
 
-      const planResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: planningPrompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.2,
-          maxOutputTokens: 12000,
-        },
-      });
+        const planResponse = await generateContentWithRetry(() =>
+          ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents: planningPrompt,
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
+              maxOutputTokens: 12000,
+            },
+          })
+        );
 
-      
+
         const planText = extractGeneratedText(planResponse);
 
         console.log("AI PLAN RESPONSE LENGTH:", planText?.length);
         console.log(
-          "AI PLAN FINISH REASON:",
-          planResponse?.candidates?.[0]?.finishReason
+            "AI PLAN FINISH REASON:",
+            planResponse?.candidates?.[0]?.finishReason,
         );
         console.log(
-          "AI PLAN USAGE:",
-          JSON.stringify(planResponse?.usageMetadata ?? {})
+            "AI PLAN USAGE:",
+            JSON.stringify(planResponse?.usageMetadata ?? {}),
         );
         console.log(
-          "AI PLAN RESPONSE START:",
-          String(planText ?? "").slice(0, 300)
+            "AI PLAN RESPONSE START:",
+            String(planText ?? "").slice(0, 300),
         );
         console.log(
-          "AI PLAN RESPONSE END:",
-          String(planText ?? "").slice(-500)
+            "AI PLAN RESPONSE END:",
+            String(planText ?? "").slice(-500),
         );
 
         const plan = parseJsonObject(planText);
 
-      /*
+        /*
        * Save the result privately under the requesting user's UID.
        * This is a draft plan, not an approved quote or payment instruction.
        */
-  // Validate the basic structure of the AI-generated plan.
-  if (
-    !plan ||
+        // Validate the basic structure of the AI-generated plan.
+        if (
+          !plan ||
     typeof plan !== "object" ||
     Array.isArray(plan) ||
     !plan.projectSummary ||
@@ -3051,218 +3404,257 @@ Do not place Markdown fences around the JSON.
     !Array.isArray(plan.deliveryPhases) ||
     !Array.isArray(plan.risks) ||
     !plan.constraintAssessment
-  ) {
-    throw new HttpsError(
-      "internal",
-      "The AI generated an incomplete project plan. Please try again."
-    );
-  }
+        ) {
+          throw new HttpsError(
+              "internal",
+              "The AI generated an incomplete project plan. Please try again.",
+          );
+        }
 
-  // Validate project effort and timeline ranges.
-  const {
-    effortHoursMin,
-    effortHoursMax,
-    timelineMinWeeks,
-    timelineMaxWeeks,
-  } = plan.estimate;
+        // Validate project effort and timeline ranges.
+        const {
+          effortHoursMin,
+          effortHoursMax,
+          timelineMinWeeks,
+          timelineMaxWeeks,
+        } = plan.estimate;
 
-  const validRange = (min, max) =>
-    Number.isFinite(min) &&
+        const validRange = (min, max) =>
+          Number.isFinite(min) &&
     Number.isFinite(max) &&
     min >= 0 &&
     max >= min;
 
-  if (
-    !validRange(effortHoursMin, effortHoursMax) ||
+        if (
+          !validRange(effortHoursMin, effortHoursMax) ||
     !validRange(timelineMinWeeks, timelineMaxWeeks)
-  ) {
-    throw new HttpsError(
-      "internal",
-      "The AI generated invalid effort or timeline estimates. Please try again."
-    );
-  }
+        ) {
+          throw new HttpsError(
+              "internal",
+              "The AI generated invalid effort or timeline estimates. Please try again.",
+          );
+        }
 
-  // Validate task effort and task-level fixed-price ranges.
-  // Price ranges are pre-contingency; project totals are recalculated below.
-  for (const module of plan.modules) {
-    if (!module || !Array.isArray(module.tasks)) {
-      throw new HttpsError(
-        "internal",
-        "The AI generated an invalid project module."
-      );
-    }
+        // Validate task effort and task-level fixed-price ranges.
+        // Price ranges are pre-contingency; project totals are recalculated below.
+        for (const module of plan.modules) {
+          if (!module || !Array.isArray(module.tasks)) {
+            throw new HttpsError(
+                "internal",
+                "The AI generated an invalid project module.",
+            );
+          }
 
-    for (const task of module.tasks) {
-      if (
-        !task ||
+          for (const task of module.tasks) {
+            if (
+              !task ||
         !task.name ||
         !validRange(task.effortHoursMin, task.effortHoursMax) ||
         !validRange(task.priceMinINR, task.priceMaxINR) ||
         task.priceMaxINR <= 0
-      ) {
-        throw new HttpsError(
-          "internal",
-          "The AI generated an incomplete task estimate or task price. Please retry; if the problem persists, clarify the project scope."
-        );
-      }
-    }
-  }
+            ) {
+              throw new HttpsError(
+                  "internal",
+                  "The AI generated an incomplete task estimate or task price. Please retry; if the problem persists, clarify the project scope.",
+              );
+            }
+          }
+        }
 
-  // Recalculate total effort from all task estimates.
-  let calculatedEffortMin = 0;
-  let calculatedEffortMax = 0;
+        // Recalculate total effort from all task estimates.
+        let calculatedEffortMin = 0;
+        let calculatedEffortMax = 0;
 
-  for (const module of plan.modules) {
-    for (const task of module.tasks) {
-      calculatedEffortMin += task.effortHoursMin;
-      calculatedEffortMax += task.effortHoursMax;
-    }
-  }
+        for (const module of plan.modules) {
+          for (const task of module.tasks) {
+            calculatedEffortMin += task.effortHoursMin;
+            calculatedEffortMax += task.effortHoursMax;
+          }
+        }
 
-  // Allow a small tolerance for numeric rounding.
-  const effortTolerance = 0.01;
+        // Allow a small tolerance for numeric rounding.
+        const effortTolerance = 0.01;
 
-  
-  if (
-    Math.abs(calculatedEffortMin - plan.estimate.effortHoursMin) >
+
+        if (
+          Math.abs(calculatedEffortMin - plan.estimate.effortHoursMin) >
       effortTolerance ||
     Math.abs(calculatedEffortMax - plan.estimate.effortHoursMax) >
       effortTolerance
-  ) {
-    logger.warn("AI plan effort totals recalculated from task estimates.", {
-      calculatedEffortMin,
-      calculatedEffortMax,
-      reportedEffortMin: plan.estimate.effortHoursMin,
-      reportedEffortMax: plan.estimate.effortHoursMax,
-    });
-  }
+        ) {
+          logger.warn("AI plan effort totals recalculated from task estimates.", {
+            calculatedEffortMin,
+            calculatedEffortMax,
+            reportedEffortMin: plan.estimate.effortHoursMin,
+            reportedEffortMax: plan.estimate.effortHoursMax,
+          });
+        }
 
-  // Task-level estimates are the source of truth for effort and fixed-price.
-  plan.estimate.effortHoursMin = calculatedEffortMin;
-  plan.estimate.effortHoursMax = calculatedEffortMax;
+        // Task-level estimates are the source of truth for effort and fixed-price.
+        plan.estimate.effortHoursMin = calculatedEffortMin;
+        plan.estimate.effortHoursMax = calculatedEffortMax;
 
-  let taskPriceMinINR = 0;
-  let taskPriceMaxINR = 0;
-  for (const module of plan.modules) {
-    for (const task of module.tasks) {
-      taskPriceMinINR += task.priceMinINR;
-      taskPriceMaxINR += task.priceMaxINR;
-    }
-  }
+        let taskPriceMinINR = 0;
+        let taskPriceMaxINR = 0;
+        for (const module of plan.modules) {
+          for (const task of module.tasks) {
+            taskPriceMinINR += task.priceMinINR;
+            taskPriceMaxINR += task.priceMaxINR;
+          }
+        }
 
-  // Apply contingency exactly once to the pre-contingency task-price totals.
-  const rawContingency = plan.estimate.contingencyPercent;
-  const requestedContingency =
-    typeof rawContingency === "number"
-      ? rawContingency
-      : typeof rawContingency === "string" && rawContingency.trim() !== ""
-        ? Number(rawContingency)
-        : Number.NaN;
-  const contingencyPercent =
+        // Apply contingency exactly once to the pre-contingency task-price totals.
+        const rawContingency = plan.estimate.contingencyPercent;
+        const requestedContingency =
+    typeof rawContingency === "number" ?
+      rawContingency :
+      typeof rawContingency === "string" && rawContingency.trim() !== "" ?
+        Number(rawContingency) :
+        Number.NaN;
+        const contingencyPercent =
     Number.isFinite(requestedContingency) &&
     requestedContingency >= 0 &&
-    requestedContingency <= 50
-      ? requestedContingency
-      : 15;
+    requestedContingency <= 50 ?
+      requestedContingency :
+      15;
 
-  plan.estimate.contingencyPercent = contingencyPercent;
-  plan.estimate.costMinINR = Math.round(
-    taskPriceMinINR * (1 + contingencyPercent / 100)
-  );
-  plan.estimate.costMaxINR = Math.round(
-    taskPriceMaxINR * (1 + contingencyPercent / 100)
-  );
-  plan.estimate.calculationNotes = Array.isArray(plan.estimate.calculationNotes)
-    ? plan.estimate.calculationNotes
-    : [];
-  plan.estimate.calculationNotes.push(
-    `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${plan.estimate.marketRateStatus || "unverified"}.`
-  );
-
-
-      const planRef = db.collection("aiProjectPlans").doc();
+        plan.estimate.contingencyPercent = contingencyPercent;
+        plan.estimate.costMinINR = Math.round(
+            taskPriceMinINR * (1 + contingencyPercent / 100),
+        );
+        plan.estimate.costMaxINR = Math.round(
+            taskPriceMaxINR * (1 + contingencyPercent / 100),
+        );
+        plan.estimate.calculationNotes = Array.isArray(plan.estimate.calculationNotes) ?
+    plan.estimate.calculationNotes :
+    [];
+        plan.estimate.calculationNotes.push(
+            `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${plan.estimate.marketRateStatus || "unverified"}.`,
+        );
 
 
-      // Validate team roles and allow unknown market rates.
-      for (const member of plan.team) {
-        if (
-          !member ||
+        const planRef = db.collection("aiProjectPlans").doc();
+
+
+        // Validate team roles and allow unknown market rates.
+        for (const member of plan.team) {
+          if (
+            !member ||
           typeof member.role !== "string" ||
           !member.role.trim() ||
           !Number.isInteger(member.headcount) ||
           member.headcount < 1
-        ) {
-          throw new HttpsError(
-            "internal",
-            "The AI generated invalid team information. Please try again."
-          );
-        }
+          ) {
+            throw new HttpsError(
+                "internal",
+                "The AI generated invalid team information. Please try again.",
+            );
+          }
 
-        const minRate = member.rateMinINRPerHour;
-        const maxRate = member.rateMaxINRPerHour;
+          const minRate = member.rateMinINRPerHour;
+          const maxRate = member.rateMaxINRPerHour;
 
-        const ratesAreUnknown =
+          const ratesAreUnknown =
           minRate === null && maxRate === null;
 
-        const ratesAreValid =
+          const ratesAreValid =
           validRange(minRate, maxRate) &&
           maxRate > 0;
 
-        if (!ratesAreUnknown && !ratesAreValid) {
-          throw new HttpsError(
-            "internal",
-            "The AI generated invalid hourly rates. Please try again."
-          );
+          if (!ratesAreUnknown && !ratesAreValid) {
+            throw new HttpsError(
+                "internal",
+                "The AI generated invalid hourly rates. Please try again.",
+            );
+          }
         }
+
+        await planRef.set({
+          planId: planRef.id,
+          ownerUid: request.auth.uid,
+          mode,
+          projectInput,
+          constraints,
+          researchQueries: queries,
+          sources,
+          plan,
+          status: "draft",
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        logger.info("AI project research and plan generated", {
+          planId: planRef.id,
+          userId: request.auth.uid,
+          mode,
+          sourceCount: sources.length,
+        });
+
+        return {
+          success: true,
+          planId: planRef.id,
+          mode,
+          researchQueries: queries,
+          sources,
+          plan,
+          status: "draft",
+        };
+      } catch (error) {
+        logger.error("AI project research/planning failed", {
+          userId: request.auth.uid,
+          mode,
+          errorName: error?.name,
+          message: error?.message,
+          stack: error?.stack,
+          details: error?.details,
+          cause: error?.cause?.message,
+        });
+
+        if (error instanceof HttpsError) throw error;
+
+        throw new HttpsError(
+            "internal",
+            "Unable to research and plan this project. Please try again.",
+        );
       }
-
-      await planRef.set({
-        planId: planRef.id,
-        ownerUid: request.auth.uid,
-        mode,
-        projectInput,
-        constraints,
-        researchQueries: queries,
-        sources,
-        plan,
-        status: "draft",
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-
-      logger.info("AI project research and plan generated", {
-        planId: planRef.id,
-        userId: request.auth.uid,
-        mode,
-        sourceCount: sources.length,
-      });
-
-      return {
-        success: true,
-        planId: planRef.id,
-        mode,
-        researchQueries: queries,
-        sources,
-        plan,
-        status: "draft",
-      };
-    } catch (error) {
-      logger.error("AI project research/planning failed", {
-        userId: request.auth.uid,
-        mode,
-        errorName: error?.name,
-        message: error?.message,
-        stack: error?.stack,
-        details: error?.details,
-        cause: error?.cause?.message,
-      });
-
-      if (error instanceof HttpsError) throw error;
-
-      throw new HttpsError(
-        "internal",
-        "Unable to research and plan this project. Please try again."
-      );
-    }
-  }
+    },
 );
+
+exports.ensureSupabaseRole = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const auth = getAuth();
+
+  try {
+    const user = await auth.getUser(uid);
+    const existingClaims = user.customClaims || {};
+
+    if (existingClaims.role !== "authenticated") {
+      await auth.setCustomUserClaims(uid, {
+        ...existingClaims,
+        role: "authenticated",
+      });
+    }
+
+    return {
+      success: true,
+      message: "Supabase role configured.",
+    };
+  } catch (error) {
+    logger.error("Failed to configure Supabase role", {
+      uid,
+      error: error.message,
+    });
+
+    throw new HttpsError(
+      "internal",
+      "Could not configure Supabase authentication.",
+    );
+  }
+});

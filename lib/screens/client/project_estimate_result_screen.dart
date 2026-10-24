@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:skill_bridge/services/supabase_storage_service.dart';
 
 const _primary = Color(0xFF2563EB);
 const _indigo = Color(0xFF4F46E5);
@@ -23,6 +26,11 @@ class ProjectEstimateResultScreen extends StatefulWidget {
   final String technologies;
   final Map<String, dynamic> plan;
   final String? planId;
+  final List<String> designImageUrls;
+  final List<Uint8List> generatedDesignImageBytes;
+  final List<Uint8List> referenceImageBytesList;
+  final List<String> referenceImageNames;
+  final List<String> referenceImageMimeTypes;
 
   const ProjectEstimateResultScreen({
     super.key,
@@ -34,6 +42,11 @@ class ProjectEstimateResultScreen extends StatefulWidget {
     required this.technologies,
     required this.plan,
     this.planId,
+    required this.designImageUrls,
+    this.generatedDesignImageBytes = const [],
+    this.referenceImageBytesList = const [],
+    this.referenceImageNames = const [],
+    this.referenceImageMimeTypes = const [],
   });
 
   @override
@@ -77,6 +90,14 @@ class _ProjectEstimateResultScreenState
   Map<String, dynamic> get _estimate => _asMap(_currentPlan['estimate']);
 
   Map<String, dynamic> get _team => _asMap(_currentPlan['team']);
+
+  int get _teamRoleCount {
+    final roles = _asList(_team['roles']);
+    if (roles.isNotEmpty) return roles.length;
+    return _currentPlan['team'] is List
+        ? _asList(_currentPlan['team']).length
+        : 0;
+  }
 
   List<dynamic> get _modules => _asList(_currentPlan['modules']);
 
@@ -408,11 +429,39 @@ class _ProjectEstimateResultScreenState
             'budget and assumptions before confirming.',
             style: TextStyle(color: Color(0xFFEFF4FF), height: 1.5),
           ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _heroPill(
+                Icons.view_module_outlined,
+                '${_modules.length} modules',
+              ),
+              _heroPill(Icons.groups_2_outlined, '$_teamRoleCount team roles'),
+              _heroPill(
+                Icons.flag_outlined,
+                '${_phases.length} delivery phases',
+              ),
+            ],
+          ),
           if ((_currentPlanId ?? '').trim().isNotEmpty) ...[
             const SizedBox(height: 14),
-            Text(
-              'Estimate ID: $_currentPlanId',
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Text(
+                'Estimate ID  $_currentPlanId',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ],
@@ -1319,9 +1368,7 @@ class _ProjectEstimateResultScreenState
     final feedbackParts = <String>[];
     final trimmedFeedback = (additionalFeedback ?? '').trim();
     if (trimmedFeedback.isNotEmpty) {
-      feedbackParts.add(
-        'Additional client change request: $trimmedFeedback',
-      );
+      feedbackParts.add('Additional client change request: $trimmedFeedback');
     }
 
     if (_costChoice == false) {
@@ -1446,6 +1493,51 @@ class _ProjectEstimateResultScreenState
     setState(() => _isSubmitting = true);
 
     try {
+      // Upload images only after the client confirms acceptance.
+      List<String> finalDesignImageUrls = List<String>.from(
+        widget.designImageUrls,
+      );
+
+      if (status == 'accepted') {
+        final storage = SupabaseStorageService.instance;
+
+        final safePlanId = _currentPlanId!.replaceAll(
+          RegExp(r'[^A-Za-z0-9_-]'),
+          '_',
+        );
+
+        final uploadProjectId = 'accepted_${user.uid}_$safePlanId';
+
+        for (int i = 0; i < widget.generatedDesignImageBytes.length; i++) {
+          final url = await storage.uploadProjectImage(
+            bytes: widget.generatedDesignImageBytes[i],
+            fileName: 'generated_design_${i + 1}.png',
+            projectId: uploadProjectId,
+            contentType: 'image/png',
+          );
+
+          finalDesignImageUrls.add(url);
+        }
+
+        for (int i = 0; i < widget.referenceImageBytesList.length; i++) {
+          final fileName = i < widget.referenceImageNames.length
+              ? widget.referenceImageNames[i]
+              : 'reference_image_${i + 1}.jpg';
+
+          final mimeType = i < widget.referenceImageMimeTypes.length
+              ? widget.referenceImageMimeTypes[i]
+              : 'image/jpeg';
+
+          final url = await storage.uploadProjectImage(
+            bytes: widget.referenceImageBytesList[i],
+            fileName: fileName,
+            projectId: uploadProjectId,
+            contentType: mimeType,
+          );
+
+          finalDesignImageUrls.add(url);
+        }
+      }
       final doc = <String, dynamic>{
         // Nullable: a draft estimate can be reviewed before a project exists.
         'projectId': widget.projectId,
@@ -1483,91 +1575,84 @@ class _ProjectEstimateResultScreenState
         // A deterministic confirmation ID makes retries idempotent: a timeout
         // after a successful server write must not create a second project.
         final firestore = FirebaseFirestore.instance;
-        final safePlanId = _currentPlanId!
-            .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+        final safePlanId = _currentPlanId!.replaceAll(
+          RegExp(r'[^A-Za-z0-9_-]'),
+          '_',
+        );
         final confirmationRef = firestore
             .collection('projectEstimateConfirmations')
             .doc('${user.uid}_${safePlanId}');
         final requestedProjectId = widget.projectId?.trim();
-        final newProjectRef = requestedProjectId != null &&
-                requestedProjectId.isNotEmpty
+        final newProjectRef =
+            requestedProjectId != null && requestedProjectId.isNotEmpty
             ? firestore.collection('projects').doc(requestedProjectId)
             : firestore.collection('projects').doc();
 
-        createdProjectId = await firestore.runTransaction<String>(
-          (transaction) async {
-            final confirmationSnapshot =
-                await transaction.get(confirmationRef);
-            final priorConfirmation = confirmationSnapshot.data() ?? {};
-            final priorProjectId =
-                priorConfirmation['projectId']?.toString().trim() ?? '';
+        createdProjectId = await firestore.runTransaction<String>((
+          transaction,
+        ) async {
+          final confirmationSnapshot = await transaction.get(confirmationRef);
+          final priorConfirmation = confirmationSnapshot.data() ?? {};
+          final priorProjectId =
+              priorConfirmation['projectId']?.toString().trim() ?? '';
 
-            // Reuse the ID from a previous successful attempt if present.
-            final projectRef = priorProjectId.isNotEmpty
-                ? firestore.collection('projects').doc(priorProjectId)
-                : newProjectRef;
-            final projectSnapshot = await transaction.get(projectRef);
-            final existingProject = projectSnapshot.data() ?? {};
+          // Reuse the ID from a previous successful attempt if present.
+          final projectRef = priorProjectId.isNotEmpty
+              ? firestore.collection('projects').doc(priorProjectId)
+              : newProjectRef;
+          final projectSnapshot = await transaction.get(projectRef);
+          final existingProject = projectSnapshot.data() ?? {};
 
-            // If both records already exist, this acceptance was completed
-            // earlier. Return the same project rather than creating another.
-            if (confirmationSnapshot.exists &&
-                priorConfirmation['status'] == 'accepted' &&
-                projectSnapshot.exists) {
-              return projectRef.id;
-            }
-
-            final now = FieldValue.serverTimestamp();
-            final projectData = <String, dynamic>{
-              'projectId': projectRef.id,
-              'clientId': user.uid,
-              'title': widget.title.trim(),
-              'categories': widget.categories,
-              'description': widget.description.trim(),
-              'requirements': widget.requirements.trim(),
-              'technologies': widget.technologies.trim(),
-              'status': existingProject['status'] ?? 'requirement',
-              'planId': _currentPlanId,
-              'plan': _currentPlan,
-              'estimate': _estimate,
-              'acceptedScope': _scopeItems.map((item) => item.title).toList(),
-              'acceptedCost': true,
-              'acceptedTimeline': true,
-              'acceptedTerms': true,
-              'termsVersion': 'v1',
-              'updatedAt': now,
-            };
-            if (!projectSnapshot.exists ||
-                existingProject['createdAt'] == null) {
-              projectData['createdAt'] = now;
-            }
-            final clientName = user.displayName?.trim() ?? '';
-            if (clientName.isNotEmpty) {
-              projectData['clientName'] = clientName;
-            }
-
-            // merge:true preserves fields owned by other project workflows.
-            transaction.set(
-              projectRef,
-              projectData,
-              SetOptions(merge: true),
-            );
-            transaction.set(
-              confirmationRef,
-              <String, dynamic>{
-                ...doc,
-                'projectId': projectRef.id,
-                'createdAt': confirmationSnapshot.exists
-                    ? (priorConfirmation['createdAt'] ?? now)
-                    : now,
-                'updatedAt': now,
-              },
-              SetOptions(merge: true),
-            );
-
+          // If both records already exist, this acceptance was completed
+          // earlier. Return the same project rather than creating another.
+          if (confirmationSnapshot.exists &&
+              priorConfirmation['status'] == 'accepted' &&
+              projectSnapshot.exists) {
             return projectRef.id;
-          },
-        );
+          }
+
+          final now = FieldValue.serverTimestamp();
+          final projectData = <String, dynamic>{
+            'projectId': projectRef.id,
+            'clientId': user.uid,
+            'title': widget.title.trim(),
+            'categories': widget.categories,
+            'description': widget.description.trim(),
+            'requirements': widget.requirements.trim(),
+            'technologies': widget.technologies.trim(),
+            'status': existingProject['status'] ?? 'requirement',
+            'planId': _currentPlanId,
+            'plan': _currentPlan,
+            'designImageUrls': finalDesignImageUrls,
+            'estimate': _estimate,
+            'acceptedScope': _scopeItems.map((item) => item.title).toList(),
+            'acceptedCost': true,
+            'acceptedTimeline': true,
+            'acceptedTerms': true,
+            'termsVersion': 'v1',
+            'updatedAt': now,
+          };
+          if (!projectSnapshot.exists || existingProject['createdAt'] == null) {
+            projectData['createdAt'] = now;
+          }
+          final clientName = user.displayName?.trim() ?? '';
+          if (clientName.isNotEmpty) {
+            projectData['clientName'] = clientName;
+          }
+
+          // merge:true preserves fields owned by other project workflows.
+          transaction.set(projectRef, projectData, SetOptions(merge: true));
+          transaction.set(confirmationRef, <String, dynamic>{
+            ...doc,
+            'projectId': projectRef.id,
+            'createdAt': confirmationSnapshot.exists
+                ? (priorConfirmation['createdAt'] ?? now)
+                : now,
+            'updatedAt': now,
+          }, SetOptions(merge: true));
+
+          return projectRef.id;
+        });
       } else {
         // Questions and change requests remain separate response records.
         await FirebaseFirestore.instance
@@ -1598,17 +1683,65 @@ class _ProjectEstimateResultScreenState
     }
   }
 
+  Widget _heroPill(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _metricCard({
     required IconData icon,
     required String title,
     required String value,
   }) {
-    return _card(
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x060F172A),
+            blurRadius: 12,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: _primary, size: 25),
-          const SizedBox(height: 10),
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [_primary, _indigo]),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+          const SizedBox(height: 14),
           Text(
             title,
             style: const TextStyle(
@@ -1624,6 +1757,7 @@ class _ProjectEstimateResultScreenState
               color: _dark,
               fontSize: 17,
               fontWeight: FontWeight.w800,
+              height: 1.25,
             ),
           ),
         ],
@@ -1635,15 +1769,19 @@ class _ProjectEstimateResultScreenState
     return Row(
       children: [
         Container(
-          width: 38,
-          height: 38,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: const Color(0xFFEFF4FF),
-            borderRadius: BorderRadius.circular(12),
+            gradient: const LinearGradient(
+              colors: [Color(0xFFEFF4FF), Color(0xFFE0E7FF)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(icon, color: _primary),
+          child: Icon(icon, color: _primary, size: 22),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Expanded(
           child: Text(
             title,
@@ -1651,6 +1789,7 @@ class _ProjectEstimateResultScreenState
               color: _dark,
               fontSize: 17,
               fontWeight: FontWeight.w800,
+              height: 1.25,
             ),
           ),
         ),
@@ -1661,16 +1800,16 @@ class _ProjectEstimateResultScreenState
   Widget _card({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE8EDF5)),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x060F172A),
-            blurRadius: 12,
-            offset: Offset(0, 3),
+            color: Color(0x080F172A),
+            blurRadius: 16,
+            offset: Offset(0, 5),
           ),
         ],
       ),

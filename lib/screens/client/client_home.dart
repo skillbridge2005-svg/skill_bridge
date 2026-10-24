@@ -397,10 +397,7 @@ class _ClientHomeState extends State<ClientHome>
                   value: 'settings',
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.settings_outlined,
-                        size: 20,
-                      ),
+                      Icon(Icons.settings_outlined, size: 20),
                       SizedBox(width: 12),
                       Text('Settings'),
                     ],
@@ -2340,14 +2337,8 @@ Widget _languageOption({
           style: const TextStyle(fontSize: 11, color: Color(0xFF667085)),
         ),
         trailing: selected
-            ? const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF2563EB),
-              )
-            : const Icon(
-                Icons.chevron_right_rounded,
-                color: Color(0xFF98A2B3),
-              ),
+            ? const Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB))
+            : const Icon(Icons.chevron_right_rounded, color: Color(0xFF98A2B3)),
       ),
     ),
   );
