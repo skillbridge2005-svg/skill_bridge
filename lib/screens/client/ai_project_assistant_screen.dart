@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../localization/app_localizations.dart';
 import 'initial_project_estimate_screen.dart';
@@ -26,6 +27,7 @@ class AIProjectAssistantScreen extends StatefulWidget {
   final String description;
   final String requirements;
   final String initialTarget;
+  final Uint8List? initialDesignImageBytes;
 
   const AIProjectAssistantScreen({
     super.key,
@@ -34,6 +36,7 @@ class AIProjectAssistantScreen extends StatefulWidget {
     required this.description,
     required this.requirements,
     required this.initialTarget,
+    this.initialDesignImageBytes,
   });
 
   @override
@@ -50,6 +53,14 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
   bool _analyzing = false;
   bool _analyzed = false;
 
+  final ImagePicker _imagePicker = ImagePicker();
+
+  final List<Uint8List> _selectedImageBytesList = [];
+  final List<String> _selectedImageNames = [];
+  final List<String> _selectedImageMimeTypes = [];
+
+  bool _isPickingImage = false;
+
   bool _generatingDescription = false;
   bool _generatingRequirements = false;
   bool _generatingTechnologies = false;
@@ -57,6 +68,7 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
   List<_GeneratedDesignPage> _generatedPages = [];
   int _designPageIndex = 0;
   bool _generatingDesign = false;
+  bool _uploadingDesignImages = false;
 
   String _analysis = '';
 
@@ -74,6 +86,15 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     _technologiesController = TextEditingController(
       text: 'Flutter, Firebase, Firestore, REST API',
     );
+
+    // Receive the design image from Create Project.
+    final initialImage = widget.initialDesignImageBytes;
+
+    if (initialImage != null) {
+      _selectedImageBytesList.add(initialImage);
+      _selectedImageNames.add('project_design.png');
+      _selectedImageMimeTypes.add('image/png');
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -115,6 +136,85 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
           ),
         ),
       );
+  }
+
+  Future<void> _pickDesignImage() async {
+    if (_isPickingImage) return;
+
+    setState(() => _isPickingImage = true);
+
+    try {
+      final images = await _imagePicker.pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+
+      if (images.isEmpty || !mounted) return;
+
+      final remainingSlots = 10 - _selectedImageBytesList.length;
+
+      if (remainingSlots <= 0) {
+        _showMessage('You can select a maximum of 10 images.');
+        return;
+      }
+
+      final imagesToAdd = images.take(remainingSlots).toList();
+
+      final newBytesList = <Uint8List>[];
+      final newNames = <String>[];
+      final newMimeTypes = <String>[];
+
+      for (final image in imagesToAdd) {
+        final bytes = await image.readAsBytes();
+
+        if (!mounted) return;
+
+        if (bytes.length > 10 * 1024 * 1024) {
+          _showMessage('${image.name} is larger than 10 MB and was skipped.');
+          continue;
+        }
+
+        final extension = image.name.split('.').last.toLowerCase();
+
+        String mimeType;
+        if (extension == 'png') {
+          mimeType = 'image/png';
+        } else if (extension == 'webp') {
+          mimeType = 'image/webp';
+        } else if (extension == 'jpg' || extension == 'jpeg') {
+          mimeType = 'image/jpeg';
+        } else {
+          _showMessage(
+            '${image.name} has an unsupported format. Use JPG, PNG, or WEBP.',
+          );
+          continue;
+        }
+
+        newBytesList.add(bytes);
+        newNames.add(image.name);
+        newMimeTypes.add(mimeType);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _selectedImageBytesList.addAll(newBytesList);
+        _selectedImageNames.addAll(newNames);
+        _selectedImageMimeTypes.addAll(newMimeTypes);
+      });
+
+      if (images.length > remainingSlots) {
+        _showMessage('Only 10 images can be selected in total.');
+      }
+    } catch (e) {
+      debugPrint('Image selection error: $e');
+      _showMessage('Unable to select design images.');
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingImage = false);
+      }
+    }
   }
 
   List<_GeneratedDesignPage> _pagesFromResponse(Map<String, dynamic> data) {
@@ -1090,7 +1190,7 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                         ],
                         const SizedBox(height: 10),
                         SizedBox(
-                          height: 420,
+                          height: 560,
                           child: PageView.builder(
                             itemCount: _generatedPages.length,
                             onPageChanged: (index) {
@@ -1104,20 +1204,9 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                                 borderRadius: BorderRadius.circular(14),
                                 child: ColoredBox(
                                   color: const Color(0xFFF8FAFC),
-                                  child: Image.memory(
-                                    page.bytes,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return const Padding(
-                                        padding: EdgeInsets.all(20),
-                                        child: Text(
-                                          'Unable to display this page image.',
-                                          style: TextStyle(
-                                            color: _kTextSecondary,
-                                          ),
-                                        ),
-                                      );
-                                    },
+                                  child: ZoomableBase64Image(
+                                    imageBytes: page.bytes,
+                                    height: 560,
                                   ),
                                 ),
                               );
@@ -1206,6 +1295,104 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                         ),
                       ),
 
+                      const SizedBox(height: 12),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: OutlinedButton.icon(
+                          onPressed: _isPickingImage ? null : _pickDesignImage,
+                          icon: _isPickingImage
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.cloud_upload_outlined),
+                          label: Text(
+                            _isPickingImage
+                                ? 'Selecting Image...'
+                                : _selectedImageBytesList.isEmpty
+                                ? 'Upload Design Images'
+                                : 'Add More Design Images',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _kPrimaryBlue,
+                            side: const BorderSide(color: _kPrimaryBlue),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      if (_selectedImageBytesList.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: List.generate(
+                            _selectedImageBytesList.length,
+                            (index) {
+                              return SizedBox(
+                                width: 150,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.memory(
+                                        _selectedImageBytesList[index],
+                                        width: 150,
+                                        height: 110,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            _selectedImageNames[index],
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: _kTextSecondary,
+                                            ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Remove image',
+                                          onPressed: () {
+                                            setState(() {
+                                              _selectedImageBytesList.removeAt(
+                                                index,
+                                              );
+                                              _selectedImageNames.removeAt(
+                                                index,
+                                              );
+                                              _selectedImageMimeTypes.removeAt(
+                                                index,
+                                              );
+                                            });
+                                          },
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.red,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+
                       if (_generatingDesign) ...[
                         const SizedBox(height: 12),
                         const LinearProgressIndicator(
@@ -1287,20 +1474,49 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => InitialProjectEstimateScreen(
-                              title: _titleController.text.trim(),
-                              categories: widget.categories,
-                              description: _descriptionController.text.trim(),
-                              requirements: _requirementsController.text.trim(),
-                              technologies: _technologiesController.text.trim(),
-                              analysis: _analysis,
+                      onPressed: () async {
+                        if (_uploadingDesignImages) return;
+
+                        setState(() => _uploadingDesignImages = true);
+
+                        try {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => InitialProjectEstimateScreen(
+                                title: _titleController.text.trim(),
+                                categories: widget.categories,
+                                description: _descriptionController.text.trim(),
+                                requirements: _requirementsController.text
+                                    .trim(),
+                                technologies: _technologiesController.text
+                                    .trim(),
+                                analysis: _analysis,
+
+                                // Keep images in memory for now; don't upload yet.
+                                generatedDesignImageBytes: _generatedPages
+                                    .map((page) => page.bytes)
+                                    .toList(),
+
+                                referenceImageBytesList:
+                                    _selectedImageBytesList,
+                                referenceImageNames: _selectedImageNames,
+                                referenceImageMimeTypes:
+                                    _selectedImageMimeTypes,
+                              ),
                             ),
-                          ),
-                        );
+                          );
+                        } catch (e, stackTrace) {
+                          debugPrint('Unable to open initial estimate: $e');
+                          debugPrintStack(stackTrace: stackTrace);
+
+                          if (!mounted) return;
+
+                          _showMessage('Unable to continue. Please try again.');
+                        } finally {
+                          if (mounted) {
+                            setState(() => _uploadingDesignImages = false);
+                          }
+                        }
                       },
                       icon: const Icon(Icons.arrow_forward),
                       label: const Text(
@@ -1359,4 +1575,121 @@ class _GeneratedDesignPage {
     required this.purpose,
     required this.bytes,
   });
+}
+
+class ZoomableBase64Image extends StatefulWidget {
+  final Uint8List imageBytes;
+  final double height;
+
+  const ZoomableBase64Image({
+    super.key,
+    required this.imageBytes,
+    this.height = 420,
+  });
+
+  @override
+  State<ZoomableBase64Image> createState() => _ZoomableBase64ImageState();
+}
+
+class _ZoomableBase64ImageState extends State<ZoomableBase64Image> {
+  final TransformationController _controller = TransformationController();
+
+  void _zoomBy(double multiplier) {
+    final currentScale = _controller.value.getMaxScaleOnAxis();
+
+    final nextScale = (currentScale * multiplier).clamp(1.0, 5.0).toDouble();
+
+    final scaleFactor = nextScale / currentScale;
+
+    setState(() {
+      _controller.value = _controller.value.clone()
+        ..scaleByDouble(scaleFactor, scaleFactor, 1.0, 1.0);
+    });
+  }
+
+  void _resetZoom() {
+    setState(() {
+      _controller.value = Matrix4.identity();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: SizedBox(
+        width: double.infinity,
+        height: widget.height,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 5,
+              panEnabled: true,
+              scaleEnabled: true,
+              boundaryMargin: const EdgeInsets.all(80),
+              child: SizedBox(
+                width: double.infinity,
+                height: widget.height,
+                child: Image.memory(
+                  widget.imageBytes,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Center(
+                      child: Text('Unable to display this image.'),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(14),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Zoom in',
+                        onPressed: () => _zoomBy(1.25),
+                        icon: const Icon(Icons.zoom_in, color: Colors.white),
+                      ),
+                      IconButton(
+                        tooltip: 'Zoom out',
+                        onPressed: () => _zoomBy(0.8),
+                        icon: const Icon(Icons.zoom_out, color: Colors.white),
+                      ),
+                      IconButton(
+                        tooltip: 'Reset zoom',
+                        onPressed: _resetZoom,
+                        icon: const Icon(
+                          Icons.restart_alt,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

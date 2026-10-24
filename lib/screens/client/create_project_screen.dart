@@ -342,6 +342,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           description: _descriptionController.text.trim(),
           requirements: _requirementsController.text.trim(),
           initialTarget: target,
+          initialDesignImageBytes: _designImageBytes,
         ),
       ),
     );

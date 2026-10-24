@@ -7,12 +7,10 @@ import 'project_details_screen.dart';
 
 class MyProjectsScreen extends StatelessWidget {
   const MyProjectsScreen({super.key});
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) {
       return Scaffold(
         backgroundColor: const Color(0xFFF6F8FC),
@@ -27,7 +25,6 @@ class MyProjectsScreen extends StatelessWidget {
         ),
       );
     }
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       body: Stack(
@@ -46,7 +43,6 @@ class MyProjectsScreen extends StatelessWidget {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: _ProjectsLoader());
               }
-
               if (snapshot.hasError) {
                 return Center(
                   child: Padding(
@@ -57,19 +53,15 @@ class MyProjectsScreen extends StatelessWidget {
                   ),
                 );
               }
-
               final projects = snapshot.data?.docs ?? [];
-
               if (projects.isEmpty) {
                 return const _EmptyProjects();
               }
-
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final horizontalPadding = constraints.maxWidth > 800
                       ? 28.0
                       : 20.0;
-
                   return ListView.separated(
                     physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.fromLTRB(
@@ -84,9 +76,7 @@ class MyProjectsScreen extends StatelessWidget {
                       if (index == 0) {
                         return _ProjectsHeader(projectCount: projects.length);
                       }
-
                       final project = projects[index - 1].data();
-
                       return _ProjectCard(
                         project: project,
                         projectId: projects[index - 1].id,
@@ -105,13 +95,10 @@ class MyProjectsScreen extends StatelessWidget {
 
 class _ProjectsHeader extends StatelessWidget {
   final int projectCount;
-
   const _ProjectsHeader({required this.projectCount});
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(21),
@@ -208,9 +195,7 @@ class _ProjectsHeader extends StatelessWidget {
 class _ProjectCard extends StatelessWidget {
   final Map<String, dynamic> project;
   final String projectId;
-
   const _ProjectCard({required this.project, required this.projectId});
-
   Color _statusColor(String status) {
     switch (status) {
       case 'requirement':
@@ -255,7 +240,6 @@ class _ProjectCard extends StatelessWidget {
 
   String _formatStatus(BuildContext context, String status) {
     final l10n = AppLocalizations.of(context);
-
     switch (status) {
       case 'requirement':
         return l10n.requirement;
@@ -276,19 +260,109 @@ class _ProjectCard extends StatelessWidget {
     }
   }
 
+  Future<void> _deleteProject(BuildContext context, String title) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to delete this project.'),
+        ),
+      );
+      return;
+    }
+    if (project['status']?.toString() != 'team_formation') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('A project can only be deleted during team formation.'),
+        ),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete project?'),
+        content: Text(
+          '“$title” will be permanently deleted. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      final projectRef = FirebaseFirestore.instance
+          .collection('projects')
+          .doc(projectId);
+      final latestSnapshot = await projectRef.get();
+      if (!latestSnapshot.exists) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This project no longer exists.')),
+        );
+        return;
+      }
+      final latestProject = latestSnapshot.data() ?? <String, dynamic>{};
+      if (latestProject['clientId']?.toString() != currentUser.uid ||
+          latestProject['status']?.toString() != 'team_formation') {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Only your projects in the team formation phase can be deleted.',
+            ),
+          ),
+        );
+        return;
+      }
+      await projectRef.delete();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Project deleted successfully.')),
+      );
+    } on FirebaseException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not delete project: ${error.message ?? error.code}',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Something went wrong while deleting the project.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-
     final title = project['title']?.toString() ?? l10n.project;
     final category = project['category']?.toString() ?? '';
     final description = project['description']?.toString() ?? '';
     final budget = project['budget']?.toString() ?? '';
     final timeline = project['timeline']?.toString() ?? '';
     final status = project['status']?.toString() ?? 'requirement';
-
     final statusColor = _statusColor(status);
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -386,6 +460,23 @@ class _ProjectCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (status == 'team_formation') ...[
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Delete project',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFFFEF2F2),
+                        foregroundColor: const Color(0xFFDC2626),
+                      ),
+                      icon: const Icon(Icons.delete_outline_rounded, size: 19),
+                      onPressed: () => _deleteProject(context, title),
+                    ),
+                  ],
                 ],
               ),
               if (category.isNotEmpty) ...[
@@ -505,9 +596,7 @@ class _ProjectCard extends StatelessWidget {
 class _InfoItem extends StatelessWidget {
   final IconData icon;
   final String label;
-
   const _InfoItem({required this.icon, required this.label});
-
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -538,11 +627,9 @@ class _InfoItem extends StatelessWidget {
 
 class _EmptyProjects extends StatelessWidget {
   const _EmptyProjects();
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -607,7 +694,6 @@ class _EmptyProjects extends StatelessWidget {
 
 class _ProjectsLoader extends StatelessWidget {
   const _ProjectsLoader();
-
   @override
   Widget build(BuildContext context) {
     return const SizedBox(
@@ -623,9 +709,7 @@ class _ProjectsLoader extends StatelessWidget {
 
 class _ProjectsErrorCard extends StatelessWidget {
   final String message;
-
   const _ProjectsErrorCard({required this.message});
-
   @override
   Widget build(BuildContext context) {
     return Container(
