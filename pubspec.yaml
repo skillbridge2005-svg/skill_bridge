@@ -30,6 +30,8 @@ dependencies:
   flutter_svg: ^2.2.3
   youtube_player_iframe: ^6.0.2
   image_picker: ^1.2.4
+  vector_math: ^2.4.3
+  supabase_flutter: ^2.18.3
 
 dev_dependencies:
   flutter_test:

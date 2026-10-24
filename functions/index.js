@@ -2,6 +2,13 @@ const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 
 require("dotenv").config();
 
+<<<<<<< HEAD
+=======
+const { jsonrepair } = require("jsonrepair");
+
+const {getAuth} = require("firebase-admin/auth");
+
+>>>>>>> origin/main
 const {initializeApp} = require("firebase-admin/app");
 const {
   FieldValue,
@@ -43,52 +50,55 @@ function getGeminiClient() {
 }
 
 /**
- * Read an image payload from a Gemini Interactions response.
- * @param {object} interaction Gemini interactions response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
+ * Extract useful diagnostic fields from a provider API error.
+ * @param {Error} error Provider error.
+ * @return {object} Sanitized error diagnostics.
  */
-function extractInteractionImage(interaction) {
-  const candidates = [
-    interaction?.output_image,
-    interaction?.outputImage,
-    interaction?.outputs?.find?.((item) => item?.type === "image"),
-  ];
 
-  for (const image of candidates) {
-    const imageBase64 = image?.data || image?.imageBytes || image?.b64_json;
-    if (typeof imageBase64 === "string" && imageBase64.trim()) {
-      return {
-        imageBase64: imageBase64.trim(),
-        mimeType: image.mime_type || image.mimeType || "image/png",
-      };
-    }
+function getProviderErrorFields(error) {
+  const body =
+    error?.error ??
+    error?.response?.data?.error ??
+    error?.response?.data ??
+    error?.response?.body ??
+    null;
+
+  const bodyObject =
+    body && typeof body === "object" ? body : null;
+
+  let providerDetails = null;
+
+  try {
+    providerDetails = body == null ?
+      null :
+      (
+          typeof body === "string" ?
+            body :
+            JSON.stringify(body)
+      ).slice(0, 1500);
+  } catch (_) {
+    providerDetails = "Unable to serialize provider details";
   }
 
-  return null;
-}
-
-/**
- * Read an inline image from a Gemini generateContent response.
- * @param {object} response Gemini SDK response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
- */
-function extractInlineImage(response) {
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return null;
-  }
-
-  for (const part of parts) {
-    const data = part.inlineData || part.inline_data;
-    if (data && typeof data.data === "string" && data.data.trim()) {
-      return {
-        imageBase64: data.data.trim(),
-        mimeType: data.mimeType || data.mime_type || "image/png",
-      };
-    }
-  }
-
-  return null;
+  return {
+    providerErrorName: error?.name ?? null,
+    providerHttpStatus:
+      error?.status ??
+      error?.statusCode ??
+      error?.response?.status ??
+      null,
+    providerErrorCode:
+      bodyObject?.status ??
+      bodyObject?.code ??
+      error?.code ??
+      null,
+    providerMessage: String(
+        bodyObject?.message ??
+      error?.message ??
+      "No provider error message returned",
+    ).slice(0, 1500),
+    providerDetails,
+  };
 }
 
 /**
@@ -98,47 +108,188 @@ function extractInlineImage(response) {
  * @param {string} aspectRatio Aspect ratio such as 16:9 or 9:16.
  * @return {Promise<{imageBase64: string, mimeType: string}>} Image payload.
  */
-async function generateOneDesignImage(ai, prompt, aspectRatio) {
-  try {
-    const interaction = await ai.interactions.create({
-      model: "gemini-nano-banana-2.1",
-      input: prompt,
-      generation_config: {
-        image_config: {
-          aspect_ratio: aspectRatio,
-          image_size: "1K",
-        },
-      },
-    });
 
-    const fromInteraction = extractInteractionImage(interaction);
-    if (fromInteraction) {
-      return fromInteraction;
-    }
-  } catch (error) {
-    logger.warn("Interactions image generation failed", {
-      message: error?.message,
-    });
+/**
+ * Generate a UI mockup using Cloudflare Workers AI.
+ *
+ * @param {*} _ai Retained for compatibility with existing callers.
+ * @param {string} prompt The screen-specific image prompt.
+ * @param {string} aspectRatio The requested image aspect ratio.
+ * @return {Promise<{imageBase64: string, mimeType: string}>}
+ *   The generated image payload.
+ */
+async function generateOneDesignImage(_ai, prompt, aspectRatio) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !apiToken) {
+    throw new Error(
+        "Cloudflare Workers AI credentials are not configured.",
+    );
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image",
-    contents: prompt,
-    config: {
-      responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: {
-        aspectRatio: aspectRatio,
-        imageSize: "1K",
-      },
+  const source = String(prompt || "").trim();
+
+  const clipText = (value, maxLength) => {
+    const text = String(value || "").trim();
+
+    if (text.length <= maxLength) return text;
+    if (maxLength <= 1) return text.slice(0, maxLength);
+
+    const startLength = Math.ceil((maxLength - 1) / 2);
+    const endLength = Math.floor((maxLength - 1) / 2);
+
+    return (
+      text.slice(0, startLength) +
+      "…" +
+      text.slice(-endLength)
+    );
+  };
+
+  const readLine = (label, maxLength) => {
+    const match = source.match(
+        new RegExp("^" + label + ":\\s*(.*)$", "mi"),
+    );
+
+    return clipText(match?.[1] || "", maxLength);
+  };
+
+  const screenName =
+    source.match(
+        /^This image is page\s+(.+?)\s+of a multi-page product design\./mi,
+    )?.[1] || "Main Screen";
+
+  const screenPurpose =
+    source.match(/^Screen purpose:\s*(.*)$/mi)?.[1] ||
+    "Primary user-facing application screen";
+
+  const requirementIndex =
+    source.toLowerCase().lastIndexOf("requirements:");
+
+  const requirements =
+    requirementIndex >= 0 ?
+      source.slice(requirementIndex + "requirements:".length).trim() :
+      source;
+
+  const fixedPrompt = [
+    "Act as a principal product designer at a world-class technology company.",
+    "Create ONE premium, enterprise-grade, high-fidelity software UI screen.",
+    aspectRatio === "9:16" ?
+      "MOBILE: portrait layout, touch-friendly controls, mobile navigation. " +
+        "Fill the canvas with the app interface only. Never draw a phone." :
+      "LAPTOP: landscape desktop layout, professional top or side navigation, " +
+        "spacious content panels. Fill the canvas with the interface only. " +
+        "Never draw a laptop or device frame.",
+    "DESIGN SYSTEM: establish a distinctive identity appropriate to the product.",
+    "Use consistent spacing, typography, colors, component sizes, alignment,",
+    "border radii, icon styles, shadows, and accessible color contrast.",
+    "VISUAL HIERARCHY: clear page title, section headings, key information,",
+    "well-grouped content, whitespace, and one obvious primary action.",
+    "COMPONENTS: use realistic buttons, forms, cards, tables, filters, charts,",
+    "tabs, navigation, and status indicators only when relevant to the project.",
+    "CONTENT: use concise, believable English labels and realistic domain data.",
+    "Avoid placeholder gibberish, excessive tiny text, dense paragraphs, and clutter.",
+    "UX QUALITY: make the main workflow intuitive, accessible, and easy to scan.",
+    "CONSISTENCY: screens from the same project must share the same design language.",
+    "Follow the stated requirements. Do not invent unrelated features.",
+    "Show ONE complete, straight-on application interface with key content visible.",
+    "Never produce collages, device mockups, presentation slides, wireframes,",
+    "watermarks, decorative backgrounds, or fake hardware.",
+    `Technologies: ${readLine("Suggested technologies", 60)}`,
+    `Project: ${readLine("Project title", 100)}`,
+    `Categories: ${readLine("Categories", 100)}`,
+    `Description: ${readLine("Description", 220)}`,
+    `Screen: ${clipText(screenName, 100)}`,
+    `Purpose: ${clipText(screenPurpose, 180)}`,
+    "Essential project requirements:",
+  ].join("\n");
+
+  // FLUX.1 schnell's 2048-character limit.
+  const maxPromptLength = 2048;
+
+  // Reserve space for project requirements.
+  const requirementsBudget = Math.min(requirements.length, 850);
+  const fixedPromptBudget =
+    maxPromptLength - requirementsBudget - 1;
+
+  // Shorten the design instructions too, if necessary.
+  const promptPrefix = fixedPrompt.slice(0, fixedPromptBudget);
+
+  // Calculate the remaining space after the design instructions.
+  const remaining = Math.max(
+      0,
+      maxPromptLength - promptPrefix.length - 1,
+  );
+
+  const finalPrompt = (
+    promptPrefix + "\n" + clipText(requirements, remaining)
+  ).slice(0, maxPromptLength);
+
+  const url =
+  "https://api.cloudflare.com/client/v4/accounts/" +
+  encodeURIComponent(accountId) +
+  "/ai/run/@cf/black-forest-labs/flux-2-klein-4b";
+
+  // Use a larger output image for sharper design details.
+  const width = aspectRatio === "9:16" ? 720 : 1536;
+  const height = aspectRatio === "9:16" ? 1280 : 864;
+
+  const formData = new FormData();
+  formData.set("prompt", finalPrompt);
+  formData.set("width", String(width));
+  formData.set("height", String(height));
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
     },
+    body: formData,
   });
 
-  const fromContent = extractInlineImage(response);
-  if (fromContent) {
-    return fromContent;
+  const responseText = await response.text();
+
+  let body = null;
+  try {
+    body = JSON.parse(responseText);
+  } catch (_) {
+    // The response may contain a non-JSON provider error.
   }
 
-  throw new Error("The AI returned no generated project image.");
+  if (!response.ok || body?.success === false) {
+    logger.error("Cloudflare image generation failed", {
+      status: response.status,
+      errors: body?.errors ?? null,
+      details: responseText.slice(0, 1200),
+    });
+
+    const error = new Error(
+        `Cloudflare image generation failed (HTTP ${response.status}).`,
+    );
+
+    error.status = response.status;
+    throw error;
+  }
+
+  const imageBase64 = body?.result?.image;
+
+  if (
+    typeof imageBase64 !== "string" ||
+    imageBase64.length === 0
+  ) {
+    logger.error("Cloudflare returned no image data", {
+      responseKeys: Object.keys(body?.result ?? {}),
+    });
+
+    throw new Error(
+        "Cloudflare returned no generated image.",
+    );
+  }
+
+  return {
+    imageBase64,
+    mimeType: "image/jpeg",
+  };
 }
 
 /**
@@ -232,13 +383,6 @@ const razorpay = new Razorpay({
 |--------------------------------------------------------------------------
 */
 
-
-/**
- * Gets the project payment amount from available fields.
- *
- * @param {Object} projectData - Project data with amount fields.
- * @return {number|null} Positive amount, or null if unavailable.
- */
 function getProjectAmount(projectData) {
   const possibleAmounts = [
     projectData.budget,
@@ -258,7 +402,6 @@ function getProjectAmount(projectData) {
 
   return null;
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -1002,7 +1145,7 @@ Return the analysis in clear, readable sections.
 exports.generateProjectDesign = onCall(
     {
       maxInstances: 5,
-      timeoutSeconds: 240,
+      timeoutSeconds: 540,
     },
     async (request) => {
       if (!request.auth) {
@@ -1088,10 +1231,27 @@ exports.generateProjectDesign = onCall(
         );
       }
 
-      const joinedCategories = categories.join(", ") || "Not specified";
-      const isMobile = joinedCategories.toLowerCase().includes("mobile");
-      const aspectRatio = isMobile ? "9:16" : "16:9";
+      const joinedCategories =
+        categories.join(", ") || "Not specified";
 
+      const designPlatforms = [
+        {
+          name: "Mobile",
+          aspectRatio: "9:16",
+          instructions:
+            "Create a portrait mobile app interface filling the image. " +
+            "Use touch-friendly controls and mobile navigation. " +
+            "Show the UI only; no phone hardware, frame, or device mockup.",
+        },
+        {
+          name: "Laptop",
+          aspectRatio: "16:9",
+          instructions:
+            "Create a landscape laptop or desktop web app interface filling " +
+            "the image. Use a professional desktop layout and wider content. " +
+            "Show the UI only; no laptop hardware, frame, or device mockup.",
+        },
+      ];
       try {
         const screenResponse = await ai.models.generateContent({
           model: "gemini-3.5-flash-lite",
@@ -1125,42 +1285,78 @@ Choose the 4 most important user-facing pages for this product.
             categories,
         );
 
-        const images = await Promise.all(screens.map(async (screen) => {
-          const prompt = `
-Create one polished, realistic software UI mockup image for a single
-application page. Show a complete high-fidelity ${isMobile ?
-    "mobile app" : "web or desktop"} screen with readable layout,
-consistent branding, and production-quality visual design.
+        const images = [];
 
-This image is page ${screen.name} of a multi-page product design.
-Screen purpose: ${screen.purpose}
+        for (const screen of screens) {
+          const platformImages = await Promise.all(
+              designPlatforms.map(async (platform) => {
+                const prompt = `
+                  PROJECT: ${title.trim()}
 
-Use the project requirements below so the layout, features, labels,
-and content match this software. Show only this one full page. Do not
-create a collage, extra device frames, watermarks, or captions outside
-the UI.
+                  PROJECT CATEGORY:
+                  ${joinedCategories}
 
-Project title: ${title.trim()}
-Categories: ${joinedCategories}
-Description: ${description || "Not provided"}
-Suggested technologies: ${technologies || "Not provided"}
-Requirements:
-${requirements}
-`;
+                  PROJECT DESCRIPTION:
+                  ${description || "Not provided"}
 
-          const generated = await generateOneDesignImage(
-              ai,
-              prompt,
-              aspectRatio,
+                  TARGET PLATFORM:
+                  ${platform.name}
+
+                  SCREEN NAME:
+                  ${screen.name}
+
+                  SCREEN PURPOSE:
+                  ${screen.purpose}
+
+                  ACTUAL USER REQUIREMENTS:
+                  ${requirements}
+
+                  SUGGESTED TECHNOLOGIES:
+                  ${technologies || "Not provided"}
+
+                  DESIGN INSTRUCTIONS:
+                  First understand the exact product described above.
+                  Identify its target users, main task, and essential features.
+                  Design this specific screen exclusively for this product.
+                  Every heading, card, button, form, navigation item, and sample
+                  data must be relevant to the stated project and screen purpose.
+                  Follow the actual requirements instead of inventing generic features.
+
+                  For example, a food delivery app should show relevant food,
+                  restaurant, menu, cart, and order-tracking elements when required.
+                  A learning app should show relevant courses, lessons, and progress.
+                  A project management app should show relevant tasks and workflows.
+                  These are examples only; do not use them unless they match this project.
+
+                  PLATFORM:
+                  ${platform.instructions}
+
+                  VISUAL QUALITY:
+                  Premium enterprise UI/UX, coherent design system, refined typography,
+                  clear hierarchy, realistic content, balanced spacing, accessible contrast,
+                  and a professional implementation-ready layout.
+
+                  Generate exactly ONE screen. Fill the image with the interface itself.
+                  No device mockups, unrelated dashboards, collages, or watermarks.
+                  `;
+
+                const generated = await generateOneDesignImage(
+                    ai,
+                    prompt,
+                    platform.aspectRatio,
+                );
+
+                return {
+                  label: `${screen.name} - ${platform.name}`,
+                  purpose: `${screen.purpose} (${platform.name} layout)`,
+                  mimeType: generated.mimeType,
+                  imageBase64: generated.imageBase64,
+                };
+              }),
           );
 
-          return {
-            label: screen.name,
-            purpose: screen.purpose,
-            mimeType: generated.mimeType,
-            imageBase64: generated.imageBase64,
-          };
-        }));
+          images.push(...platformImages);
+        }
 
         if (!images.length) {
           throw new Error("The AI returned no generated project pages.");
@@ -1178,10 +1374,7 @@ ${requirements}
         };
       } catch (error) {
         logger.error("AI project design generation failed", {
-          errorName: error?.name,
-          message: error?.message,
-          status: error?.status,
-          code: error?.code,
+          ...getProviderErrorFields(error),
           userId: request.auth.uid,
         });
 
@@ -1197,18 +1390,79 @@ ${requirements}
     },
 );
 
+<<<<<<< HEAD
 
 function validatePlanText(value, maxLength = 10000) {
   if (value == null) return "";
   if (typeof value !== "string" || value.length > maxLength) {
+=======
+/* --------------------------------------------------------------------------
+ * AI PROJECT RESEARCH & PLANNING
+ * Add below the existing callable functions.
+ * Requires TAVILY_API_KEY in functions/.env.
+ * -------------------------------------------------------------------------- */
+
+function validatePlanText(value, maxLength = 10000, fieldName = "unknown") {
+  if (value == null) return "";
+
+  if (typeof value !== "string" || value.length > maxLength) {
+    logger.error("AI PLAN INPUT VALIDATION FAILED", {
+      field: fieldName,
+      actualType: typeof value,
+      actualLength: typeof value === "string" ?
+        value.length :
+        null,
+      maxLength,
+    });
+
+>>>>>>> origin/main
     throw new HttpsError(
         "invalid-argument",
         "One or more project fields are invalid or too long.",
     );
   }
+<<<<<<< HEAD
   return value.trim();
 }
 
+=======
+
+  return value.trim();
+}
+
+/**
+ * Retry Gemini requests when the service is temporarily unavailable.
+ * @param {Function} request Function that performs the Gemini request.
+ * @param {number} maxAttempts Maximum number of attempts.
+ * @return {Promise<object>} Gemini response.
+ */
+async function generateContentWithRetry(request, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await request();
+    } catch (error) {
+      const message = String(error?.message || error);
+      const retryable =
+        /503|UNAVAILABLE|high demand|429|RESOURCE_EXHAUSTED|500|INTERNAL/i
+          .test(message);
+
+      if (!retryable || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = 1000 * (2 ** (attempt - 1));
+      console.warn(
+        `Gemini request failed (attempt ${attempt}/${maxAttempts}); ` +
+        `retrying in ${delayMs}ms: ${message}`
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error("Gemini request failed after retries.");
+}
+>>>>>>> origin/main
 
 function parseJsonObject(text) {
   const cleaned = String(text || "")
@@ -1229,6 +1483,28 @@ function parseJsonObject(text) {
 
     return result;
   } catch (error) {
+<<<<<<< HEAD
+=======
+    // Try repairing malformed JSON returned by the AI.
+    try {
+      const repaired = JSON.parse(jsonrepair(cleaned));
+
+      if (
+        repaired &&
+        typeof repaired === "object" &&
+        !Array.isArray(repaired)
+      ) {
+        console.warn("AI JSON repaired successfully.");
+        return repaired;
+      }
+    } catch (repairError) {
+      console.error(
+          "AI JSON REPAIR ERROR:",
+          repairError.message,
+      );
+    }
+
+>>>>>>> origin/main
     console.error("AI JSON PARSE ERROR:", error.message);
     console.error("AI JSON LENGTH:", cleaned.length);
 
@@ -1305,11 +1581,16 @@ function asStringArray(value, maxItems = 15) {
       .slice(0, maxItems);
 }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/main
 async function searchProjectResearch(query) {
   const apiKey = process.env.TAVILY_API_KEY;
 
   if (!apiKey) {
     throw new HttpsError(
+<<<<<<< HEAD
         "failed-precondition",
         "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
     );
@@ -1336,11 +1617,83 @@ async function searchProjectResearch(query) {
       status: response.status,
     });
     throw new Error("The external research service failed.");
+=======
+      "failed-precondition",
+      "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
+    );
+  }
+
+  let response;
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: "advanced",
+          max_results: 5,
+          include_answer: false,
+          include_raw_content: false,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (
+        response.ok ||
+        (response.status !== 429 && response.status < 500)
+      ) {
+        break;
+      }
+
+      if (attempt === maxAttempts) {
+        break;
+      }
+
+      console.warn(
+        `Tavily HTTP ${response.status}; retrying ` +
+        `(${attempt}/${maxAttempts}).`,
+      );
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        logger.error("Tavily request failed after retries", {
+          attempt,
+          errorName: error.name,
+          message: error.message,
+        });
+        throw new Error(
+          "The external research service could not be reached after retries.",
+        );
+      }
+
+      console.warn(
+        `Tavily network request failed (${attempt}/${maxAttempts}): ` +
+        `${error.message}`,
+      );
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1000 * attempt),
+    );
+  }
+
+  if (!response || !response.ok) {
+    logger.error("Project research search failed", {
+      status: response?.status ?? null,
+    });
+    throw new Error("The external research service failed after retries.");
+>>>>>>> origin/main
   }
 
   const data = await response.json();
 
   return (Array.isArray(data.results) ? data.results : [])
+<<<<<<< HEAD
       .map((item) => ({
         title: String(item.title || "").slice(0, 300),
         url: String(item.url || "").slice(0, 1500),
@@ -1349,6 +1702,19 @@ async function searchProjectResearch(query) {
       }))
       .filter((item) => item.url.startsWith("https://") ||
                       item.url.startsWith("http://"));
+=======
+    .map((item) => ({
+      title: String(item.title || "").slice(0, 300),
+      url: String(item.url || "").slice(0, 1500),
+      content: String(item.content || "").slice(0, 2500),
+      score: Number.isFinite(item.score) ? item.score : null,
+    }))
+    .filter(
+      (item) =>
+        item.url.startsWith("https://") ||
+        item.url.startsWith("http://"),
+    );
+>>>>>>> origin/main
 }
 
 exports.generateAIProjectPlan = onCall(
@@ -1367,7 +1733,11 @@ exports.generateAIProjectPlan = onCall(
 
       const data = request.data || {};
 
+<<<<<<< HEAD
       const title = validatePlanText(data.title, 150);
+=======
+      const title = validatePlanText(data.title, 150, "title");
+>>>>>>> origin/main
       if (!title) {
         throw new HttpsError(
             "invalid-argument",
@@ -1383,16 +1753,40 @@ exports.generateAIProjectPlan = onCall(
           .slice(0, 10) :
       [];
 
+<<<<<<< HEAD
       const description = validatePlanText(data.description, 5000);
       const requirements = validatePlanText(data.requirements, 8000);
       const technologies = validatePlanText(data.technologies, 5000);
       const analysis = validatePlanText(data.analysis, 8000);
 
+=======
+      const description = validatePlanText(
+          data.description, 5000, "description",
+      );
+
+      const requirements = validatePlanText(
+          data.requirements, 8000, "requirements",
+      );
+
+      const technologies = validatePlanText(
+          data.technologies, 5000, "technologies",
+      );
+
+      const analysis = validatePlanText(
+        data.analysis,
+        12000,
+        "analysis",
+      );
+>>>>>>> origin/main
       // Optional: design output can be screen descriptions or text metadata.
       // Do not send large base64 image payloads in this field.
       const designInformation = validatePlanText(
           data.designInformation,
           5000,
+<<<<<<< HEAD
+=======
+          "designInformation",
+>>>>>>> origin/main
       );
 
       const mode = data.mode === "replan" ? "replan" : "initial";
@@ -1402,8 +1796,16 @@ exports.generateAIProjectPlan = onCall(
         data.budgetMin >= 0 ? data.budgetMin : null,
         budgetMax: Number.isFinite(data.budgetMax) &&
         data.budgetMax >= 0 ? data.budgetMax : null,
+<<<<<<< HEAD
         deadline: validatePlanText(data.deadline, 50),
         clientFeedback: validatePlanText(data.clientFeedback, 3000),
+=======
+        deadline: validatePlanText(data.deadline, 50, "deadline"),
+
+        clientFeedback: validatePlanText(
+            data.clientFeedback, 3000, "clientFeedback",
+        ),
+>>>>>>> origin/main
         previousPlan: data.previousPlan || null,
       };
 
@@ -2161,7 +2563,12 @@ ${JSON.stringify(projectInput)}
 
         const projectAnalysis = parseJsonObject(analysisText);
 
+<<<<<<< HEAD
         const queryResponse = await ai.models.generateContent({
+=======
+        const queryResponse = await generateContentWithRetry(() =>
+  ai.models.generateContent({
+>>>>>>> origin/main
           model: "gemini-3.5-flash-lite",
           contents: `
 You are SkillBridge's Principal Software Research Analyst, Solution Architect, and Technical Due-Diligence Specialist.
@@ -2248,7 +2655,12 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
             temperature: 0.2,
             maxOutputTokens: 1500,
           },
+<<<<<<< HEAD
         });
+=======
+        })
+      );
+>>>>>>> origin/main
 
         const queryText = extractGeneratedText(queryResponse);
 
@@ -2272,6 +2684,7 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
         }
 
 
+<<<<<<< HEAD
         /*
        * Stage 2: Perform actual external web searches.
        */
@@ -2284,14 +2697,60 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
           for (const result of results) {
             if (!uniqueSources.has(result.url)) {
               uniqueSources.set(result.url, result);
+=======
+       
+        /*
+         * Stage 2: Perform external web searches.
+         * Preserve successful results if an individual query fails.
+         */
+        const researchResults = await Promise.allSettled(
+          queries.map((query) => searchProjectResearch(query)),
+        );
+
+        const uniqueSources = new Map();
+        let failedResearchCount = 0;
+
+        for (let i = 0; i < researchResults.length; i++) {
+          const result = researchResults[i];
+
+          if (result.status === "rejected") {
+            failedResearchCount++;
+
+            logger.warn("Project research query failed", {
+              queryIndex: i,
+              errorName: result.reason?.name || "Error",
+              message: result.reason?.message || String(result.reason),
+            });
+
+            continue;
+          }
+
+          for (const source of result.value) {
+            if (!uniqueSources.has(source.url)) {
+              uniqueSources.set(source.url, source);
+>>>>>>> origin/main
             }
           }
         }
 
         const sources = Array.from(uniqueSources.values()).slice(0, 30);
 
+<<<<<<< HEAD
         if (!sources.length) {
           throw new Error("No usable web research sources were returned.");
+=======
+        logger.info("Project research completed", {
+          totalQueries: queries.length,
+          failedQueries: failedResearchCount,
+          successfulQueries: queries.length - failedResearchCount,
+          uniqueSourceCount: sources.length,
+        });
+
+        if (!sources.length) {
+          throw new Error(
+            "All project research queries failed or returned no usable sources.",
+          );
+>>>>>>> origin/main
         }
 
         /*
@@ -3004,6 +3463,7 @@ Use JSON null when a cost or rate cannot be responsibly calculated.
 Do not place Markdown fences around the JSON.
 `;
 
+<<<<<<< HEAD
         const planResponse = await ai.models.generateContent({
           model: "gemini-3.5-flash-lite",
           contents: planningPrompt,
@@ -3013,6 +3473,19 @@ Do not place Markdown fences around the JSON.
             maxOutputTokens: 12000,
           },
         });
+=======
+        const planResponse = await generateContentWithRetry(() =>
+          ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents: planningPrompt,
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
+              maxOutputTokens: 12000,
+            },
+          })
+        );
+>>>>>>> origin/main
 
 
         const planText = extractGeneratedText(planResponse);
@@ -3270,6 +3743,7 @@ Do not place Markdown fences around the JSON.
     },
 );
 
+<<<<<<< HEAD
 /**
  * Notify developers when a new project document is created.
  * Uses deterministic notification IDs to prevent duplicates on retries.
@@ -3353,3 +3827,43 @@ exports.notifyDevelopersOnProjectCreated = onDocumentCreated(
     },
 
 );
+=======
+exports.ensureSupabaseRole = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const auth = getAuth();
+
+  try {
+    const user = await auth.getUser(uid);
+    const existingClaims = user.customClaims || {};
+
+    if (existingClaims.role !== "authenticated") {
+      await auth.setCustomUserClaims(uid, {
+        ...existingClaims,
+        role: "authenticated",
+      });
+    }
+
+    return {
+      success: true,
+      message: "Supabase role configured.",
+    };
+  } catch (error) {
+    logger.error("Failed to configure Supabase role", {
+      uid,
+      error: error.message,
+    });
+
+    throw new HttpsError(
+      "internal",
+      "Could not configure Supabase authentication.",
+    );
+  }
+});
+>>>>>>> origin/main

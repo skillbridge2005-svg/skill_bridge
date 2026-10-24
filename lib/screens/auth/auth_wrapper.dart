@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../client/client_home.dart';
@@ -24,10 +25,61 @@ class AuthWrapper extends StatelessWidget {
           return const SkillBridgeLandingPage();
         }
 
+        return _SupabaseRoleGate(key: ValueKey(user.uid), user: user);
+      },
+    );
+  }
+}
+
+class _SupabaseRoleGate extends StatefulWidget {
+  final User user;
+
+  const _SupabaseRoleGate({super.key, required this.user});
+
+  @override
+  State<_SupabaseRoleGate> createState() => _SupabaseRoleGateState();
+}
+
+class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
+  late Future<void> _roleSetup;
+
+  @override
+  void initState() {
+    super.initState();
+    _roleSetup = _configureSupabaseRole();
+  }
+
+  Future<void> _configureSupabaseRole() async {
+    final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('ensureSupabaseRole');
+
+    await callable.call();
+
+    // Refresh this user's Firebase ID token to obtain updated claims.
+    await widget.user.getIdToken(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _roleSetup,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _LoadingScreen();
+        }
+
+        if (snapshot.hasError) {
+          return _ErrorScreen(
+            message:
+                'Supabase authentication setup failed.\n'
+                '${snapshot.error}',
+          );
+        }
+
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection('users')
-              .doc(user.uid)
+              .doc(widget.user.uid)
               .snapshots(),
           builder: (context, userSnapshot) {
             if (userSnapshot.connectionState == ConnectionState.waiting) {
