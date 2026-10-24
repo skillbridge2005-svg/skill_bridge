@@ -15,6 +15,8 @@ import 'client_messages_screen.dart';
 import 'client_notifications_screen.dart';
 import 'project_details_screen.dart';
 import 'hire_developer_screen.dart';
+import 'client_analytics_screen.dart';
+import 'how_to_use_skillbridge_screen.dart';
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -397,10 +399,7 @@ class _ClientHomeState extends State<ClientHome>
                   value: 'settings',
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.settings_outlined,
-                        size: 20,
-                      ),
+                      Icon(Icons.settings_outlined, size: 20),
                       SizedBox(width: 12),
                       Text('Settings'),
                     ],
@@ -775,6 +774,31 @@ class _ClientDashboardSection extends StatelessWidget {
                           onMessages: () => _openMessages(context),
                         ),
                       ],
+                      const SizedBox(height: 24),
+                      _SectionHeading(
+                        eyebrow: 'SKILLBRIDGE TOOLS',
+                        title: 'Make the most of your workspace',
+                        subtitle: 'Explore analytics and learn how SkillBridge works.',
+                      ),
+                      const SizedBox(height: 13),
+                      _WorkspaceTools(
+                        onAnalytics: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const ClientAnalyticsScreen(),
+                            ),
+                          );
+                        },
+                        onGuide: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const HowToUseSkillBridgeScreen(),
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -783,6 +807,43 @@ class _ClientDashboardSection extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _WorkspaceTools extends StatelessWidget {
+  final VoidCallback onAnalytics;
+  final VoidCallback onGuide;
+
+  const _WorkspaceTools({required this.onAnalytics, required this.onGuide});
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _QuickActionCard(
+        icon: Icons.insights_rounded,
+        title: 'Project Analytics',
+        subtitle: 'Review progress across your projects',
+        onTap: onAnalytics,
+      ),
+      _QuickActionCard(
+        icon: Icons.play_circle_outline_rounded,
+        title: 'How to Use SkillBridge',
+        subtitle: 'Learn how to get started and use the platform',
+        onTap: onGuide,
+      ),
+    ];
+
+    if (MediaQuery.of(context).size.width < 700) {
+      return Column(children: [cards[0], const SizedBox(height: 10), cards[1]]);
+    }
+
+    return Row(
+      children: [
+        Expanded(child: cards[0]),
+        const SizedBox(width: 12),
+        Expanded(child: cards[1]),
+      ],
     );
   }
 }
@@ -2340,14 +2401,8 @@ Widget _languageOption({
           style: const TextStyle(fontSize: 11, color: Color(0xFF667085)),
         ),
         trailing: selected
-            ? const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF2563EB),
-              )
-            : const Icon(
-                Icons.chevron_right_rounded,
-                color: Color(0xFF98A2B3),
-              ),
+            ? const Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB))
+            : const Icon(Icons.chevron_right_rounded, color: Color(0xFF98A2B3)),
       ),
     ),
   );

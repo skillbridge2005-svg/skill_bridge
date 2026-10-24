@@ -144,6 +144,7 @@ class NotificationService {
     required String type,
     String? projectId,
     String? applicationId,
+    String? meetingId,
   }) async {
     if (developerId.trim().isEmpty) {
       throw const NotificationServiceException('Developer ID cannot be empty.');
@@ -175,6 +176,7 @@ class NotificationService {
       'isRead': false,
       'projectId': projectId?.trim(),
       'applicationId': applicationId?.trim(),
+      'meetingId': meetingId?.trim(),
       'createdAt': FieldValue.serverTimestamp(),
     });
 

@@ -10,6 +10,7 @@ class NotificationModel {
     required this.isRead,
     this.projectId,
     this.applicationId,
+    this.meetingId,
     this.createdAt,
   });
 
@@ -21,6 +22,7 @@ class NotificationModel {
   final bool isRead;
   final String? projectId;
   final String? applicationId;
+  final String? meetingId;
   final DateTime? createdAt;
 
   factory NotificationModel.fromFirestore(
@@ -38,6 +40,7 @@ class NotificationModel {
       projectId: _nullableStringValue(data['projectId']),
       applicationId:
           _nullableStringValue(data['applicationId']),
+      meetingId: _nullableStringValue(data['meetingId']),
       createdAt: _dateTimeValue(data['createdAt']),
     );
   }
@@ -56,6 +59,7 @@ class NotificationModel {
       projectId: _nullableStringValue(data['projectId']),
       applicationId:
           _nullableStringValue(data['applicationId']),
+      meetingId: _nullableStringValue(data['meetingId']),
       createdAt: _dateTimeValue(data['createdAt']),
     );
   }
@@ -69,6 +73,7 @@ class NotificationModel {
       'isRead': isRead,
       'projectId': projectId,
       'applicationId': applicationId,
+      'meetingId': meetingId,
       'createdAt': createdAt,
     };
   }
@@ -81,6 +86,7 @@ class NotificationModel {
     bool? isRead,
     String? projectId,
     String? applicationId,
+    String? meetingId,
     DateTime? createdAt,
   }) {
     return NotificationModel(
@@ -93,6 +99,7 @@ class NotificationModel {
       projectId: projectId ?? this.projectId,
       applicationId:
           applicationId ?? this.applicationId,
+      meetingId: meetingId ?? this.meetingId,
       createdAt: createdAt ?? this.createdAt,
     );
   }
