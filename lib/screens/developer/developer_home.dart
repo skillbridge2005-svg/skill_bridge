@@ -13,6 +13,7 @@ import '../../models/notification_model.dart';
 import '../../services/notification_service.dart';
 import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
+import 'team_invitations_screen.dart';
 /// SkillBridge Developer Dashboard
 ///
 /// This screen is intentionally self-contained and uses only Flutter + the
@@ -59,6 +60,15 @@ class _DeveloperHomeState extends State<DeveloperHome>
     _NavItem(Icons.person_rounded, 'My Profile'),
     _NavItem(Icons.folder_copy_rounded, 'Portfolio'),
   ];
+
+void _openTeamInvitations() {
+  Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => const TeamInvitationsScreen(),
+    ),
+  );
+}
 
   @override
   void initState() {
@@ -370,17 +380,32 @@ if (index == 4) {
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              itemCount: _navItems.length,
+              // Add Team Invitations immediately after Teams without changing
+              // the existing navigation indexes for the other destinations.
+              itemCount: _navItems.length + 1,
               separatorBuilder: (_, index) => index == 0
                   ? const SizedBox(height: 10)
                   : const SizedBox(height: 2),
               itemBuilder: (context, index) {
-                final item = _navItems[index];
+                if (index == 5) {
+                  return _SidebarItem(
+                    item: const _NavItem(
+                      Icons.mark_email_unread_outlined,
+                      'Team Invitations',
+                    ),
+                    selected: false,
+                    compact: compact,
+                    onTap: _openTeamInvitations,
+                  );
+                }
+
+                final navIndex = index < 5 ? index : index - 1;
+                final item = _navItems[navIndex];
                 return _SidebarItem(
                   item: item,
-                  selected: _selectedNav == index,
+                  selected: _selectedNav == navIndex,
                   compact: compact,
-                  onTap: () => _selectNav(index),
+                  onTap: () => _selectNav(navIndex),
                 );
               },
             ),
@@ -563,10 +588,19 @@ if (index == 4) {
       icon: Icons.notifications_none_rounded,
       badge: unreadCount,
       selected: _notificationsOpen,
-      onTap: () => setState(() {
-        _notificationsOpen = !_notificationsOpen;
-        _messagesOpen = false;
-      }),
+     onTap: () {
+  setState(() {
+    _notificationsOpen = false;
+    _messagesOpen = false;
+  });
+
+  Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => const NotificationsScreen(),
+    ),
+  );
+},
     );
   },
 ),
@@ -1198,7 +1232,14 @@ if (index == 4) {
                 ),
               ),
               OutlinedButton(
-                onPressed: () => _showFeatureSnack('Team invitation'),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const Teams(),
+                    ),
+                  );
+                },
                 child: const Text('Invite'),
               ),
             ],
@@ -1225,7 +1266,14 @@ if (index == 4) {
                 ),
               ),
               OutlinedButton(
-                onPressed: () => _showFeatureSnack('Team invitation'),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const Teams(),
+                    ),
+                  );
+                },
                 child: const Text('Invite'),
               ),
             ],
@@ -1387,6 +1435,13 @@ if (index == 4) {
               const SizedBox(height: 12),
               for (final entry in <MapEntry<int, _NavItem>>[
                 MapEntry(4, _navItems[4]),
+                const MapEntry(
+                  -1,
+                  _NavItem(
+                    Icons.mark_email_unread_outlined,
+                    'Team Invitations',
+                  ),
+                ),
                 MapEntry(5, _navItems[5]),
                 MapEntry(6, _navItems[6]),
                 MapEntry(7, _navItems[7]),
@@ -1399,7 +1454,11 @@ if (index == 4) {
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    _selectNav(entry.key);
+                    if (entry.key == -1) {
+                      _openTeamInvitations();
+                    } else {
+                      _selectNav(entry.key);
+                    }
                   },
                 ),
               ListTile(
