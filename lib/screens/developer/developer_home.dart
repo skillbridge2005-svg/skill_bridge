@@ -14,6 +14,7 @@ import '../../services/notification_service.dart';
 import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
+import 'team_messages_screen.dart';
 /// SkillBridge Developer Dashboard
 ///
 /// This screen is intentionally self-contained and uses only Flutter + the
@@ -608,10 +609,19 @@ if (index == 4) {
               icon: Icons.chat_bubble_outline_rounded,
               badge: 2,
               selected: _messagesOpen,
-              onTap: () => setState(() {
-                _messagesOpen = !_messagesOpen;
-                _notificationsOpen = false;
-              }),
+     onTap: () {
+  setState(() {
+    _messagesOpen = false;
+    _notificationsOpen = false;
+  });
+
+  Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => const TeamMessagesScreen(),
+    ),
+  );
+},
             ),
             const SizedBox(width: 4),
             PopupMenuButton<String>(

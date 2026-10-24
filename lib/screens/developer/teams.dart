@@ -10,7 +10,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/team_invitation_service.dart';
+import '../../services/individual_chat_service.dart';
 import '../developer/team_chat_screen.dart';
+import 'individual_chat_screen.dart';
+import 'developer_public_profile_screen.dart';
+import 'individual_chats_screen.dart';
 
 class Teams extends StatefulWidget {
   const Teams({super.key});
@@ -27,6 +31,8 @@ class _TeamsState extends State<Teams> {
   final TextEditingController _searchController = TextEditingController();
 
   final TeamInvitationService _invitationService = TeamInvitationService();
+  final IndividualChatService _individualChatService =
+      IndividualChatService();
 
   String _searchQuery = '';
 
@@ -74,27 +80,43 @@ class _TeamsState extends State<Teams> {
           'Teams',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: FilledButton.icon(
-              onPressed: _showCreateTeamDialog,
-              icon: const Icon(Icons.add_rounded, size: 19),
-              label: const Text('Create Team'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
-        ],
+        
+actions: [
+  IconButton(
+    tooltip: 'Individual Chats',
+    icon: const Icon(
+      Icons.forum_outlined,
+      color: Color(0xFF2563EB),
+    ),
+    onPressed: () {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => IndividualChatsScreen(),
+        ),
+      );
+    },
+  ),
+  Padding(
+    padding: const EdgeInsets.only(right: 16),
+    child: FilledButton.icon(
+      onPressed: _showCreateTeamDialog,
+      icon: const Icon(Icons.add_rounded, size: 19),
+      label: const Text('Create Team'),
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xFF2563EB),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    ),
+  ),
+],
+
       ),
       body: StreamBuilder<List<TeamModel>>(
         stream: _teamService.watchMyTeams(),
@@ -734,137 +756,325 @@ class _TeamsState extends State<Teams> {
       return;
     }
 
+    final roleController = TextEditingController();
+    final responsibilitiesController = TextEditingController();
+    final customRoleController = TextEditingController();
+    const roles = <String>[
+      'Flutter Developer',
+      'Frontend Developer',
+      'Backend Developer',
+      'Full Stack Developer',
+      'UI/UX Designer',
+      'QA Tester',
+      'Database Developer',
+      'DevOps Engineer',
+      'Other (custom role)',
+    ];
+
+    String selectedRole = roles.first;
+    String search = '';
+    String? sendingUid;
+    List<Map<String, dynamic>> developers = [];
+
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('role', isEqualTo: 'developer')
           .get();
 
-      if (!mounted) return;
-
-      final developers = snapshot.docs.where((doc) {
+      final eligibleDocs = snapshot.docs.where((doc) {
         return doc.id != currentUid && !team.memberIds.contains(doc.id);
       }).toList();
 
+      // Join users data with developerProfiles so the inviter can see
+      // headline, skills, technologies and profile photo before inviting.
+      final profileResults = await Future.wait(
+        eligibleDocs.map((doc) async {
+          final profileSnapshot = await FirebaseFirestore.instance
+              .collection('developerProfiles')
+              .doc(doc.id)
+              .get();
+          final userData = doc.data();
+          final profileData = profileSnapshot.data() ?? <String, dynamic>{};
+          return <String, dynamic>{
+            'id': doc.id,
+            'name': (profileData['name'] ?? userData['name'] ??
+                    userData['displayName'] ?? userData['fullName'] ?? 'Developer')
+                .toString(),
+            'email': (profileData['email'] ?? userData['email'] ?? '').toString(),
+            'headline': (profileData['headline'] ?? '').toString(),
+            'photoUrl': (profileData['photoUrl'] ?? '').toString(),
+            'skills': profileData['skills'] is List
+                ? List<String>.from(profileData['skills'])
+                : <String>[],
+            'technologies': profileData['technologies'] is List
+                ? List<String>.from(profileData['technologies'])
+                : <String>[],
+            'openToTeams': profileData['openToTeams'] != false,
+            'profileVisible': profileData['profileVisible'] != false,
+          };
+        }),
+      );
+
+      developers = profileResults
+          .where((developer) =>
+              developer['openToTeams'] == true &&
+              developer['profileVisible'] == true)
+          .toList();
+
+      if (!mounted) {
+        roleController.dispose();
+        responsibilitiesController.dispose();
+        customRoleController.dispose();
+        return;
+      }
+
       if (developers.isEmpty) {
         _showSnackBar('No eligible developers found.');
+        roleController.dispose();
+        responsibilitiesController.dispose();
+        customRoleController.dispose();
         return;
       }
 
       await showDialog<void>(
         context: context,
         builder: (dialogContext) {
-          String search = '';
-          String? sendingUid;
-
           return StatefulBuilder(
             builder: (context, setDialogState) {
-              final filtered = developers.where((doc) {
-                final data = doc.data();
-                final name =
-                    (data['name'] ??
-                            data['displayName'] ??
-                            data['fullName'] ??
-                            '')
-                        .toString();
-                final email = (data['email'] ?? '').toString();
-
-                return '$name $email'.toLowerCase().contains(
-                  search.toLowerCase(),
-                );
+              final filtered = developers.where((developer) {
+                final searchable = [
+                  developer['name'],
+                  developer['email'],
+                  developer['headline'],
+                  ...(developer['skills'] as List<String>),
+                  ...(developer['technologies'] as List<String>),
+                ].join(' ').toLowerCase();
+                return searchable.contains(search.toLowerCase());
               }).toList();
 
+              final role = selectedRole == 'Other (custom role)'
+                  ? customRoleController.text.trim()
+                  : selectedRole;
+
+              Future<void> sendTo(Map<String, dynamic> developer) async {
+                if (role.trim().isEmpty) {
+                  _showSnackBar('Please select or enter a role.');
+                  return;
+                }
+                if (responsibilitiesController.text.trim().isEmpty) {
+                  _showSnackBar('Please enter the responsibilities for this role.');
+                  return;
+                }
+
+                final developerId = developer['id'].toString();
+                setDialogState(() => sendingUid = developerId);
+
+                try {
+                  await _invitationService.sendInvitation(
+                    teamId: team.id,
+                    developerId: developerId,
+                    role: role,
+                    responsibilities: responsibilitiesController.text.trim(),
+                  );
+
+                  if (!mounted || !dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  _showSnackBar('Invitation sent to ${developer['name']}.');
+                } catch (error) {
+                  setDialogState(() => sendingUid = null);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    SnackBar(content: Text('Could not send invitation: $error')),
+                  );
+                }
+              }
+
               return AlertDialog(
-                title: const Text('Invite a Developer'),
+                title: const Text(
+                  'Invite a Developer',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
                 content: SizedBox(
-                  width: 440,
-                  height: 420,
+                  width: 560,
+                  height: 620,
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextField(
+                      Text(
+                        'Invite someone to ${team.name} and define their role.',
+                        style: const TextStyle(color: Color(0xFF64748B)),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        value: selectedRole,
+                        isExpanded: true,
                         decoration: const InputDecoration(
-                          hintText: 'Search by name or email',
-                          prefixIcon: Icon(Icons.search),
+                          labelText: 'Team role',
+                          prefixIcon: Icon(Icons.badge_outlined),
                           border: OutlineInputBorder(),
                         ),
-                        onChanged: (value) {
-                          setDialogState(() => search = value);
-                        },
+                        items: roles.map((item) => DropdownMenuItem<String>(
+                          value: item,
+                          child: Text(item, overflow: TextOverflow.ellipsis),
+                        )).toList(),
+                        onChanged: sendingUid != null
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                setDialogState(() => selectedRole = value);
+                              },
                       ),
+                      if (selectedRole == 'Other (custom role)') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: customRoleController,
+                          enabled: sendingUid == null,
+                          decoration: const InputDecoration(
+                            labelText: 'Custom role name',
+                            hintText: 'e.g. AI Integration Developer',
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (_) => setDialogState(() {}),
+                        ),
+                      ],
                       const SizedBox(height: 12),
+                      TextField(
+                        controller: responsibilitiesController,
+                        enabled: sendingUid == null,
+                        minLines: 2,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Responsibilities',
+                          hintText: 'Describe the tasks this developer will handle...',
+                          alignLabelWithHint: true,
+                          prefixIcon: Padding(
+                            padding: EdgeInsets.only(bottom: 38),
+                            child: Icon(Icons.assignment_outlined),
+                          ),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        enabled: sendingUid == null,
+                        decoration: const InputDecoration(
+                          hintText: 'Search by name, skill or email',
+                          prefixIcon: Icon(Icons.search_rounded),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (value) => setDialogState(() => search = value),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Choose a developer to send the invitation',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
                       Expanded(
                         child: filtered.isEmpty
-                            ? const Center(child: Text('No developers found.'))
+                            ? const Center(child: Text('No matching developers found.'))
                             : ListView.separated(
                                 itemCount: filtered.length,
-                                separatorBuilder: (_, __) =>
-                                    const Divider(height: 1),
+                                separatorBuilder: (_, __) => const Divider(height: 1),
                                 itemBuilder: (context, index) {
                                   final developer = filtered[index];
-                                  final data = developer.data();
-                                  final name =
-                                      (data['name'] ??
-                                              data['displayName'] ??
-                                              data['fullName'] ??
-                                              'Developer')
-                                          .toString();
-                                  final email = (data['email'] ?? '')
-                                      .toString();
-                                  final busy = sendingUid == developer.id;
+                                  final developerId = developer['id'].toString();
+                                  final photoUrl = developer['photoUrl'].toString();
+                                  final busy = sendingUid == developerId;
+                                  final skills = <String>[
+                                    ...(developer['skills'] as List<String>),
+                                    ...(developer['technologies'] as List<String>),
+                                  ].toSet().take(4).join(' · ');
+                                  final subtitle = [
+                                    if (developer['headline'].toString().isNotEmpty)
+                                      developer['headline'].toString(),
+                                    if (skills.isNotEmpty) skills,
+                                    if (developer['email'].toString().isNotEmpty)
+                                      developer['email'].toString(),
+                                  ].join('\n');
 
                                   return ListTile(
-                                    leading: const CircleAvatar(
-                                      child: Icon(Icons.person_outline),
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 5),
+                                    leading: CircleAvatar(
+                                      backgroundColor: const Color(0xFFE0E7FF),
+                                      backgroundImage: photoUrl.startsWith('http')
+                                          ? NetworkImage(photoUrl)
+                                          : null,
+                                      child: photoUrl.startsWith('http')
+                                          ? null
+                                          : const Icon(
+                                              Icons.person_outline_rounded,
+                                              color: Color(0xFF4338CA),
+                                            ),
                                     ),
-                                    title: Text(name),
-                                    subtitle: email.isEmpty
-                                        ? null
-                                        : Text(email),
-                                    trailing: busy
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(Icons.person_add_alt_1),
-                                    enabled: sendingUid == null,
-                                    onTap: () async {
-                                      setDialogState(() {
-                                        sendingUid = developer.id;
-                                      });
-
-                                      try {
-                                        await _invitationService.sendInvitation(
-                                          teamId: team.id,
-                                          developerId: developer.id,
-                                        );
-
-                                        if (!mounted) return;
-                                        if (!dialogContext.mounted) return;
-
-                                        Navigator.of(dialogContext).pop();
-                                        _showSnackBar(
-                                          'Invitation sent to $name.',
-                                        );
-                                      } catch (error) {
-                                        setDialogState(() {
-                                          sendingUid = null;
-                                        });
-
-                                        if (!mounted) return;
-
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Could not send invitation: $error',
-                                            ),
+                                    title: Text(
+                                      developer['name'].toString(),
+                                      style: const TextStyle(fontWeight: FontWeight.w700),
+                                    ),
+                                    subtitle: subtitle.isEmpty
+                                        ? const Text('Developer')
+                                        : Text(
+                                            subtitle,
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
                                           ),
-                                        );
-                                      }
+                                    isThreeLine: subtitle.contains('\n'),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'View developer profile',
+                                          icon: const Icon(
+                                            Icons.account_circle_outlined,
+                                            color: Color(0xFF4F46E5),
+                                          ),
+                                          onPressed: () {
+                                            Navigator.of(dialogContext).push(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    DeveloperPublicProfileScreen(
+                                                  developerId: developerId,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        busy
+                                            ? const SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : IconButton(
+                                                tooltip: 'Send invitation',
+                                                icon: const Icon(
+                                                  Icons.person_add_alt_1_rounded,
+                                                  color: Color(0xFF2563EB),
+                                                ),
+                                                onPressed: sendingUid == null
+                                                    ? () => sendTo(developer)
+                                                    : null,
+                                              ),
+                                      ],
+                                    ),
+                                    enabled: sendingUid == null,
+                                    onTap: () {
+                                      Navigator.of(dialogContext).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              DeveloperPublicProfileScreen(
+                                            developerId: developerId,
+                                          ),
+                                        ),
+                                      );
                                     },
                                   );
                                 },
@@ -875,7 +1085,9 @@ class _TeamsState extends State<Teams> {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    onPressed: sendingUid != null
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(),
                     child: const Text('Close'),
                   ),
                 ],
@@ -886,68 +1098,296 @@ class _TeamsState extends State<Teams> {
       );
     } catch (error) {
       _showSnackBar('Could not load developers: $error');
+    } finally {
+      roleController.dispose();
+      responsibilitiesController.dispose();
+      customRoleController.dispose();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadTeamMembers(TeamModel team) async {
+    final firestore = FirebaseFirestore.instance;
+    final members = <Map<String, dynamic>>[];
+
+    for (final memberId in team.memberIds.toSet()) {
+      try {
+        final results = await Future.wait([
+          firestore.collection('users').doc(memberId).get(),
+          firestore.collection('developerProfiles').doc(memberId).get(),
+        ]);
+        final userData = results[0].data() ?? <String, dynamic>{};
+        final profileData = results[1].data() ?? <String, dynamic>{};
+        final name = (profileData['name'] ?? userData['name'] ??
+                userData['displayName'] ?? 'Developer')
+            .toString();
+        members.add({
+          'id': memberId,
+          'name': name,
+          'email': (profileData['email'] ?? userData['email'] ?? '').toString(),
+          'photoUrl': (profileData['photoUrl'] ?? userData['photoUrl'] ??
+                  userData['profileImageUrl'] ?? '')
+              .toString(),
+          'headline': (profileData['headline'] ?? '').toString(),
+          'skills': _toStringList(profileData['skills']),
+          'technologies': _toStringList(profileData['technologies']),
+          'isOwner': memberId == team.ownerId,
+        });
+      } catch (_) {
+        members.add({
+          'id': memberId,
+          'name': 'Team member',
+          'email': '',
+          'photoUrl': '',
+          'headline': '',
+          'skills': <String>[],
+          'technologies': <String>[],
+          'isOwner': memberId == team.ownerId,
+        });
+      }
+    }
+
+    members.sort((a, b) {
+      if (a['isOwner'] == true) return -1;
+      if (b['isOwner'] == true) return 1;
+      return (a['name'] as String).toLowerCase().compareTo(
+            (b['name'] as String).toLowerCase(),
+          );
+    });
+    return members;
+  }
+
+  List<String> _toStringList(dynamic value) {
+    if (value is Iterable) {
+      return value.map((item) => item.toString()).where((s) => s.isNotEmpty).toList();
+    }
+    return <String>[];
+  }
+
+  Future<void> _confirmRemoveMember(TeamModel team, String memberId, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove team member?'),
+        content: Text('Remove $name from ${team.name}? They will lose access to this team membership.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove member'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _teamService.removeMember(team.id, memberId);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      _showSnackBar('$name was removed from the team.');
+    } catch (error) {
+      _showSnackBar('Could not remove member: $error');
+    }
+  }
+
+  Future<void> _confirmDeleteTeam(TeamModel team) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete this team?'),
+        content: Text('This will permanently delete "${team.name}". This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete team'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _teamService.deleteTeam(team.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      _showSnackBar('Team deleted successfully.');
+    } catch (error) {
+      _showSnackBar('Could not delete team: $error');
     }
   }
 
   void _showTeamDetails(TeamModel team) {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final isOwner = team.ownerId == currentUid;
+
     showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: Text(team.name.isEmpty ? 'Team Details' : team.name),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _detailRow(
-                  'Project',
-                  team.projectTitle.isEmpty
-                      ? 'Not specified'
-                      : team.projectTitle,
-                ),
-                _detailRow('Members', '${team.memberCount}'),
-                _detailRow(
-                  'Status',
-                  team.status.isEmpty ? 'Active' : team.status,
-                ),
-                if (team.description.isNotEmpty)
-                  _detailRow('Description', team.description),
-              ],
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _detailRow('Project', team.projectTitle.isEmpty ? 'Not specified' : team.projectTitle),
+                  _detailRow('Status', team.status.isEmpty ? 'Active' : team.status),
+                  if (team.description.isNotEmpty) _detailRow('Description', team.description),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Team Members', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF111827))),
+                      ),
+                      Chip(label: Text('${team.memberIds.toSet().length}')),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _loadTeamMembers(team),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return const Text('Could not load team members. Please try again.');
+                      }
+                      final members = snapshot.data ?? <Map<String, dynamic>>[];
+                      if (members.isEmpty) return const Text('No members found.');
+                      return Column(
+                        children: members.map((member) {
+                          final memberId = member['id'].toString();
+                          final photoUrl = member['photoUrl'].toString();
+                          final skills = <String>[
+                            ..._toStringList(member['skills']),
+                            ..._toStringList(member['technologies']),
+                          ].toSet().take(3).join(' · ');
+                          final subtitle = [
+                            if (member['isOwner'] == true) 'Team owner',
+                            if (member['headline'].toString().isNotEmpty) member['headline'].toString(),
+                            if (skills.isNotEmpty) skills,
+                            if (member['email'].toString().isNotEmpty) member['email'].toString(),
+                          ].join('\n');
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            elevation: 0,
+                            color: const Color(0xFFF8FAFC),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: const BorderSide(color: Color(0xFFE5E7EB)),
+                            ),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              leading: CircleAvatar(
+                                backgroundColor: const Color(0xFFE0E7FF),
+                                backgroundImage: photoUrl.startsWith('http') ? NetworkImage(photoUrl) : null,
+                                child: photoUrl.startsWith('http') ? null : const Icon(Icons.person_outline_rounded, color: Color(0xFF4338CA)),
+                              ),
+                              title: Text(member['name'].toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+                              subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 3, overflow: TextOverflow.ellipsis),
+                              isThreeLine: subtitle.contains('\n'),
+                              onTap: () {
+                                Navigator.of(dialogContext).push(MaterialPageRoute(
+                                  builder: (_) => DeveloperPublicProfileScreen(developerId: memberId),
+                                ));
+                              },
+                              trailing: PopupMenuButton<String>(
+                                tooltip: 'Member actions',
+                                onSelected: (action) {
+                                  if (action == 'profile') {
+                                    Navigator.of(dialogContext).push(MaterialPageRoute(
+                                      builder: (_) => DeveloperPublicProfileScreen(developerId: memberId),
+                                    ));
+                                  } else if (action == 'message') {
+                                    _openIndividualChat(
+                                      team,
+                                      memberId,
+                                      member['name'].toString(),
+                                    );
+                                  } else if (action == 'remove') {
+                                    if (memberId == team.ownerId) {
+                                      _showSnackBar('The team owner cannot be removed.');
+                                    } else {
+                                      _confirmRemoveMember(team, memberId, member['name'].toString());
+                                    }
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(
+                                    value: 'profile',
+                                    child: ListTile(
+                                      leading: Icon(Icons.account_circle_outlined),
+                                      title: Text('View profile'),
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                  if (memberId != FirebaseAuth.instance.currentUser?.uid)
+                                    const PopupMenuItem(
+                                      value: 'message',
+                                      child: ListTile(
+                                        leading: Icon(Icons.chat_bubble_outline),
+                                        title: Text('Message privately'),
+                                        contentPadding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                  if (isOwner && memberId != team.ownerId)
+                                    const PopupMenuItem(
+                                      value: 'remove',
+                                      child: ListTile(
+                                        leading: Icon(Icons.person_remove_outlined, color: Color(0xFFDC2626)),
+                                        title: Text('Remove member'),
+                                        contentPadding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
-            if (team.ownerId == FirebaseAuth.instance.currentUser?.uid &&
-                team.isActive)
+            if (isOwner && team.isActive)
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.of(context).pop();
+                  Navigator.of(dialogContext).pop();
                   _showInviteMemberDialog(team);
                 },
                 icon: const Icon(Icons.person_add_alt_1),
                 label: const Text('Invite Member'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                ),
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
               ),
-            if (team.memberIds.contains(FirebaseAuth.instance.currentUser?.uid))
+            if (team.memberIds.contains(currentUid))
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(this.context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          TeamChatScreen(teamId: team.id, teamName: team.name),
-                    ),
-                  );
+                  Navigator.of(dialogContext).pop();
+                  Navigator.of(this.context).push(MaterialPageRoute(
+                    builder: (_) => TeamChatScreen(teamId: team.id, teamName: team.name),
+                  ));
                 },
                 icon: const Icon(Icons.chat_bubble_outline),
                 label: const Text('Team Chat'),
               ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
+            if (isOwner)
+              TextButton.icon(
+                onPressed: () => _confirmDeleteTeam(team),
+                icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+                label: const Text('Delete Team', style: TextStyle(color: Color(0xFFDC2626))),
+              ),
+            TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Close')),
           ],
         );
       },
@@ -976,6 +1416,39 @@ class _TeamsState extends State<Teams> {
         ],
       ),
     );
+  }
+
+
+  Future<void> _openIndividualChat(
+    TeamModel team,
+    String memberId,
+    String memberName,
+  ) async {
+    try {
+      final chatId = await _individualChatService.openChat(
+        otherUid: memberId,
+        otherName: memberName,
+        teamId: team.id,
+      );
+
+      if (!mounted) return;
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => IndividualChatScreen(
+            chatId: chatId,
+            otherUid: memberId,
+            otherName: memberName,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open private chat: $error')),
+      );
+    }
   }
 
   void _showSnackBar(String message) {

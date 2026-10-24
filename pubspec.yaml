@@ -30,6 +30,13 @@ dependencies:
   flutter_svg: ^2.2.3
   youtube_player_iframe: ^6.0.2
   image_picker: ^1.2.4
+  record: ^7.1.2
+  audioplayers: ^6.8.1
+  flutter_webrtc: ^1.6.2+hotfix.4
+  path_provider: ^2.1.6
+  supabase_flutter: ^2.18.3
+  firebase_storage: ^13.6.1
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
