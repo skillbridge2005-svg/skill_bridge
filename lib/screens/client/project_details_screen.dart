@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
+import 'initial_estimate_screen.dart';
+import 'project_meeting_screen.dart';
 import 'client_applications_screen.dart';
 
 class ProjectDetailsScreen extends StatelessWidget {
@@ -145,6 +147,47 @@ class ProjectDetailsScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) =>
             ClientProjectChat(projectId: projectId, projectTitle: projectTitle),
+      ),
+    );
+  }
+
+  void _openMeetings(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectMeetingScreen(
+          projectId: projectId,
+          projectTitle: projectTitle,
+        ),
+      ),
+    );
+  }
+
+  void _openEstimate(
+    BuildContext context,
+    String title,
+    Map<String, dynamic> data,
+  ) {
+    final rawCategories = data['categories'];
+    final categories = rawCategories is List
+        ? rawCategories.map((value) => value.toString()).toList()
+        : [
+            if (data['category']?.toString().trim().isNotEmpty == true)
+              data['category'].toString().trim(),
+          ];
+
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => InitialEstimateScreen(
+          title: title,
+          categories: categories,
+          description: data['description']?.toString() ?? '',
+          requirements: data['requirements']?.toString() ?? '',
+          technologies:
+              data['technologies']?.toString() ?? categories.join(', '),
+          analysis: data['analysis']?.toString() ?? '',
+        ),
       ),
     );
   }
@@ -625,21 +668,41 @@ class ProjectDetailsScreen extends StatelessWidget {
                                     subtitle: _messagesSubtitle(context),
                                     onTap: () => _openMessages(context, title),
                                   ),
+                                  _ActionButton(
+                                    icon: Icons.video_call_rounded,
+                                    title: 'Project Meetings',
+                                    subtitle: 'Schedule or view team meetings',
+                                    onTap: () => _openMeetings(context, title),
+                                  ),
+                                  _ActionButton(
+                                    icon: Icons.calculate_outlined,
+                                    title: 'Project Estimate',
+                                    subtitle: 'Get an AI-powered cost estimate',
+                                    onTap: () =>
+                                        _openEstimate(context, title, data),
+                                  ),
                                 ];
 
                                 if (actionConstraints.maxWidth > 650) {
-                                  return Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                  return Column(
                                     children: [
-                                      for (
-                                        int i = 0;
-                                        i < buttons.length;
-                                        i++
-                                      ) ...[
-                                        if (i > 0) const SizedBox(width: 14),
-                                        Expanded(child: buttons[i]),
-                                      ],
+                                      Row(
+                                        children: [
+                                          Expanded(child: buttons[0]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[1]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        children: [
+                                          Expanded(child: buttons[2]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[3]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      buttons[4],
                                     ],
                                   );
                                 }

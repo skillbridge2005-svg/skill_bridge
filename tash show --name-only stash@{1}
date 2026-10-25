@@ -1,0 +1,16 @@
+ functions/index.js                                 | 1045 [32m++++++++++++[m[31m--------[m
+ lib/models/notification_model.dart                 |   55 [32m+[m[31m-[m
+ lib/screens/auth/auth_wrapper.dart                 |  114 [32m++[m[31m-[m
+ lib/screens/auth/login_screen.dart                 |   25 [32m+[m[31m-[m
+ lib/screens/auth/register_screen.dart              |  283 [32m+++++[m[31m-[m
+ .../client/ai_project_assistant_screen.dart        |   29 [32m+[m[31m-[m
+ .../client/client_notifications_screen.dart        |   64 [32m+[m[31m-[m
+ lib/screens/client/client_profile_screen.dart      |   34 [32m+[m
+ lib/screens/client/project_details_screen.dart     |   21 [32m+[m
+ lib/screens/developer/developer_home.dart          |   26 [32m+[m[31m-[m
+ lib/screens/developer/developer_profile.dart       |  107 [32m++[m
+ lib/screens/landing_page.dart                      |    2 [32m+[m[31m-[m
+ lib/services/notification_service.dart             |    2 [32m+[m
+ pubspec.lock                                       |   16 [32m+[m
+ pubspec.yaml                                       |    1 [32m+[m
+ 15 files changed, 1339 insertions(+), 485 deletions(-)

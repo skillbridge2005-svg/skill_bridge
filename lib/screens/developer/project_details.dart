@@ -384,17 +384,15 @@ class _ProjectDetailsState extends State<ProjectDetails>
     return Scaffold(
       backgroundColor: _background,
       floatingActionButton: FloatingActionButton.small(
-    heroTag: 'project-details-back',
-    backgroundColor: Colors.white,
-    foregroundColor: _textPrimary,
-    elevation: 4,
-    onPressed: () {
-      Navigator.of(context).maybePop();
-    },
-    child: const Icon(
-      Icons.arrow_back_rounded,
-    ),
-  ),
+        heroTag: 'project-details-back',
+        backgroundColor: Colors.white,
+        foregroundColor: _textPrimary,
+        elevation: 4,
+        onPressed: () {
+          Navigator.of(context).maybePop();
+        },
+        child: const Icon(Icons.arrow_back_rounded),
+      ),
       body: SafeArea(
         bottom: false,
         child: StreamBuilder<ProjectModel?>(

@@ -37,20 +37,14 @@ class TeamModel {
       projectTitle: _stringValue(data['projectTitle']),
       ownerId: _stringValue(data['ownerId']),
       memberIds: _stringList(data['memberIds']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'active',
-      ),
+      status: _stringValue(data['status'], fallback: 'active'),
       description: _stringValue(data['description']),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
     );
   }
 
-  factory TeamModel.fromMap(
-    String id,
-    Map<String, dynamic> data,
-  ) {
+  factory TeamModel.fromMap(String id, Map<String, dynamic> data) {
     return TeamModel(
       id: id,
       name: _stringValue(data['name']),
@@ -58,10 +52,7 @@ class TeamModel {
       projectTitle: _stringValue(data['projectTitle']),
       ownerId: _stringValue(data['ownerId']),
       memberIds: _stringList(data['memberIds']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'active',
-      ),
+      status: _stringValue(data['status'], fallback: 'active'),
       description: _stringValue(data['description']),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
@@ -107,15 +98,11 @@ class TeamModel {
     );
   }
 
-  bool get isActive =>
-      status.trim().toLowerCase() == 'active';
+  bool get isActive => status.trim().toLowerCase() == 'active';
 
   int get memberCount => memberIds.length;
 
-  static String _stringValue(
-    dynamic value, {
-    String fallback = '',
-  }) {
+  static String _stringValue(dynamic value, {String fallback = ''}) {
     if (value == null) {
       return fallback;
     }

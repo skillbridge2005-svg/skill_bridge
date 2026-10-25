@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../../models/project_model.dart';
 import '../../services/application_service.dart';
 import '../../services/project_service.dart';
 import '../../services/team_service.dart';
 import '../../models/team_model.dart';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import '../../services/team_invitation_service.dart';
+import '../developer/team_chat_screen.dart';
 
 class Teams extends StatefulWidget {
   const Teams({super.key});
@@ -14,12 +21,12 @@ class Teams extends StatefulWidget {
 
 class _TeamsState extends State<Teams> {
   final TeamService _teamService = TeamService();
-  final ApplicationService _applicationService =
-      ApplicationService();
+  final ApplicationService _applicationService = ApplicationService();
   final ProjectService _projectService = ProjectService();
 
-  final TextEditingController _searchController =
-      TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+
+  final TeamInvitationService _invitationService = TeamInvitationService();
 
   String _searchQuery = '';
 
@@ -45,10 +52,7 @@ class _TeamsState extends State<Teams> {
       return teams;
     }
 
-    return _teamService.searchTeams(
-      teams,
-      _searchQuery,
-    );
+    return _teamService.searchTeams(teams, _searchQuery);
   }
 
   @override
@@ -68,32 +72,24 @@ class _TeamsState extends State<Teams> {
         ),
         title: const Text(
           'Teams',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: FilledButton.icon(
               onPressed: _showCreateTeamDialog,
-              icon: const Icon(
-                Icons.add_rounded,
-                size: 19,
-              ),
+              icon: const Icon(Icons.add_rounded, size: 19),
               label: const Text('Create Team'),
               style: FilledButton.styleFrom(
-                backgroundColor:
-                    const Color(0xFF2563EB),
+                backgroundColor: const Color(0xFF2563EB),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 12,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
@@ -103,37 +99,26 @@ class _TeamsState extends State<Teams> {
       body: StreamBuilder<List<TeamModel>>(
         stream: _teamService.watchMyTeams(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState ==
-                  ConnectionState.waiting &&
+          if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return _buildErrorState(
-              snapshot.error.toString(),
-            );
+            return _buildErrorState(snapshot.error.toString());
           }
 
-          final teams =
-              snapshot.data ?? <TeamModel>[];
+          final teams = snapshot.data ?? <TeamModel>[];
 
-          final filteredTeams =
-              _filterTeams(teams);
+          final filteredTeams = _filterTeams(teams);
 
           return Column(
             children: [
               _buildHeader(teams.length),
               Expanded(
                 child: filteredTeams.isEmpty
-                    ? _buildEmptyState(
-                        hasTeams: teams.isNotEmpty,
-                      )
-                    : _buildTeamList(
-                        filteredTeams,
-                      ),
+                    ? _buildEmptyState(hasTeams: teams.isNotEmpty)
+                    : _buildTeamList(filteredTeams),
               ),
             ],
           );
@@ -146,15 +131,9 @@ class _TeamsState extends State<Teams> {
     return Container(
       width: double.infinity,
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(
-        24,
-        20,
-        24,
-        20,
-      ),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'My Teams',
@@ -169,44 +148,31 @@ class _TeamsState extends State<Teams> {
             teamCount == 0
                 ? 'Create or join teams for your projects.'
                 : '$teamCount '
-                    '${teamCount == 1 ? 'team' : 'teams'} found',
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF6B7280),
-            ),
+                      '${teamCount == 1 ? 'team' : 'teams'} found',
+            style: const TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
           ),
           const SizedBox(height: 18),
           TextField(
             controller: _searchController,
             decoration: InputDecoration(
-              hintText:
-                  'Search teams or projects...',
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-              ),
-              suffixIcon:
-                  _searchQuery.isNotEmpty
-                      ? IconButton(
-                          tooltip: 'Clear',
-                          icon: const Icon(
-                            Icons.close_rounded,
-                          ),
-                          onPressed: () {
-                            _searchController
-                                .clear();
-                          },
-                        )
-                      : null,
+              hintText: 'Search teams or projects...',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      tooltip: 'Clear',
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () {
+                        _searchController.clear();
+                      },
+                    )
+                  : null,
               filled: true,
-              fillColor:
-                  const Color(0xFFF7F8FC),
+              fillColor: const Color(0xFFF7F8FC),
               border: OutlineInputBorder(
-                borderRadius:
-                    BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(
+              contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 14,
               ),
@@ -217,9 +183,7 @@ class _TeamsState extends State<Teams> {
     );
   }
 
-  Widget _buildTeamList(
-    List<TeamModel> teams,
-  ) {
+  Widget _buildTeamList(List<TeamModel> teams) {
     return ListView.builder(
       padding: const EdgeInsets.all(24),
       itemCount: teams.length,
@@ -227,9 +191,7 @@ class _TeamsState extends State<Teams> {
         final team = teams[index];
 
         return Padding(
-          padding: const EdgeInsets.only(
-            bottom: 16,
-          ),
+          padding: const EdgeInsets.only(bottom: 16),
           child: _buildTeamCard(team),
         );
       },
@@ -241,23 +203,18 @@ class _TeamsState extends State<Teams> {
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.circular(16),
-        side: const BorderSide(
-          color: Color(0xFFE5E7EB),
-        ),
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFE5E7EB)),
       ),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         onTap: () {
           _showTeamDetails(team);
         },
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
@@ -265,55 +222,41 @@ class _TeamsState extends State<Teams> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color:
-                          const Color(0xFFEFF6FF),
-                      borderRadius:
-                          BorderRadius.circular(12),
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
                       Icons.groups_rounded,
-                      color:
-                          Color(0xFF2563EB),
+                      color: Color(0xFF2563EB),
                     ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          team.name.isEmpty
-                              ? 'Unnamed Team'
-                              : team.name,
-                          style:
-                              const TextStyle(
+                          team.name.isEmpty ? 'Unnamed Team' : team.name,
+                          style: const TextStyle(
                             fontSize: 17,
-                            fontWeight:
-                                FontWeight.w700,
-                            color:
-                                Color(0xFF111827),
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF111827),
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          team.projectTitle
-                                  .isEmpty
+                          team.projectTitle.isEmpty
                               ? 'Project not specified'
                               : team.projectTitle,
-                          style:
-                              const TextStyle(
+                          style: const TextStyle(
                             fontSize: 13,
-                            color:
-                                Color(0xFF6B7280),
+                            color: Color(0xFF6B7280),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  _buildStatusBadge(
-                    team.status,
-                  ),
+                  _buildStatusBadge(team.status),
                 ],
               ),
               const SizedBox(height: 18),
@@ -321,13 +264,11 @@ class _TeamsState extends State<Teams> {
                 Text(
                   team.description,
                   maxLines: 2,
-                  overflow:
-                      TextOverflow.ellipsis,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 14,
                     height: 1.5,
-                    color:
-                        Color(0xFF4B5563),
+                    color: Color(0xFF4B5563),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -337,18 +278,15 @@ class _TeamsState extends State<Teams> {
                   const Icon(
                     Icons.people_outline_rounded,
                     size: 18,
-                    color:
-                        Color(0xFF6B7280),
+                    color: Color(0xFF6B7280),
                   ),
                   const SizedBox(width: 6),
                   Text(
                     '${team.memberCount} '
                     '${team.memberCount == 1 ? 'member' : 'members'}',
-                    style:
-                        const TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
-                      color:
-                          Color(0xFF6B7280),
+                      color: Color(0xFF6B7280),
                     ),
                   ),
                   const Spacer(),
@@ -356,18 +294,15 @@ class _TeamsState extends State<Teams> {
                     'View Team',
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight:
-                          FontWeight.w600,
-                      color:
-                          Color(0xFF2563EB),
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2563EB),
                     ),
                   ),
                   const SizedBox(width: 4),
                   const Icon(
                     Icons.arrow_forward_rounded,
                     size: 17,
-                    color:
-                        Color(0xFF2563EB),
+                    color: Color(0xFF2563EB),
                   ),
                 ],
               ),
@@ -379,83 +314,65 @@ class _TeamsState extends State<Teams> {
   }
 
   Widget _buildStatusBadge(String status) {
-    final normalized =
-        status.trim().toLowerCase();
+    final normalized = status.trim().toLowerCase();
 
     final label = normalized.isEmpty
         ? 'Active'
         : '${normalized[0].toUpperCase()}'
-            '${normalized.substring(1)}';
+              '${normalized.substring(1)}';
 
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: normalized == 'completed'
             ? const Color(0xFFECFDF5)
             : normalized == 'archived'
-                ? const Color(0xFFF3F4F6)
-                : const Color(0xFFEFF6FF),
-        borderRadius:
-            BorderRadius.circular(20),
+            ? const Color(0xFFF3F4F6)
+            : const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 12,
-          fontWeight:
-              FontWeight.w600,
+          fontWeight: FontWeight.w600,
           color: normalized == 'completed'
               ? const Color(0xFF047857)
               : normalized == 'archived'
-                  ? const Color(0xFF6B7280)
-                  : const Color(0xFF2563EB),
+              ? const Color(0xFF6B7280)
+              : const Color(0xFF2563EB),
         ),
       ),
     );
   }
 
-  Widget _buildEmptyState({
-    required bool hasTeams,
-  }) {
+  Widget _buildEmptyState({required bool hasTeams}) {
     return Center(
       child: Padding(
-        padding:
-            const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 88,
               height: 88,
               decoration: BoxDecoration(
-                color:
-                    const Color(0xFFEFF6FF),
-                borderRadius:
-                    BorderRadius.circular(24),
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(24),
               ),
               child: const Icon(
                 Icons.groups_outlined,
                 size: 44,
-                color:
-                    Color(0xFF2563EB),
+                color: Color(0xFF2563EB),
               ),
             ),
             const SizedBox(height: 20),
             Text(
-              hasTeams
-                  ? 'No teams found'
-                  : 'No teams yet',
+              hasTeams ? 'No teams found' : 'No teams yet',
               style: const TextStyle(
                 fontSize: 22,
-                fontWeight:
-                    FontWeight.w700,
-                color:
-                    Color(0xFF111827),
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF111827),
               ),
             ),
             const SizedBox(height: 8),
@@ -463,42 +380,28 @@ class _TeamsState extends State<Teams> {
               hasTeams
                   ? 'Try a different search.'
                   : 'Create a team for one of '
-                      'your active projects to get started.',
-              textAlign:
-                  TextAlign.center,
+                        'your active projects to get started.',
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 14,
                 height: 1.5,
-                color:
-                    Color(0xFF6B7280),
+                color: Color(0xFF6B7280),
               ),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed:
-                  _showCreateTeamDialog,
-              icon: const Icon(
-                Icons.add_rounded,
-              ),
-              label:
-                  const Text('Create Team'),
-              style:
-                  FilledButton.styleFrom(
-                backgroundColor:
-                    const Color(0xFF2563EB),
-                foregroundColor:
-                    Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(
+              onPressed: _showCreateTeamDialog,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Create Team'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
                   horizontal: 20,
                   vertical: 14,
                 ),
-                shape:
-                    RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                    10,
-                  ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
@@ -508,41 +411,28 @@ class _TeamsState extends State<Teams> {
     );
   }
 
-  Widget _buildErrorState(
-    String error,
-  ) {
+  Widget _buildErrorState(String error) {
     return Center(
       child: Padding(
-        padding:
-            const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(
               Icons.error_outline_rounded,
               size: 48,
-              color:
-                  Colors.redAccent,
+              color: Colors.redAccent,
             ),
             const SizedBox(height: 16),
             const Text(
               'Unable to load teams',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight:
-                    FontWeight.w700,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
             Text(
               error,
-              textAlign:
-                  TextAlign.center,
-              style: const TextStyle(
-                color:
-                    Color(0xFF6B7280),
-              ),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF6B7280)),
             ),
           ],
         ),
@@ -551,42 +441,29 @@ class _TeamsState extends State<Teams> {
   }
 
   Future<void> _showCreateTeamDialog() async {
-    final nameController =
-        TextEditingController();
+    final nameController = TextEditingController();
 
-    final descriptionController =
-        TextEditingController();
+    final descriptionController = TextEditingController();
 
     String? selectedProjectId;
 
-    List<ProjectModel> activeProjects =
-        <ProjectModel>[];
+    List<ProjectModel> activeProjects = <ProjectModel>[];
 
     bool loadingProjects = true;
     String? projectError;
 
     try {
-      final applications =
-          await _applicationService
-              .getMyApplications();
+      final applications = await _applicationService.getMyApplications();
 
-      final acceptedApplications =
-          applications
-              .where(
-                (application) =>
-                    application.status
-                        .trim()
-                        .toLowerCase() ==
-                    'accepted',
-              )
-              .toList();
+      final acceptedApplications = applications
+          .where(
+            (application) =>
+                application.status.trim().toLowerCase() == 'accepted',
+          )
+          .toList();
 
-      for (final application
-          in acceptedApplications) {
-        final project =
-            await _projectService.getProject(
-          application.projectId,
-        );
+      for (final application in acceptedApplications) {
+        final project = await _projectService.getProject(application.projectId);
 
         if (project != null) {
           activeProjects.add(project);
@@ -594,8 +471,7 @@ class _TeamsState extends State<Teams> {
       }
 
       if (activeProjects.isNotEmpty) {
-        selectedProjectId =
-            activeProjects.first.id;
+        selectedProjectId = activeProjects.first.id;
       }
     } catch (e) {
       projectError = e.toString();
@@ -615,38 +491,24 @@ class _TeamsState extends State<Teams> {
         bool isCreating = false;
 
         return StatefulBuilder(
-          builder:
-              (context, setDialogState) {
+          builder: (context, setDialogState) {
             Future<void> createTeam() async {
-              final name =
-                  nameController.text.trim();
+              final name = nameController.text.trim();
 
-              final description =
-                  descriptionController.text
-                      .trim();
+              final description = descriptionController.text.trim();
 
               if (name.isEmpty) {
-                _showSnackBar(
-                  'Please enter a team name.',
-                );
+                _showSnackBar('Please enter a team name.');
                 return;
               }
 
-              if (selectedProjectId ==
-                      null ||
-                  selectedProjectId!
-                      .isEmpty) {
-                _showSnackBar(
-                  'Please select a project.',
-                );
+              if (selectedProjectId == null || selectedProjectId!.isEmpty) {
+                _showSnackBar('Please select a project.');
                 return;
               }
 
-              final selectedProject =
-                  activeProjects.firstWhere(
-                (project) =>
-                    project.id ==
-                    selectedProjectId,
+              final selectedProject = activeProjects.firstWhere(
+                (project) => project.id == selectedProjectId,
               );
 
               setDialogState(() {
@@ -656,285 +518,158 @@ class _TeamsState extends State<Teams> {
               try {
                 await _teamService.createTeam(
                   name: name,
-                  projectId:
-                      selectedProject.id,
-                  projectTitle:
-                      selectedProject.title,
+                  projectId: selectedProject.id,
+                  projectTitle: selectedProject.title,
                   memberIds: const [],
-                  description:
-                      description,
+                  description: description,
                 );
 
                 if (!mounted) return;
-if (!dialogContext.mounted) return;
+                if (!dialogContext.mounted) return;
 
-Navigator.of(dialogContext).pop();
+                Navigator.of(dialogContext).pop();
 
-                _showSnackBar(
-                  'Team created successfully.',
-                );
+                _showSnackBar('Team created successfully.');
               } catch (e) {
                 setDialogState(() {
                   isCreating = false;
                 });
 
-                _showSnackBar(
-                  e.toString(),
-                );
+                _showSnackBar(e.toString());
               }
             }
 
             return AlertDialog(
               title: const Text(
                 'Create Team',
-                style: TextStyle(
-                  fontWeight:
-                      FontWeight.w700,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
               content: SizedBox(
                 width: 480,
                 child: SingleChildScrollView(
                   child: Column(
-                    mainAxisSize:
-                        MainAxisSize.min,
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
                         'Create a team for one of your active projects.',
                         style: TextStyle(
                           fontSize: 14,
-                          color:
-                              Color(0xFF6B7280),
+                          color: Color(0xFF6B7280),
                         ),
                       ),
-                      const SizedBox(
-                        height: 20,
-                      ),
+                      const SizedBox(height: 20),
                       TextField(
-                        controller:
-                            nameController,
-                        enabled:
-                            !isCreating,
-                        textInputAction:
-                            TextInputAction.next,
-                        decoration:
-                            InputDecoration(
-                          labelText:
-                              'Team Name',
-                          hintText:
-                              'e.g. Flutter Development Team',
-                          prefixIcon:
-                              const Icon(
-                            Icons.groups_outlined,
-                          ),
-                          border:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              10,
-                            ),
+                        controller: nameController,
+                        enabled: !isCreating,
+                        textInputAction: TextInputAction.next,
+                        decoration: InputDecoration(
+                          labelText: 'Team Name',
+                          hintText: 'e.g. Flutter Development Team',
+                          prefixIcon: const Icon(Icons.groups_outlined),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                       ),
-                      const SizedBox(
-                        height: 16,
-                      ),
+                      const SizedBox(height: 16),
                       if (loadingProjects)
                         const Padding(
-                          padding:
-                              EdgeInsets
-                                  .symmetric(
-                            vertical: 12,
-                          ),
+                          padding: EdgeInsets.symmetric(vertical: 12),
                           child: Row(
                             children: [
                               SizedBox(
                                 width: 20,
                                 height: 20,
-                                child:
-                                    CircularProgressIndicator(
-                                  strokeWidth:
-                                      2,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
                                 ),
                               ),
-                              SizedBox(
-                                width: 12,
-                              ),
-                              Text(
-                                'Loading active projects...',
-                              ),
+                              SizedBox(width: 12),
+                              Text('Loading active projects...'),
                             ],
                           ),
                         )
-                      else if (projectError !=
-                          null)
+                      else if (projectError != null)
                         Container(
-                          width:
-                              double.infinity,
-                          padding:
-                              const EdgeInsets
-                                  .all(
-                            12,
-                          ),
-                          decoration:
-                              BoxDecoration(
-                            color:
-                                const Color(
-                              0xFFFFF7ED,
-                            ),
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              10,
-                            ),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF7ED),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             'Unable to load active projects.\n'
                             '$projectError',
-                            style:
-                                const TextStyle(
+                            style: const TextStyle(
                               fontSize: 13,
-                              color:
-                                  Color(
-                                0xFF9A3412,
-                              ),
+                              color: Color(0xFF9A3412),
                             ),
                           ),
                         )
-                      else if (activeProjects
-                          .isEmpty)
+                      else if (activeProjects.isEmpty)
                         Container(
-                          width:
-                              double.infinity,
-                          padding:
-                              const EdgeInsets
-                                  .all(
-                            14,
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3F4F6),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          decoration:
-                              BoxDecoration(
-                            color:
-                                const Color(
-                              0xFFF3F4F6,
-                            ),
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              10,
-                            ),
-                          ),
-                          child:
-                              const Text(
+                          child: const Text(
                             'You currently have no accepted projects. '
                             'You need an accepted project before creating a team.',
-                            style:
-                                TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               height: 1.4,
-                              color:
-                                  Color(
-                                0xFF4B5563,
-                              ),
+                              color: Color(0xFF4B5563),
                             ),
                           ),
                         )
                       else
-                        DropdownButtonFormField<
-                            String>(
-                          initialValue:
-                              selectedProjectId,
-                          decoration:
-                              InputDecoration(
-                            labelText:
-                                'Project',
-                            prefixIcon:
-                                const Icon(
-                              Icons
-                                  .work_outline_rounded,
-                            ),
-                            border:
-                                OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius
-                                      .circular(
-                                10,
-                              ),
+                        DropdownButtonFormField<String>(
+                          initialValue: selectedProjectId,
+                          decoration: InputDecoration(
+                            labelText: 'Project',
+                            prefixIcon: const Icon(Icons.work_outline_rounded),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          items:
-                              activeProjects
-                                  .map(
-                            (project) {
-                              return DropdownMenuItem<
-                                  String>(
-                                value:
-                                    project.id,
-                                child:
-                                    SizedBox(
-                                  width:
-                                      330,
-                                  child:
-                                      Text(
-                                    project.title,
-                                    overflow:
-                                        TextOverflow
-                                            .ellipsis,
-                                  ),
+                          items: activeProjects.map((project) {
+                            return DropdownMenuItem<String>(
+                              value: project.id,
+                              child: SizedBox(
+                                width: 330,
+                                child: Text(
+                                  project.title,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                              );
-                            },
-                          ).toList(),
-                          onChanged:
-                              isCreating
-                                  ? null
-                                  : (value) {
-                                      setDialogState(
-                                        () {
-                                          selectedProjectId =
-                                              value;
-                                        },
-                                      );
-                                    },
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: isCreating
+                              ? null
+                              : (value) {
+                                  setDialogState(() {
+                                    selectedProjectId = value;
+                                  });
+                                },
                         ),
-                      const SizedBox(
-                        height: 16,
-                      ),
+                      const SizedBox(height: 16),
                       TextField(
-                        controller:
-                            descriptionController,
-                        enabled:
-                            !isCreating,
+                        controller: descriptionController,
+                        enabled: !isCreating,
                         maxLines: 4,
-                        decoration:
-                            InputDecoration(
-                          labelText:
-                              'Description',
-                          hintText:
-                              'Describe what this team will work on...',
-                          alignLabelWithHint:
-                              true,
-                          prefixIcon:
-                              const Padding(
-                            padding:
-                                EdgeInsets.only(
-                              bottom: 54,
-                            ),
-                            child: Icon(
-                              Icons
-                                  .description_outlined,
-                            ),
+                        decoration: InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'Describe what this team will work on...',
+                          alignLabelWithHint: true,
+                          prefixIcon: const Padding(
+                            padding: EdgeInsets.only(bottom: 54),
+                            child: Icon(Icons.description_outlined),
                           ),
-                          border:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              10,
-                            ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                       ),
@@ -947,42 +682,28 @@ Navigator.of(dialogContext).pop();
                   onPressed: isCreating
                       ? null
                       : () {
-                          Navigator.of(
-                            dialogContext,
-                          ).pop();
+                          Navigator.of(dialogContext).pop();
                         },
-                  child:
-                      const Text('Cancel'),
+                  child: const Text('Cancel'),
                 ),
                 FilledButton(
                   onPressed:
-                      isCreating ||
-                              loadingProjects ||
-                              activeProjects
-                                  .isEmpty
-                          ? null
-                          : createTeam,
-                  style:
-                      FilledButton.styleFrom(
-                    backgroundColor:
-                        const Color(
-                      0xFF2563EB,
-                    ),
+                      isCreating || loadingProjects || activeProjects.isEmpty
+                      ? null
+                      : createTeam,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
                   ),
                   child: isCreating
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child:
-                              CircularProgressIndicator(
+                          child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color:
-                                Colors.white,
+                            color: Colors.white,
                           ),
                         )
-                      : const Text(
-                          'Create Team',
-                        ),
+                      : const Text('Create Team'),
                 ),
               ],
             );
@@ -995,60 +716,237 @@ Navigator.of(dialogContext).pop();
     descriptionController.dispose();
   }
 
-  void _showTeamDetails(
-    TeamModel team,
-  ) {
+  Future<void> _showInviteMemberDialog(TeamModel team) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (currentUid == null) {
+      _showSnackBar('Please sign in to invite a developer.');
+      return;
+    }
+
+    if (team.ownerId != currentUid) {
+      _showSnackBar('Only the team owner can invite members.');
+      return;
+    }
+
+    if (!team.isActive) {
+      _showSnackBar('Only active teams can receive invitations.');
+      return;
+    }
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'developer')
+          .get();
+
+      if (!mounted) return;
+
+      final developers = snapshot.docs.where((doc) {
+        return doc.id != currentUid && !team.memberIds.contains(doc.id);
+      }).toList();
+
+      if (developers.isEmpty) {
+        _showSnackBar('No eligible developers found.');
+        return;
+      }
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          String search = '';
+          String? sendingUid;
+
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              final filtered = developers.where((doc) {
+                final data = doc.data();
+                final name =
+                    (data['name'] ??
+                            data['displayName'] ??
+                            data['fullName'] ??
+                            '')
+                        .toString();
+                final email = (data['email'] ?? '').toString();
+
+                return '$name $email'.toLowerCase().contains(
+                  search.toLowerCase(),
+                );
+              }).toList();
+
+              return AlertDialog(
+                title: const Text('Invite a Developer'),
+                content: SizedBox(
+                  width: 440,
+                  height: 420,
+                  child: Column(
+                    children: [
+                      TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Search by name or email',
+                          prefixIcon: Icon(Icons.search),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() => search = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: filtered.isEmpty
+                            ? const Center(child: Text('No developers found.'))
+                            : ListView.separated(
+                                itemCount: filtered.length,
+                                separatorBuilder: (_, __) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final developer = filtered[index];
+                                  final data = developer.data();
+                                  final name =
+                                      (data['name'] ??
+                                              data['displayName'] ??
+                                              data['fullName'] ??
+                                              'Developer')
+                                          .toString();
+                                  final email = (data['email'] ?? '')
+                                      .toString();
+                                  final busy = sendingUid == developer.id;
+
+                                  return ListTile(
+                                    leading: const CircleAvatar(
+                                      child: Icon(Icons.person_outline),
+                                    ),
+                                    title: Text(name),
+                                    subtitle: email.isEmpty
+                                        ? null
+                                        : Text(email),
+                                    trailing: busy
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(Icons.person_add_alt_1),
+                                    enabled: sendingUid == null,
+                                    onTap: () async {
+                                      setDialogState(() {
+                                        sendingUid = developer.id;
+                                      });
+
+                                      try {
+                                        await _invitationService.sendInvitation(
+                                          teamId: team.id,
+                                          developerId: developer.id,
+                                        );
+
+                                        if (!mounted) return;
+                                        if (!dialogContext.mounted) return;
+
+                                        Navigator.of(dialogContext).pop();
+                                        _showSnackBar(
+                                          'Invitation sent to $name.',
+                                        );
+                                      } catch (error) {
+                                        setDialogState(() {
+                                          sendingUid = null;
+                                        });
+
+                                        if (!mounted) return;
+
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Could not send invitation: $error',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } catch (error) {
+      _showSnackBar('Could not load developers: $error');
+    }
+  }
+
+  void _showTeamDetails(TeamModel team) {
     showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text(
-            team.name.isEmpty
-                ? 'Team Details'
-                : team.name,
-          ),
-          content:
-              SingleChildScrollView(
+          title: Text(team.name.isEmpty ? 'Team Details' : team.name),
+          content: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              mainAxisSize:
-                  MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _detailRow(
                   'Project',
-                  team.projectTitle
-                          .isEmpty
+                  team.projectTitle.isEmpty
                       ? 'Not specified'
                       : team.projectTitle,
                 ),
-                _detailRow(
-                  'Members',
-                  '${team.memberCount}',
-                ),
+                _detailRow('Members', '${team.memberCount}'),
                 _detailRow(
                   'Status',
-                  team.status.isEmpty
-                      ? 'Active'
-                      : team.status,
+                  team.status.isEmpty ? 'Active' : team.status,
                 ),
-                if (team.description
-                    .isNotEmpty)
-                  _detailRow(
-                    'Description',
-                    team.description,
-                  ),
+                if (team.description.isNotEmpty)
+                  _detailRow('Description', team.description),
               ],
             ),
           ),
           actions: [
+            if (team.ownerId == FirebaseAuth.instance.currentUser?.uid &&
+                team.isActive)
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showInviteMemberDialog(team);
+                },
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Invite Member'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                ),
+              ),
+            if (team.memberIds.contains(FirebaseAuth.instance.currentUser?.uid))
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(this.context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          TeamChatScreen(teamId: team.id, teamName: team.name),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('Team Chat'),
+              ),
             TextButton(
-              onPressed: () {
-                Navigator.of(context)
-                    .pop();
-              },
-              child:
-                  const Text('Close'),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
             ),
           ],
         );
@@ -1056,39 +954,24 @@ Navigator.of(dialogContext).pop();
     );
   }
 
-  Widget _detailRow(
-    String label,
-    String value,
-  ) {
+  Widget _detailRow(String label, String value) {
     return Padding(
-      padding:
-          const EdgeInsets.only(
-        bottom: 14,
-      ),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style:
-                const TextStyle(
+            style: const TextStyle(
               fontSize: 12,
-              fontWeight:
-                  FontWeight.w600,
-              color:
-                  Color(0xFF6B7280),
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style:
-                const TextStyle(
-              fontSize: 14,
-              color:
-                  Color(0xFF111827),
-            ),
+            style: const TextStyle(fontSize: 14, color: Color(0xFF111827)),
           ),
         ],
       ),
@@ -1099,12 +982,6 @@ Navigator.of(dialogContext).pop();
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)
-        .showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-        ),
-      ),
-    );
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 }

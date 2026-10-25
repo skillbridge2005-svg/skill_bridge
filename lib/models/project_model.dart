@@ -74,10 +74,7 @@ class ProjectModel {
       duration: _stringValue(data['duration']),
       projectType: _stringValue(data['projectType']),
       workMode: _stringValue(data['workMode']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'open',
-      ),
+      status: _stringValue(data['status'], fallback: 'open'),
       applicationsCount: _intValue(data['applicationsCount']),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
@@ -88,10 +85,7 @@ class ProjectModel {
   ///
   /// Useful when working with locally generated data or when a map has
   /// already been obtained from Firestore.
-  factory ProjectModel.fromMap(
-    Map<String, dynamic> data, {
-    String id = '',
-  }) {
+  factory ProjectModel.fromMap(Map<String, dynamic> data, {String id = ''}) {
     return ProjectModel(
       id: id,
       title: _stringValue(data['title']),
@@ -106,10 +100,7 @@ class ProjectModel {
       duration: _stringValue(data['duration']),
       projectType: _stringValue(data['projectType']),
       workMode: _stringValue(data['workMode']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'open',
-      ),
+      status: _stringValue(data['status'], fallback: 'open'),
       applicationsCount: _intValue(data['applicationsCount']),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
@@ -120,9 +111,7 @@ class ProjectModel {
   ///
   /// The ID is intentionally not included because Firestore uses the
   /// document ID separately.
-  Map<String, dynamic> toMap({
-    bool includeTimestamps = true,
-  }) {
+  Map<String, dynamic> toMap({bool includeTimestamps = true}) {
     final map = <String, dynamic>{
       'title': title.trim(),
       'description': description.trim(),
@@ -195,16 +184,14 @@ class ProjectModel {
   }
 
   /// Whether this project is currently open for applications.
-bool get isOpen {
-  final normalizedStatus = status.trim().toLowerCase();
+  bool get isOpen {
+    final normalizedStatus = status.trim().toLowerCase();
 
-  return normalizedStatus == 'open' ||
-      normalizedStatus == 'requirement';
-}
+    return normalizedStatus == 'open' || normalizedStatus == 'requirement';
+  }
 
   /// Whether the project has a defined budget range.
-  bool get hasBudgetRange =>
-      budgetMin > 0 || budgetMax > 0;
+  bool get hasBudgetRange => budgetMin > 0 || budgetMax > 0;
 
   /// Returns the effective minimum budget.
   double get effectiveBudgetMin {
@@ -277,30 +264,18 @@ bool get isOpen {
     final userSkills = _normalizeList(developerSkills);
     final userTechnologies = _normalizeList(developerTechnologies);
 
-    final skillScore = _overlapPercentage(
-      userSkills,
-      projectSkills,
-    );
+    final skillScore = _overlapPercentage(userSkills, projectSkills);
 
     final technologyScore = _overlapPercentage(
       userTechnologies,
       projectTechnologies,
     );
 
-    final projectTypeScore = _textMatchScore(
-      developerProjectType,
-      projectType,
-    );
+    final projectTypeScore = _textMatchScore(developerProjectType, projectType);
 
-    final workModeScore = _textMatchScore(
-      developerWorkMode,
-      workMode,
-    );
+    final workModeScore = _textMatchScore(developerWorkMode, workMode);
 
-    final durationScore = _textMatchScore(
-      developerDuration,
-      duration,
-    );
+    final durationScore = _textMatchScore(developerDuration, duration);
 
     final score =
         (skillScore * 0.40) +
@@ -329,24 +304,15 @@ bool get isOpen {
     ).round();
   }
 
-  static List<String> _normalizeList(
-    List<String> values,
-  ) {
+  static List<String> _normalizeList(List<String> values) {
     return values
-        .map(
-          (value) => value
-              .trim()
-              .toLowerCase(),
-        )
+        .map((value) => value.trim().toLowerCase())
         .where((value) => value.isNotEmpty)
         .toSet()
         .toList();
   }
 
-  static double _overlapPercentage(
-    List<String> first,
-    List<String> second,
-  ) {
+  static double _overlapPercentage(List<String> first, List<String> second) {
     if (second.isEmpty) {
       return 0;
     }
@@ -358,54 +324,39 @@ bool get isOpen {
     final firstSet = first.toSet();
     final secondSet = second.toSet();
 
-    final matches = secondSet
-        .where(firstSet.contains)
-        .length;
+    final matches = secondSet.where(firstSet.contains).length;
 
     return (matches / secondSet.length) * 100;
   }
 
-  static double _textMatchScore(
-    String? developerValue,
-    String projectValue,
-  ) {
+  static double _textMatchScore(String? developerValue, String projectValue) {
     if (developerValue == null ||
         developerValue.trim().isEmpty ||
         projectValue.trim().isEmpty) {
       return 0;
     }
 
-    final developer = developerValue
-        .trim()
-        .toLowerCase();
+    final developer = developerValue.trim().toLowerCase();
 
-    final project = projectValue
-        .trim()
-        .toLowerCase();
+    final project = projectValue.trim().toLowerCase();
 
     if (developer == project) {
       return 100;
     }
 
-    if (developer.contains(project) ||
-        project.contains(developer)) {
+    if (developer.contains(project) || project.contains(developer)) {
       return 75;
     }
 
     // Handle common "Both" / "Any" style preferences.
-    if (developer == 'both' ||
-        developer == 'any' ||
-        developer == 'flexible') {
+    if (developer == 'both' || developer == 'any' || developer == 'flexible') {
       return 100;
     }
 
     return 0;
   }
 
-  static String _stringValue(
-    dynamic value, {
-    String fallback = '',
-  }) {
+  static String _stringValue(dynamic value, {String fallback = ''}) {
     if (value == null) {
       return fallback;
     }

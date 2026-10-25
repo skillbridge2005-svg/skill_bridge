@@ -230,10 +230,6 @@ class _ProjectEstimateResultScreenState
       _featureNames(oldPlan),
       _featureNames(_currentPlan),
     );
-    final addedTech = _findAdded(
-      _technologyNames(oldPlan),
-      _technologyNames(_currentPlan),
-    );
     final removedTech = _findRemoved(
       _technologyNames(oldPlan),
       _technologyNames(_currentPlan),
@@ -404,9 +400,9 @@ class _ProjectEstimateResultScreenState
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
+          color: color.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.22)),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

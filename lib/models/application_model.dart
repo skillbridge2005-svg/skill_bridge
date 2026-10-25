@@ -56,10 +56,7 @@ class ApplicationModel {
       coverLetter: _stringValue(data['coverLetter']),
       proposedBudget: _doubleValue(data['proposedBudget']),
       estimatedDuration: _stringValue(data['estimatedDuration']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'pending',
-      ),
+      status: _stringValue(data['status'], fallback: 'pending'),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
     );
@@ -78,19 +75,14 @@ class ApplicationModel {
       coverLetter: _stringValue(data['coverLetter']),
       proposedBudget: _doubleValue(data['proposedBudget']),
       estimatedDuration: _stringValue(data['estimatedDuration']),
-      status: _stringValue(
-        data['status'],
-        fallback: 'pending',
-      ),
+      status: _stringValue(data['status'], fallback: 'pending'),
       createdAt: _dateTimeValue(data['createdAt']),
       updatedAt: _dateTimeValue(data['updatedAt']),
     );
   }
 
   /// Converts the model into a Firestore-compatible map.
-  Map<String, dynamic> toMap({
-    bool includeTimestamps = true,
-  }) {
+  Map<String, dynamic> toMap({bool includeTimestamps = true}) {
     final map = <String, dynamic>{
       'developerId': developerId.trim(),
       'projectId': projectId.trim(),
@@ -98,9 +90,7 @@ class ApplicationModel {
       'coverLetter': coverLetter.trim(),
       'proposedBudget': proposedBudget,
       'estimatedDuration': estimatedDuration.trim(),
-      'status': status.trim().isEmpty
-          ? 'pending'
-          : status.trim().toLowerCase(),
+      'status': status.trim().isEmpty ? 'pending' : status.trim().toLowerCase(),
     };
 
     if (includeTimestamps) {
@@ -136,8 +126,7 @@ class ApplicationModel {
       clientId: clientId ?? this.clientId,
       coverLetter: coverLetter ?? this.coverLetter,
       proposedBudget: proposedBudget ?? this.proposedBudget,
-      estimatedDuration:
-          estimatedDuration ?? this.estimatedDuration,
+      estimatedDuration: estimatedDuration ?? this.estimatedDuration,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -146,8 +135,7 @@ class ApplicationModel {
 
   bool get isPending => status.toLowerCase() == 'pending';
 
-  bool get isShortlisted =>
-      status.toLowerCase() == 'shortlisted';
+  bool get isShortlisted => status.toLowerCase() == 'shortlisted';
 
   bool get isRejected => status.toLowerCase() == 'rejected';
 
@@ -168,10 +156,7 @@ class ApplicationModel {
         ')';
   }
 
-  static String _stringValue(
-    dynamic value, {
-    String fallback = '',
-  }) {
+  static String _stringValue(dynamic value, {String fallback = ''}) {
     if (value == null) {
       return fallback;
     }

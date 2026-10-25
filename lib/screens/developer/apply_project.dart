@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../services/project_service.dart';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
 import '../../models/project_model.dart';
 import '../../services/application_service.dart';
 
@@ -7,31 +12,22 @@ class ApplyProject extends StatefulWidget {
   final String projectId;
   final ProjectModel? initialProject;
 
-  const ApplyProject({
-    super.key,
-    required this.projectId,
-    this.initialProject,
-  });
+  const ApplyProject({super.key, required this.projectId, this.initialProject});
 
   @override
   State<ApplyProject> createState() => _ApplyProjectState();
 }
 
 class _ApplyProjectState extends State<ApplyProject> {
-  final ApplicationService _applicationService =
-      ApplicationService();
+  final ApplicationService _applicationService = ApplicationService();
 
-  final GlobalKey<FormState> _formKey =
-      GlobalKey<FormState>();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
-  final TextEditingController _coverLetterController =
-      TextEditingController();
+  final TextEditingController _coverLetterController = TextEditingController();
 
-  final TextEditingController _budgetController =
-      TextEditingController();
+  final TextEditingController _budgetController = TextEditingController();
 
-  final TextEditingController _durationController =
-      TextEditingController();
+  final TextEditingController _durationController = TextEditingController();
 
   bool _isLoading = true;
   bool _isSubmitting = false;
@@ -68,21 +64,14 @@ class _ApplyProjectState extends State<ApplyProject> {
         _errorMessage = null;
       });
 
-
-       _project ??= await _loadProject();
-
+      _project ??= await _loadProject();
 
       if (_project == null) {
-        throw Exception(
-          'The project could not be found.',
-        );
+        throw Exception('The project could not be found.');
       }
 
-      final existingApplication =
-          await _applicationService
-              .getMyApplicationForProject(
-        widget.projectId,
-      );
+      final existingApplication = await _applicationService
+          .getMyApplicationForProject(widget.projectId);
 
       if (!mounted) return;
 
@@ -114,14 +103,93 @@ class _ApplyProjectState extends State<ApplyProject> {
   // SUBMIT
   // ===========================================================================
 
+  Future<bool> _checkProfileCompletion() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      _showMessage('Please log in before applying.', isError: true);
+      return false;
+    }
+
+    try {
+      final profileDoc = await FirebaseFirestore.instance
+          .collection('developerProfiles')
+          .doc(user.uid)
+          .get();
+
+      if (!profileDoc.exists) {
+        _showMessage(
+          'Please complete your developer profile to 100% before applying.',
+          isError: true,
+        );
+        return false;
+      }
+
+      final data = profileDoc.data()!;
+      final rawCompletion = data['profileCompletion'];
+
+      int completion;
+
+      if (rawCompletion is num) {
+        completion = rawCompletion.toInt();
+      } else {
+        // Use the same 12 fields as DeveloperProfile.
+        int completed = 0;
+
+        bool hasValue(String key) {
+          return (data[key]?.toString().trim() ?? '').isNotEmpty;
+        }
+
+        bool hasList(String key) {
+          final value = data[key];
+          return value is List && value.isNotEmpty;
+        }
+
+        if (hasValue('name')) completed++;
+        if (hasValue('headline')) completed++;
+        if (hasValue('bio')) completed++;
+        if (hasValue('location')) completed++;
+        if (hasList('skills')) completed++;
+        if (hasList('technologies')) completed++;
+        if (hasValue('experience')) completed++;
+        if (hasValue('education')) completed++;
+        if (hasValue('githubUrl')) completed++;
+        if (hasValue('resumeUrl')) completed++;
+        if (hasValue('availability')) completed++;
+        if (hasValue('projectType')) completed++;
+
+        completion = ((completed / 12) * 100).round();
+      }
+
+      if (completion < 100) {
+        _showMessage(
+          'Your profile is $completion% complete. '
+          'Please complete it to 100% before applying.',
+          isError: true,
+        );
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      _showMessage(
+        'Could not verify your profile. Please try again.',
+        isError: true,
+      );
+      return false;
+    }
+  }
+
   Future<void> _submitApplication() async {
     FocusScope.of(context).unfocus();
 
     if (_alreadyApplied) {
-      _showMessage(
-        'You have already applied to this project.',
-        isError: true,
-      );
+      _showMessage('You have already applied to this project.', isError: true);
+      return;
+    }
+    final canApply = await _checkProfileCompletion();
+
+    if (!canApply || !mounted) {
       return;
     }
 
@@ -132,24 +200,16 @@ class _ApplyProjectState extends State<ApplyProject> {
     final project = _project;
 
     if (project == null) {
-      _showMessage(
-        'Project information is unavailable.',
-        isError: true,
-      );
+      _showMessage('Project information is unavailable.', isError: true);
       return;
     }
 
     final budget = double.tryParse(
-      _budgetController.text
-          .trim()
-          .replaceAll(',', ''),
+      _budgetController.text.trim().replaceAll(',', ''),
     );
 
     if (budget == null || budget <= 0) {
-      _showMessage(
-        'Enter a valid proposed budget.',
-        isError: true,
-      );
+      _showMessage('Enter a valid proposed budget.', isError: true);
       return;
     }
 
@@ -163,8 +223,7 @@ class _ApplyProjectState extends State<ApplyProject> {
         clientId: project.clientId,
         coverLetter: _coverLetterController.text,
         proposedBudget: budget,
-        estimatedDuration:
-            _durationController.text,
+        estimatedDuration: _durationController.text,
       );
 
       if (!mounted) return;
@@ -182,10 +241,7 @@ class _ApplyProjectState extends State<ApplyProject> {
         _isSubmitting = false;
       });
 
-      _showMessage(
-        e.message,
-        isError: true,
-      );
+      _showMessage(e.message, isError: true);
     } catch (e) {
       if (!mounted) return;
 
@@ -231,10 +287,7 @@ class _ApplyProjectState extends State<ApplyProject> {
               const Expanded(
                 child: Text(
                   'Application Submitted',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -290,9 +343,7 @@ class _ApplyProjectState extends State<ApplyProject> {
       return 'Enter your proposed budget.';
     }
 
-    final budget = double.tryParse(
-      text.replaceAll(',', ''),
-    );
+    final budget = double.tryParse(text.replaceAll(',', ''));
 
     if (budget == null || budget <= 0) {
       return 'Enter a valid budget.';
@@ -329,15 +380,11 @@ class _ApplyProjectState extends State<ApplyProject> {
           onPressed: () {
             Navigator.of(context).pop();
           },
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-          ),
+          icon: const Icon(Icons.arrow_back_rounded),
         ),
         title: const Text(
           'Apply for Project',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
       body: _buildBody(theme),
@@ -346,9 +393,7 @@ class _ApplyProjectState extends State<ApplyProject> {
 
   Widget _buildBody(ThemeData theme) {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_errorMessage != null) {
@@ -356,9 +401,7 @@ class _ApplyProjectState extends State<ApplyProject> {
     }
 
     if (_project == null) {
-      return _buildErrorState(
-        message: 'Project information is unavailable.',
-      );
+      return _buildErrorState(message: 'Project information is unavailable.');
     }
 
     if (_alreadyApplied) {
@@ -379,34 +422,20 @@ class _ApplyProjectState extends State<ApplyProject> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: 1050,
-          ),
+          constraints: const BoxConstraints(maxWidth: 1050),
           child: Form(
             key: _formKey,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final wide =
-                    constraints.maxWidth >= 800;
+                final wide = constraints.maxWidth >= 800;
 
                 if (wide) {
                   return Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        flex: 4,
-                        child: _buildProjectSummary(
-                          project,
-                        ),
-                      ),
+                      Expanded(flex: 4, child: _buildProjectSummary(project)),
                       const SizedBox(width: 24),
-                      Expanded(
-                        flex: 6,
-                        child: _buildApplicationCard(
-                          project,
-                        ),
-                      ),
+                      Expanded(flex: 6, child: _buildApplicationCard(project)),
                     ],
                   );
                 }
@@ -430,43 +459,32 @@ class _ApplyProjectState extends State<ApplyProject> {
   // PROJECT SUMMARY
   // ===========================================================================
 
-  Widget _buildProjectSummary(
-    ProjectModel project,
-  ) {
+  Widget _buildProjectSummary(ProjectModel project) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: const Color(0xFFE2E8F0),
-        ),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.04,
-            ),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 54,
             height: 54,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [
-                  Color(0xFF2563EB),
-                  Color(0xFF4F46E5),
-                ],
+                colors: [Color(0xFF2563EB), Color(0xFF4F46E5)],
               ),
-              borderRadius:
-                  BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: const Icon(
               Icons.work_outline_rounded,
@@ -511,31 +529,21 @@ class _ApplyProjectState extends State<ApplyProject> {
           _summaryRow(
             Icons.person_outline_rounded,
             'Client',
-            project.clientName.isEmpty
-                ? 'Client'
-                : project.clientName,
+            project.clientName.isEmpty ? 'Client' : project.clientName,
           ),
           const SizedBox(height: 16),
-          _summaryRow(
-            Icons.payments_outlined,
-            'Budget',
-            _budgetText(project),
-          ),
+          _summaryRow(Icons.payments_outlined, 'Budget', _budgetText(project)),
           const SizedBox(height: 16),
           _summaryRow(
             Icons.schedule_outlined,
             'Duration',
-            project.duration.isEmpty
-                ? 'Not specified'
-                : project.duration,
+            project.duration.isEmpty ? 'Not specified' : project.duration,
           ),
           const SizedBox(height: 16),
           _summaryRow(
             Icons.laptop_mac_outlined,
             'Work mode',
-            project.workMode.isEmpty
-                ? 'Not specified'
-                : project.workMode,
+            project.workMode.isEmpty ? 'Not specified' : project.workMode,
           ),
           if (project.skills.isNotEmpty) ...[
             const SizedBox(height: 24),
@@ -555,15 +563,13 @@ class _ApplyProjectState extends State<ApplyProject> {
                   .take(8)
                   .map(
                     (skill) => Container(
-                      padding:
-                          const EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 11,
                         vertical: 7,
                       ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFEFF6FF),
-                        borderRadius:
-                            BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         skill,
@@ -583,34 +589,23 @@ class _ApplyProjectState extends State<ApplyProject> {
     );
   }
 
-  Widget _summaryRow(
-    IconData icon,
-    String label,
-    String value,
-  ) {
+  Widget _summaryRow(IconData icon, String label, String value) {
     return Row(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           width: 38,
           height: 38,
           decoration: BoxDecoration(
             color: const Color(0xFFF1F5F9),
-            borderRadius:
-                BorderRadius.circular(11),
+            borderRadius: BorderRadius.circular(11),
           ),
-          child: Icon(
-            icon,
-            size: 19,
-            color: const Color(0xFF475569),
-          ),
+          child: Icon(icon, size: 19, color: const Color(0xFF475569)),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
@@ -640,30 +635,23 @@ class _ApplyProjectState extends State<ApplyProject> {
   // APPLICATION CARD
   // ===========================================================================
 
-  Widget _buildApplicationCard(
-    ProjectModel project,
-  ) {
+  Widget _buildApplicationCard(ProjectModel project) {
     return Container(
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: const Color(0xFFE2E8F0),
-        ),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.04,
-            ),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Submit your application',
@@ -676,24 +664,17 @@ class _ApplyProjectState extends State<ApplyProject> {
           const SizedBox(height: 7),
           const Text(
             'Tell the client why you are a good fit for this project.',
-            style: TextStyle(
-              fontSize: 14,
-              color: Color(0xFF64748B),
-            ),
+            style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
           ),
           const SizedBox(height: 28),
 
-          _fieldLabel(
-            'Cover Letter',
-            required: true,
-          ),
+          _fieldLabel('Cover Letter', required: true),
           const SizedBox(height: 9),
           TextFormField(
             controller: _coverLetterController,
             minLines: 7,
             maxLines: 12,
-            textCapitalization:
-                TextCapitalization.sentences,
+            textCapitalization: TextCapitalization.sentences,
             validator: _validateCoverLetter,
             decoration: _inputDecoration(
               hint:
@@ -705,17 +686,11 @@ class _ApplyProjectState extends State<ApplyProject> {
 
           const SizedBox(height: 22),
 
-          _fieldLabel(
-            'Proposed Budget',
-            required: true,
-          ),
+          _fieldLabel('Proposed Budget', required: true),
           const SizedBox(height: 9),
           TextFormField(
             controller: _budgetController,
-            keyboardType:
-                const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             validator: _validateBudget,
             decoration: _inputDecoration(
               hint: _budgetHint(project),
@@ -725,10 +700,7 @@ class _ApplyProjectState extends State<ApplyProject> {
 
           const SizedBox(height: 22),
 
-          _fieldLabel(
-            'Estimated Duration',
-            required: true,
-          ),
+          _fieldLabel('Estimated Duration', required: true),
           const SizedBox(height: 9),
           TextFormField(
             controller: _durationController,
@@ -745,15 +717,11 @@ class _ApplyProjectState extends State<ApplyProject> {
             padding: const EdgeInsets.all(15),
             decoration: BoxDecoration(
               color: const Color(0xFFFFFBEB),
-              borderRadius:
-                  BorderRadius.circular(14),
-              border: Border.all(
-                color: const Color(0xFFFDE68A),
-              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFDE68A)),
             ),
             child: const Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
                   Icons.info_outline_rounded,
@@ -782,27 +750,19 @@ class _ApplyProjectState extends State<ApplyProject> {
             width: double.infinity,
             height: 54,
             child: FilledButton.icon(
-              onPressed:
-                  _isSubmitting
-                      ? null
-                      : _submitApplication,
+              onPressed: _isSubmitting ? null : _submitApplication,
               icon: _isSubmitting
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child:
-                          CircularProgressIndicator(
+                      child: CircularProgressIndicator(
                         strokeWidth: 2,
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(
-                      Icons.send_rounded,
-                    ),
+                  : const Icon(Icons.send_rounded),
               label: Text(
-                _isSubmitting
-                    ? 'Submitting...'
-                    : 'Submit Application',
+                _isSubmitting ? 'Submitting...' : 'Submit Application',
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 15,
@@ -815,10 +775,7 @@ class _ApplyProjectState extends State<ApplyProject> {
     );
   }
 
-  Widget _fieldLabel(
-    String text, {
-    bool required = false,
-  }) {
+  Widget _fieldLabel(String text, {bool required = false}) {
     return RichText(
       text: TextSpan(
         text: text,
@@ -831,9 +788,7 @@ class _ApplyProjectState extends State<ApplyProject> {
           if (required)
             const TextSpan(
               text: ' *',
-              style: TextStyle(
-                color: Color(0xFFDC2626),
-              ),
+              style: TextStyle(color: Color(0xFFDC2626)),
             ),
         ],
       ),
@@ -846,58 +801,30 @@ class _ApplyProjectState extends State<ApplyProject> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(
-        color: Color(0xFF94A3B8),
-        fontSize: 13,
-      ),
-      prefixIcon: Icon(
-        icon,
-        size: 20,
-        color: const Color(0xFF64748B),
-      ),
+      hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+      prefixIcon: Icon(icon, size: 20, color: const Color(0xFF64748B)),
       filled: true,
       fillColor: const Color(0xFFF8FAFC),
-      contentPadding:
-          const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 15,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       border: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: Color(0xFFE2E8F0),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: Color(0xFFE2E8F0),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: Color(0xFF2563EB),
-          width: 1.5,
-        ),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: Color(0xFFDC2626),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFDC2626)),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(14),
-        borderSide: const BorderSide(
-          color: Color(0xFFDC2626),
-          width: 1.5,
-        ),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
       ),
     );
   }
@@ -911,16 +838,12 @@ class _ApplyProjectState extends State<ApplyProject> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Container(
-          constraints:
-              const BoxConstraints(maxWidth: 600),
+          constraints: const BoxConstraints(maxWidth: 600),
           padding: const EdgeInsets.all(34),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius:
-                BorderRadius.circular(26),
-            border: Border.all(
-              color: const Color(0xFFE2E8F0),
-            ),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
           child: Column(
             children: [
@@ -963,12 +886,8 @@ class _ApplyProjectState extends State<ApplyProject> {
                 onPressed: () {
                   Navigator.of(context).pop();
                 },
-                icon: const Icon(
-                  Icons.arrow_back_rounded,
-                ),
-                label: const Text(
-                  'Back to Project',
-                ),
+                icon: const Icon(Icons.arrow_back_rounded),
+                label: const Text('Back to Project'),
               ),
             ],
           ),
@@ -981,23 +900,17 @@ class _ApplyProjectState extends State<ApplyProject> {
   // ERROR
   // ===========================================================================
 
-  Widget _buildErrorState({
-    String? message,
-  }) {
+  Widget _buildErrorState({String? message}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Container(
-          constraints:
-              const BoxConstraints(maxWidth: 500),
+          constraints: const BoxConstraints(maxWidth: 500),
           padding: const EdgeInsets.all(30),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius:
-                BorderRadius.circular(24),
-            border: Border.all(
-              color: const Color(0xFFE2E8F0),
-            ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1011,16 +924,11 @@ class _ApplyProjectState extends State<ApplyProject> {
               const Text(
                 'Unable to load application',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 9),
               Text(
-                message ??
-                    _errorMessage ??
-                    'Something went wrong.',
+                message ?? _errorMessage ?? 'Something went wrong.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 13,
@@ -1031,9 +939,7 @@ class _ApplyProjectState extends State<ApplyProject> {
               const SizedBox(height: 22),
               FilledButton.icon(
                 onPressed: _loadApplicationData,
-                icon: const Icon(
-                  Icons.refresh_rounded,
-                ),
+                icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Try Again'),
               ),
             ],
@@ -1071,23 +977,13 @@ class _ApplyProjectState extends State<ApplyProject> {
 
   String _formatNumber(double value) {
     if (value == value.roundToDouble()) {
-      return value
-          .toInt()
-          .toString();
+      return value.toInt().toString();
     }
 
-    return value
-        .toStringAsFixed(2)
-        .replaceFirst(
-          RegExp(r'\.?0+$'),
-          '',
-        );
+    return value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
-  void _showMessage(
-    String message, {
-    bool isError = false,
-  }) {
+  void _showMessage(String message, {bool isError = false}) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)

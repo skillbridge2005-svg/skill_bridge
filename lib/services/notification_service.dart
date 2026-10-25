@@ -4,22 +4,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/notification_model.dart';
 
 class NotificationService {
-  NotificationService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore =
-            firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  NotificationService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
 
-  CollectionReference<Map<String, dynamic>>
-      get _notificationsCollection =>
-          _firestore.collection('notifications');
+  CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
+      _firestore.collection('notifications');
 
-  String? get currentDeveloperId =>
-      _auth.currentUser?.uid;
+  String? get currentDeveloperId => _auth.currentUser?.uid;
 
   // ---------------------------------------------------------------------------
   // NOTIFICATION STREAMS
@@ -29,105 +24,76 @@ class NotificationService {
   ///
   /// Sorting is done locally so we don't require a Firestore
   /// composite index.
-  Stream<List<NotificationModel>>
-      watchMyNotifications() {
+  Stream<List<NotificationModel>> watchMyNotifications() {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
-      return Stream.value(
-        <NotificationModel>[],
-      );
+      return Stream.value(<NotificationModel>[]);
     }
 
     return _notificationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
+        .where('developerId', isEqualTo: developerId)
         .snapshots()
         .map((snapshot) {
-      final notifications =
-          _documentsToNotifications(
-        snapshot,
-      );
+          final notifications = _documentsToNotifications(snapshot);
 
-      notifications.sort((a, b) {
-        final aDate = a.createdAt;
-        final bDate = b.createdAt;
+          notifications.sort((a, b) {
+            final aDate = a.createdAt;
+            final bDate = b.createdAt;
 
-        if (aDate == null && bDate == null) {
-          return 0;
-        }
+            if (aDate == null && bDate == null) {
+              return 0;
+            }
 
-        if (aDate == null) {
-          return 1;
-        }
+            if (aDate == null) {
+              return 1;
+            }
 
-        if (bDate == null) {
-          return -1;
-        }
+            if (bDate == null) {
+              return -1;
+            }
 
-        return bDate.compareTo(aDate);
-      });
+            return bDate.compareTo(aDate);
+          });
 
-      return notifications;
-    });
+          return notifications;
+        });
   }
 
   /// Streams the number of unread notifications.
   Stream<int> watchUnreadCount() {
-    return watchMyNotifications().map(
-      (notifications) {
-        return notifications
-            .where(
-              (notification) =>
-                  notification.isUnread,
-            )
-            .length;
-      },
-    );
+    return watchMyNotifications().map((notifications) {
+      return notifications
+          .where((notification) => notification.isUnread)
+          .length;
+    });
   }
 
   /// Streams one notification.
-  Stream<NotificationModel?> watchNotification(
-    String notificationId,
-  ) {
-    return _notificationsCollection
-        .doc(notificationId)
-        .snapshots()
-        .map(
-      (snapshot) {
-        if (!snapshot.exists) {
-          return null;
-        }
+  Stream<NotificationModel?> watchNotification(String notificationId) {
+    return _notificationsCollection.doc(notificationId).snapshots().map((
+      snapshot,
+    ) {
+      if (!snapshot.exists) {
+        return null;
+      }
 
-        return NotificationModel.fromFirestore(
-          snapshot,
-        );
-      },
-    );
+      return NotificationModel.fromFirestore(snapshot);
+    });
   }
 
   // ---------------------------------------------------------------------------
   // FETCH
   // ---------------------------------------------------------------------------
 
-  Future<List<NotificationModel>>
-      getMyNotifications() async {
-    final developerId =
-        _requireDeveloper();
+  Future<List<NotificationModel>> getMyNotifications() async {
+    final developerId = _requireDeveloper();
 
     final snapshot = await _notificationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
+        .where('developerId', isEqualTo: developerId)
         .get();
 
-    final notifications =
-        _documentsToNotifications(
-      snapshot,
-    );
+    final notifications = _documentsToNotifications(snapshot);
 
     notifications.sort((a, b) {
       final aDate = a.createdAt;
@@ -151,28 +117,20 @@ class NotificationService {
     return notifications;
   }
 
-  Future<NotificationModel?>
-      getNotification(
-    String notificationId,
-  ) async {
+  Future<NotificationModel?> getNotification(String notificationId) async {
     if (notificationId.trim().isEmpty) {
       throw const NotificationServiceException(
         'Notification ID cannot be empty.',
       );
     }
 
-    final snapshot =
-        await _notificationsCollection
-            .doc(notificationId)
-            .get();
+    final snapshot = await _notificationsCollection.doc(notificationId).get();
 
     if (!snapshot.exists) {
       return null;
     }
 
-    return NotificationModel.fromFirestore(
-      snapshot,
-    );
+    return NotificationModel.fromFirestore(snapshot);
   }
 
   // ---------------------------------------------------------------------------
@@ -186,11 +144,10 @@ class NotificationService {
     required String type,
     String? projectId,
     String? applicationId,
+    String? meetingId,
   }) async {
     if (developerId.trim().isEmpty) {
-      throw const NotificationServiceException(
-        'Developer ID cannot be empty.',
-      );
+      throw const NotificationServiceException('Developer ID cannot be empty.');
     }
 
     if (title.trim().isEmpty) {
@@ -211,18 +168,16 @@ class NotificationService {
       );
     }
 
-    final document =
-        await _notificationsCollection.add({
+    final document = await _notificationsCollection.add({
       'developerId': developerId.trim(),
       'title': title.trim(),
       'body': body.trim(),
       'type': type.trim(),
       'isRead': false,
       'projectId': projectId?.trim(),
-      'applicationId':
-          applicationId?.trim(),
-      'createdAt':
-          FieldValue.serverTimestamp(),
+      'applicationId': applicationId?.trim(),
+      'meetingId': meetingId?.trim(),
+      'createdAt': FieldValue.serverTimestamp(),
     });
 
     return document.id;
@@ -232,82 +187,52 @@ class NotificationService {
   // READ / UNREAD
   // ---------------------------------------------------------------------------
 
-  Future<void> markAsRead(
-    String notificationId,
-  ) async {
-    final developerId =
-        _requireDeveloper();
+  Future<void> markAsRead(String notificationId) async {
+    final developerId = _requireDeveloper();
 
-    final notification =
-        await getNotification(
-      notificationId,
-    );
+    final notification = await getNotification(notificationId);
 
     if (notification == null) {
-      throw const NotificationServiceException(
-        'Notification not found.',
-      );
+      throw const NotificationServiceException('Notification not found.');
     }
 
-    if (notification.developerId !=
-        developerId) {
+    if (notification.developerId != developerId) {
       throw const NotificationServiceException(
         'You cannot update this notification.',
       );
     }
 
-    await _notificationsCollection
-        .doc(notificationId)
-        .update({
-      'isRead': true,
-    });
+    await _notificationsCollection.doc(notificationId).update({'isRead': true});
   }
 
-  Future<void> markAsUnread(
-    String notificationId,
-  ) async {
-    final developerId =
-        _requireDeveloper();
+  Future<void> markAsUnread(String notificationId) async {
+    final developerId = _requireDeveloper();
 
-    final notification =
-        await getNotification(
-      notificationId,
-    );
+    final notification = await getNotification(notificationId);
 
     if (notification == null) {
-      throw const NotificationServiceException(
-        'Notification not found.',
-      );
+      throw const NotificationServiceException('Notification not found.');
     }
 
-    if (notification.developerId !=
-        developerId) {
+    if (notification.developerId != developerId) {
       throw const NotificationServiceException(
         'You cannot update this notification.',
       );
     }
 
-    await _notificationsCollection
-        .doc(notificationId)
-        .update({
+    await _notificationsCollection.doc(notificationId).update({
       'isRead': false,
     });
   }
 
   Future<void> markAllAsRead() async {
-    final developerId =
-        _requireDeveloper();
+    final developerId = _requireDeveloper();
 
-    final snapshot =
-        await _notificationsCollection
-            .where(
-              'developerId',
-              isEqualTo: developerId,
-            )
-            .get();
+    final snapshot = await _notificationsCollection
+        .where('developerId', isEqualTo: developerId)
+        .get();
 
-    final unreadDocuments =
-        snapshot.docs.where((doc) {
+    final unreadDocuments = snapshot.docs.where((doc) {
       final data = doc.data();
 
       return data['isRead'] != true;
@@ -319,14 +244,8 @@ class NotificationService {
 
     final batch = _firestore.batch();
 
-    for (final document
-        in unreadDocuments) {
-      batch.update(
-        document.reference,
-        {
-          'isRead': true,
-        },
-      );
+    for (final document in unreadDocuments) {
+      batch.update(document.reference, {'isRead': true});
     }
 
     await batch.commit();
@@ -336,38 +255,49 @@ class NotificationService {
   // DELETE
   // ---------------------------------------------------------------------------
 
-  Future<void> deleteNotification(
-    String notificationId,
-  ) async {
-    final developerId =
-        _requireDeveloper();
+  Future<void> deleteNotification(String notificationId) async {
+    final developerId = _requireDeveloper();
 
-    final notification =
-        await getNotification(
-      notificationId,
-    );
+    final notification = await getNotification(notificationId);
 
     if (notification == null) {
-      throw const NotificationServiceException(
-        'Notification not found.',
-      );
+      throw const NotificationServiceException('Notification not found.');
     }
 
-    if (notification.developerId !=
-        developerId) {
+    if (notification.developerId != developerId) {
       throw const NotificationServiceException(
         'You cannot delete this notification.',
       );
     }
 
-    await _notificationsCollection
-        .doc(notificationId)
-        .delete();
+    await _notificationsCollection.doc(notificationId).delete();
   }
 
   // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
+  Future<void> clearAllNotifications() async {
+    final developerId = _requireDeveloper();
+
+    while (true) {
+      final snapshot = await _notificationsCollection
+          .where('developerId', isEqualTo: developerId)
+          .limit(450)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return;
+      }
+
+      final batch = _firestore.batch();
+
+      for (final document in snapshot.docs) {
+        batch.delete(document.reference);
+      }
+
+      await batch.commit();
+    }
+  }
 
   String _requireDeveloper() {
     final uid = currentDeveloperId;
@@ -381,28 +311,18 @@ class NotificationService {
     return uid;
   }
 
-  List<NotificationModel>
-      _documentsToNotifications(
-    QuerySnapshot<Map<String, dynamic>>
-        snapshot,
+  List<NotificationModel> _documentsToNotifications(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
   ) {
-    return snapshot.docs
-        .map(
-          NotificationModel.fromFirestore,
-        )
-        .toList();
+    return snapshot.docs.map(NotificationModel.fromFirestore).toList();
   }
 }
 
-class NotificationServiceException
-    implements Exception {
-  const NotificationServiceException(
-    this.message,
-  );
+class NotificationServiceException implements Exception {
+  const NotificationServiceException(this.message);
 
   final String message;
 
   @override
-  String toString() =>
-      'NotificationServiceException: $message';
+  String toString() => 'NotificationServiceException: $message';
 }

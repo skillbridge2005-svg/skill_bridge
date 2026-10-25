@@ -847,10 +847,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                               context,
 
                                               MaterialPageRoute(
-                                                builder: (_) =>
-                                                    LoginScreen(
-                                                      role: _selectedRole,
-                                                    ),
+                                                builder: (_) => LoginScreen(
+                                                  role: _selectedRole,
+                                                ),
                                               ),
                                             );
                                           },

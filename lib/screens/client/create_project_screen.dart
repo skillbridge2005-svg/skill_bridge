@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../../services/notification_service.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -207,6 +209,30 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       };
 
       await projectRef.set(projectData);
+
+      // Notify all developers about the new project.
+      try {
+        final developersSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .where('role', isEqualTo: 'developer')
+            .get();
+
+        final notificationService = NotificationService();
+
+        for (final developer in developersSnapshot.docs) {
+          await notificationService.createNotification(
+            developerId: developer.id,
+            title: 'New project available',
+            body:
+                'A new project "${_titleController.text.trim()}" '
+                'has been published.',
+            type: 'project',
+            projectId: projectRef.id,
+          );
+        }
+      } catch (e) {
+        debugPrint('Could not notify developers: $e');
+      }
 
       await FirebaseFirestore.instance
           .collection('users')

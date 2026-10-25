@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../localization/app_localizations.dart';
 import 'client_payments_screen.dart';
+import 'client_analytics_screen.dart';
+import 'how_to_use_skillbridge_screen.dart';
 
 class ClientProfileScreen extends StatelessWidget {
   const ClientProfileScreen({super.key});
@@ -365,6 +367,19 @@ class ClientProfileScreen extends StatelessWidget {
                             );
                           },
                         ),
+                        const SizedBox(height: 12),
+                        _ProfileLinkCard(
+                          icon: Icons.analytics_rounded,
+                          title: 'Project Analysis',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ClientAnalyticsScreen(),
+                              ),
+                            );
+                          },
+                        ),
                         const SizedBox(height: 28),
                         const _ProfileSectionHeading(),
                         const SizedBox(height: 14),
@@ -447,6 +462,22 @@ class ClientProfileScreen extends StatelessWidget {
                           title: 'Help & Support',
                           onTap: () {
                             _showHelpAndSupport(context);
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.menu_book_rounded,
+                          title: 'How to Use SkillBridge',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const HowToUseSkillBridgeScreen(),
+                              ),
+                            );
                           },
                         ),
 

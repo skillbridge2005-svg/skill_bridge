@@ -15,6 +15,8 @@ import 'client_messages_screen.dart';
 import 'client_notifications_screen.dart';
 import 'project_details_screen.dart';
 import 'hire_developer_screen.dart';
+import 'client_analytics_screen.dart';
+import 'how_to_use_skillbridge_screen.dart';
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -772,6 +774,31 @@ class _ClientDashboardSection extends StatelessWidget {
                           onMessages: () => _openMessages(context),
                         ),
                       ],
+                      const SizedBox(height: 24),
+                      _SectionHeading(
+                        eyebrow: 'SKILLBRIDGE TOOLS',
+                        title: 'Make the most of your workspace',
+                        subtitle: 'Explore analytics and learn how SkillBridge works.',
+                      ),
+                      const SizedBox(height: 13),
+                      _WorkspaceTools(
+                        onAnalytics: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const ClientAnalyticsScreen(),
+                            ),
+                          );
+                        },
+                        onGuide: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const HowToUseSkillBridgeScreen(),
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -780,6 +807,43 @@ class _ClientDashboardSection extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _WorkspaceTools extends StatelessWidget {
+  final VoidCallback onAnalytics;
+  final VoidCallback onGuide;
+
+  const _WorkspaceTools({required this.onAnalytics, required this.onGuide});
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _QuickActionCard(
+        icon: Icons.insights_rounded,
+        title: 'Project Analytics',
+        subtitle: 'Review progress across your projects',
+        onTap: onAnalytics,
+      ),
+      _QuickActionCard(
+        icon: Icons.play_circle_outline_rounded,
+        title: 'How to Use SkillBridge',
+        subtitle: 'Learn how to get started and use the platform',
+        onTap: onGuide,
+      ),
+    ];
+
+    if (MediaQuery.of(context).size.width < 700) {
+      return Column(children: [cards[0], const SizedBox(height: 10), cards[1]]);
+    }
+
+    return Row(
+      children: [
+        Expanded(child: cards[0]),
+        const SizedBox(width: 12),
+        Expanded(child: cards[1]),
+      ],
     );
   }
 }

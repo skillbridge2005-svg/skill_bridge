@@ -4,30 +4,23 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/team_model.dart';
 
 class TeamService {
-  TeamService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore =
-            firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  TeamService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
 
-  CollectionReference<Map<String, dynamic>>
-      get _teamsCollection =>
-          _firestore.collection('teams');
+  CollectionReference<Map<String, dynamic>> get _teamsCollection =>
+      _firestore.collection('teams');
 
-  String? get currentDeveloperId =>
-      _auth.currentUser?.uid;
+  String? get currentDeveloperId => _auth.currentUser?.uid;
 
   String _requireDeveloper() {
     final uid = currentDeveloperId;
 
     if (uid == null || uid.trim().isEmpty) {
-      throw const TeamServiceException(
-        'You must be logged in as a developer.',
-      );
+      throw const TeamServiceException('You must be logged in as a developer.');
     }
 
     return uid;
@@ -38,61 +31,51 @@ class TeamService {
   // ---------------------------------------------------------------------------
 
   /// Streams teams where the current developer is a member.
-Stream<List<TeamModel>> watchMyTeams() {
-  final developerId = currentDeveloperId;
+  Stream<List<TeamModel>> watchMyTeams() {
+    final developerId = currentDeveloperId;
 
-  if (developerId == null) {
-    return Stream.value(<TeamModel>[]);
-  }
+    if (developerId == null) {
+      return Stream.value(<TeamModel>[]);
+    }
 
-  return _teamsCollection
-      .where(
-        'memberIds',
-        arrayContains: developerId,
-      )
-      .snapshots()
-      .map((snapshot) {
-        final teams = _documentsToTeams(snapshot);
-
-        teams.sort((a, b) {
-          final aDate = a.createdAt;
-          final bDate = b.createdAt;
-
-          if (aDate == null && bDate == null) {
-            return 0;
-          }
-
-          if (aDate == null) {
-            return 1;
-          }
-
-          if (bDate == null) {
-            return -1;
-          }
-
-          return bDate.compareTo(aDate);
-        });
-
-        return teams;
-      });
-}
-
-  /// Streams one team.
-  Stream<TeamModel?> watchTeam(
-    String teamId,
-  ) {
     return _teamsCollection
-        .doc(teamId)
+        .where('memberIds', arrayContains: developerId)
         .snapshots()
-        .map(
-          (snapshot) {
-            if (!snapshot.exists) {
-              return null;
+        .map((snapshot) {
+          final teams = _documentsToTeams(snapshot);
+
+          teams.sort((a, b) {
+            final aDate = a.createdAt;
+            final bDate = b.createdAt;
+
+            if (aDate == null && bDate == null) {
+              return 0;
             }
 
-            return TeamModel.fromFirestore(snapshot);
-          },
-        );
+            if (aDate == null) {
+              return 1;
+            }
+
+            if (bDate == null) {
+              return -1;
+            }
+
+            return bDate.compareTo(aDate);
+          });
+
+          return teams;
+        });
+  }
+
+  /// Streams one team.
+  Stream<TeamModel?> watchTeam(String teamId) {
+    return _teamsCollection.doc(teamId).snapshots().map((snapshot) {
+      if (!snapshot.exists) {
+        return null;
+      }
+
+      return TeamModel.fromFirestore(snapshot);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -100,50 +83,42 @@ Stream<List<TeamModel>> watchMyTeams() {
   // ---------------------------------------------------------------------------
 
   Future<List<TeamModel>> getMyTeams() async {
-  final developerId = _requireDeveloper();
+    final developerId = _requireDeveloper();
 
-  final snapshot = await _teamsCollection
-      .where(
-        'memberIds',
-        arrayContains: developerId,
-      )
-      .get();
+    final snapshot = await _teamsCollection
+        .where('memberIds', arrayContains: developerId)
+        .get();
 
-  final teams = _documentsToTeams(snapshot);
+    final teams = _documentsToTeams(snapshot);
 
-  teams.sort((a, b) {
-    final aDate = a.createdAt;
-    final bDate = b.createdAt;
+    teams.sort((a, b) {
+      final aDate = a.createdAt;
+      final bDate = b.createdAt;
 
-    if (aDate == null && bDate == null) {
-      return 0;
-    }
+      if (aDate == null && bDate == null) {
+        return 0;
+      }
 
-    if (aDate == null) {
-      return 1;
-    }
+      if (aDate == null) {
+        return 1;
+      }
 
-    if (bDate == null) {
-      return -1;
-    }
+      if (bDate == null) {
+        return -1;
+      }
 
-    return bDate.compareTo(aDate);
-  });
+      return bDate.compareTo(aDate);
+    });
 
-  return teams;
-}
+    return teams;
+  }
 
-  Future<TeamModel?> getTeam(
-    String teamId,
-  ) async {
+  Future<TeamModel?> getTeam(String teamId) async {
     if (teamId.trim().isEmpty) {
-      throw const TeamServiceException(
-        'Team ID cannot be empty.',
-      );
+      throw const TeamServiceException('Team ID cannot be empty.');
     }
 
-    final snapshot =
-        await _teamsCollection.doc(teamId).get();
+    final snapshot = await _teamsCollection.doc(teamId).get();
 
     if (!snapshot.exists) {
       return null;
@@ -166,28 +141,21 @@ Stream<List<TeamModel>> watchMyTeams() {
     final developerId = _requireDeveloper();
 
     if (name.trim().isEmpty) {
-      throw const TeamServiceException(
-        'Team name cannot be empty.',
-      );
+      throw const TeamServiceException('Team name cannot be empty.');
     }
 
     if (projectId.trim().isEmpty) {
-      throw const TeamServiceException(
-        'Project ID cannot be empty.',
-      );
+      throw const TeamServiceException('Project ID cannot be empty.');
     }
 
     final members = <String>{
       developerId,
-      ...memberIds
-          .map((id) => id.trim())
-          .where((id) => id.isNotEmpty),
+      ...memberIds.map((id) => id.trim()).where((id) => id.isNotEmpty),
     }.toList();
 
     final now = FieldValue.serverTimestamp();
 
-    final document =
-        await _teamsCollection.add({
+    final document = await _teamsCollection.add({
       'name': name.trim(),
       'projectId': projectId.trim(),
       'projectTitle': projectTitle.trim(),
@@ -206,16 +174,11 @@ Stream<List<TeamModel>> watchMyTeams() {
   // TEAM UPDATES
   // ---------------------------------------------------------------------------
 
-  Future<void> updateTeam(
-    String teamId,
-    Map<String, dynamic> updates,
-  ) async {
+  Future<void> updateTeam(String teamId, Map<String, dynamic> updates) async {
     final developerId = _requireDeveloper();
 
     if (teamId.trim().isEmpty) {
-      throw const TeamServiceException(
-        'Team ID cannot be empty.',
-      );
+      throw const TeamServiceException('Team ID cannot be empty.');
     }
 
     if (updates.isEmpty) {
@@ -225,9 +188,7 @@ Stream<List<TeamModel>> watchMyTeams() {
     final team = await getTeam(teamId);
 
     if (team == null) {
-      throw const TeamServiceException(
-        'Team not found.',
-      );
+      throw const TeamServiceException('Team not found.');
     }
 
     if (team.ownerId != developerId) {
@@ -236,92 +197,57 @@ Stream<List<TeamModel>> watchMyTeams() {
       );
     }
 
-    final safeUpdates =
-        Map<String, dynamic>.from(updates);
+    final safeUpdates = Map<String, dynamic>.from(updates);
 
-    safeUpdates['updatedAt'] =
-        FieldValue.serverTimestamp();
+    safeUpdates['updatedAt'] = FieldValue.serverTimestamp();
 
-    await _teamsCollection
-        .doc(teamId)
-        .update(safeUpdates);
+    await _teamsCollection.doc(teamId).update(safeUpdates);
   }
 
-  Future<void> updateTeamStatus(
-    String teamId,
-    String status,
-  ) async {
-    final normalizedStatus =
-        status.trim().toLowerCase();
+  Future<void> updateTeamStatus(String teamId, String status) async {
+    final normalizedStatus = status.trim().toLowerCase();
 
-    const validStatuses = {
-      'active',
-      'completed',
-      'archived',
-    };
+    const validStatuses = {'active', 'completed', 'archived'};
 
     if (!validStatuses.contains(normalizedStatus)) {
-      throw TeamServiceException(
-        'Invalid team status: $status',
-      );
+      throw TeamServiceException('Invalid team status: $status');
     }
 
-    await updateTeam(
-      teamId,
-      {
-        'status': normalizedStatus,
-      },
-    );
+    await updateTeam(teamId, {'status': normalizedStatus});
   }
 
   // ---------------------------------------------------------------------------
   // TEAM MEMBERS
   // ---------------------------------------------------------------------------
 
-  Future<void> addMember(
-    String teamId,
-    String developerId,
-  ) async {
+  Future<void> addMember(String teamId, String developerId) async {
     if (developerId.trim().isEmpty) {
-      throw const TeamServiceException(
-        'Developer ID cannot be empty.',
-      );
+      throw const TeamServiceException('Developer ID cannot be empty.');
     }
 
     final team = await getTeam(teamId);
 
     if (team == null) {
-      throw const TeamServiceException(
-        'Team not found.',
-      );
+      throw const TeamServiceException('Team not found.');
     }
 
     final currentUser = _requireDeveloper();
 
     if (team.ownerId != currentUser) {
-      throw const TeamServiceException(
-        'Only the team owner can add members.',
-      );
+      throw const TeamServiceException('Only the team owner can add members.');
     }
 
     await _teamsCollection.doc(teamId).update({
-      'memberIds': FieldValue.arrayUnion([
-        developerId.trim(),
-      ]),
+      'memberIds': FieldValue.arrayUnion([developerId.trim()]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
-  Future<void> removeMember(
-    String teamId,
-    String developerId,
-  ) async {
+  Future<void> removeMember(String teamId, String developerId) async {
     final team = await getTeam(teamId);
 
     if (team == null) {
-      throw const TeamServiceException(
-        'Team not found.',
-      );
+      throw const TeamServiceException('Team not found.');
     }
 
     final currentUser = _requireDeveloper();
@@ -333,15 +259,11 @@ Stream<List<TeamModel>> watchMyTeams() {
     }
 
     if (developerId == team.ownerId) {
-      throw const TeamServiceException(
-        'The team owner cannot be removed.',
-      );
+      throw const TeamServiceException('The team owner cannot be removed.');
     }
 
     await _teamsCollection.doc(teamId).update({
-      'memberIds': FieldValue.arrayRemove([
-        developerId.trim(),
-      ]),
+      'memberIds': FieldValue.arrayRemove([developerId.trim()]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -350,15 +272,11 @@ Stream<List<TeamModel>> watchMyTeams() {
   // DELETE
   // ---------------------------------------------------------------------------
 
-  Future<void> deleteTeam(
-    String teamId,
-  ) async {
+  Future<void> deleteTeam(String teamId) async {
     final team = await getTeam(teamId);
 
     if (team == null) {
-      throw const TeamServiceException(
-        'Team not found.',
-      );
+      throw const TeamServiceException('Team not found.');
     }
 
     final developerId = _requireDeveloper();
@@ -376,12 +294,8 @@ Stream<List<TeamModel>> watchMyTeams() {
   // SEARCH
   // ---------------------------------------------------------------------------
 
-  List<TeamModel> searchTeams(
-    List<TeamModel> teams,
-    String query,
-  ) {
-    final normalizedQuery =
-        query.trim().toLowerCase();
+  List<TeamModel> searchTeams(List<TeamModel> teams, String query) {
+    final normalizedQuery = query.trim().toLowerCase();
 
     if (normalizedQuery.isEmpty) {
       return teams;
@@ -395,9 +309,7 @@ Stream<List<TeamModel>> watchMyTeams() {
         team.status,
       ].join(' ').toLowerCase();
 
-      return searchableText.contains(
-        normalizedQuery,
-      );
+      return searchableText.contains(normalizedQuery);
     }).toList();
   }
 
@@ -408,9 +320,7 @@ Stream<List<TeamModel>> watchMyTeams() {
   List<TeamModel> _documentsToTeams(
     QuerySnapshot<Map<String, dynamic>> snapshot,
   ) {
-    return snapshot.docs
-        .map(TeamModel.fromFirestore)
-        .toList();
+    return snapshot.docs.map(TeamModel.fromFirestore).toList();
   }
 }
 
@@ -420,6 +330,5 @@ class TeamServiceException implements Exception {
   final String message;
 
   @override
-  String toString() =>
-      'TeamServiceException: $message';
+  String toString() => 'TeamServiceException: $message';
 }

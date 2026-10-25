@@ -50,4 +50,6 @@ app.*.map.json
 # Firebase Functions
 functions/node_modules/
 functions/.env
+rules-tests/node_modules/
+
 firebase-admin-key.json

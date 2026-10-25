@@ -1,7 +1,8 @@
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 
 require("dotenv").config();
 
-const { jsonrepair } = require("jsonrepair");
+const {jsonrepair} = require("jsonrepair");
 
 const {getAuth} = require("firebase-admin/auth");
 
@@ -1428,7 +1429,7 @@ async function generateContentWithRetry(request, maxAttempts = 3) {
       const message = String(error?.message || error);
       const retryable =
         /503|UNAVAILABLE|high demand|429|RESOURCE_EXHAUSTED|500|INTERNAL/i
-          .test(message);
+            .test(message);
 
       if (!retryable || attempt === maxAttempts) {
         throw error;
@@ -1436,8 +1437,8 @@ async function generateContentWithRetry(request, maxAttempts = 3) {
 
       const delayMs = 1000 * (2 ** (attempt - 1));
       console.warn(
-        `Gemini request failed (attempt ${attempt}/${maxAttempts}); ` +
-        `retrying in ${delayMs}ms: ${message}`
+          `Gemini request failed (attempt ${attempt}/${maxAttempts}); ` +
+        `retrying in ${delayMs}ms: ${message}`,
       );
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -1567,8 +1568,8 @@ async function searchProjectResearch(query) {
 
   if (!apiKey) {
     throw new HttpsError(
-      "failed-precondition",
-      "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
+        "failed-precondition",
+        "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
     );
   }
 
@@ -1605,7 +1606,7 @@ async function searchProjectResearch(query) {
       }
 
       console.warn(
-        `Tavily HTTP ${response.status}; retrying ` +
+          `Tavily HTTP ${response.status}; retrying ` +
         `(${attempt}/${maxAttempts}).`,
       );
     } catch (error) {
@@ -1616,12 +1617,12 @@ async function searchProjectResearch(query) {
           message: error.message,
         });
         throw new Error(
-          "The external research service could not be reached after retries.",
+            "The external research service could not be reached after retries.",
         );
       }
 
       console.warn(
-        `Tavily network request failed (${attempt}/${maxAttempts}): ` +
+          `Tavily network request failed (${attempt}/${maxAttempts}): ` +
         `${error.message}`,
       );
     }
@@ -1641,17 +1642,17 @@ async function searchProjectResearch(query) {
   const data = await response.json();
 
   return (Array.isArray(data.results) ? data.results : [])
-    .map((item) => ({
-      title: String(item.title || "").slice(0, 300),
-      url: String(item.url || "").slice(0, 1500),
-      content: String(item.content || "").slice(0, 2500),
-      score: Number.isFinite(item.score) ? item.score : null,
-    }))
-    .filter(
-      (item) =>
-        item.url.startsWith("https://") ||
+      .map((item) => ({
+        title: String(item.title || "").slice(0, 300),
+        url: String(item.url || "").slice(0, 1500),
+        content: String(item.content || "").slice(0, 2500),
+        score: Number.isFinite(item.score) ? item.score : null,
+      }))
+      .filter(
+          (item) =>
+            item.url.startsWith("https://") ||
         item.url.startsWith("http://"),
-    );
+      );
 }
 
 exports.generateAIProjectPlan = onCall(
@@ -1699,9 +1700,9 @@ exports.generateAIProjectPlan = onCall(
       );
 
       const analysis = validatePlanText(
-        data.analysis,
-        12000,
-        "analysis",
+          data.analysis,
+          12000,
+          "analysis",
       );
       // Optional: design output can be screen descriptions or text metadata.
       // Do not send large base64 image payloads in this field.
@@ -2481,9 +2482,9 @@ ${JSON.stringify(projectInput)}
         const projectAnalysis = parseJsonObject(analysisText);
 
         const queryResponse = await generateContentWithRetry(() =>
-  ai.models.generateContent({
-          model: "gemini-3.5-flash-lite",
-          contents: `
+          ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents: `
 You are SkillBridge's Principal Software Research Analyst, Solution Architect, and Technical Due-Diligence Specialist.
 
 Your responsibility is to prepare high-quality, evidence-oriented web research queries that help SkillBridge produce a technically credible, commercially realistic, secure, and implementation-ready software project plan and estimate.
@@ -2564,12 +2565,12 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
 ]
 }
 `,
-          config: {
-            temperature: 0.2,
-            maxOutputTokens: 1500,
-          },
-        })
-      );
+            config: {
+              temperature: 0.2,
+              maxOutputTokens: 1500,
+            },
+          }),
+        );
 
         const queryText = extractGeneratedText(queryResponse);
 
@@ -2593,13 +2594,12 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
         }
 
 
-       
         /*
          * Stage 2: Perform external web searches.
          * Preserve successful results if an individual query fails.
          */
         const researchResults = await Promise.allSettled(
-          queries.map((query) => searchProjectResearch(query)),
+            queries.map((query) => searchProjectResearch(query)),
         );
 
         const uniqueSources = new Map();
@@ -2638,7 +2638,7 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
 
         if (!sources.length) {
           throw new Error(
-            "All project research queries failed or returned no usable sources.",
+              "All project research queries failed or returned no usable sources.",
           );
         }
 
@@ -3558,7 +3558,7 @@ Do not place Markdown fences around the JSON.
               temperature: 0.2,
               maxOutputTokens: 12000,
             },
-          })
+          }),
         );
 
 
@@ -3772,15 +3772,15 @@ Do not place Markdown fences around the JSON.
 
         // Validate task primary roles against the defined team.
         const teamRoles = new Set(
-          plan.team.map((member) => member.role.trim()),
+            plan.team.map((member) => member.role.trim()),
         );
 
         for (const module of plan.modules) {
           for (const task of module.tasks) {
             if (!teamRoles.has(task.primaryRole.trim())) {
               throw new HttpsError(
-                "internal",
-                `Task "${task.name}" has a primary role not defined in the team.`,
+                  "internal",
+                  `Task "${task.name}" has a primary role not defined in the team.`,
               );
             }
           }
@@ -3864,8 +3864,8 @@ Do not place Markdown fences around the JSON.
 exports.ensureSupabaseRole = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in.",
+        "unauthenticated",
+        "You must be logged in.",
     );
   }
 
@@ -3894,8 +3894,92 @@ exports.ensureSupabaseRole = onCall(async (request) => {
     });
 
     throw new HttpsError(
-      "internal",
-      "Could not configure Supabase authentication.",
+        "internal",
+        "Could not configure Supabase authentication.",
     );
   }
 });
+
+/**
+ * Notify developers when a new project document is created.
+ * Uses deterministic notification IDs to prevent duplicates on retries.
+ */
+exports.notifyDevelopersOnProjectCreated = onDocumentCreated(
+    "projects/{projectId}",
+    async (event) => {
+      const snapshot = event.data;
+
+      if (!snapshot) {
+        return;
+      }
+
+      const project = snapshot.data();
+      const projectId = event.params.projectId;
+      const status = String(project.status || "").toLowerCase();
+
+      // Support the two project statuses used by the app.
+      if (!["open", "requirement"].includes(status)) {
+        logger.info("Project notification skipped due to status", {
+          projectId,
+          status,
+        });
+        return;
+      }
+
+      const title = String(project.title || "New project").trim();
+      const developersSnapshot = await db
+          .collection("users")
+          .where("role", "==", "developer")
+          .get();
+
+      if (developersSnapshot.empty) {
+        logger.info("No developers found for project notification", {
+          projectId,
+        });
+        return;
+      }
+
+      let createdCount = 0;
+
+      for (const developer of developersSnapshot.docs) {
+      // Do not notify the project owner if they also have a developer role.
+        if (developer.id === project.clientId) {
+          continue;
+        }
+
+        const notificationRef = db
+            .collection("notifications")
+            .doc(`${projectId}_${developer.id}`);
+
+        const wasCreated = await db.runTransaction(async (transaction) => {
+          const existing = await transaction.get(notificationRef);
+
+          if (existing.exists) {
+            return false;
+          }
+
+          transaction.create(notificationRef, {
+            developerId: developer.id,
+            title: "New project available",
+            body: `A new project "${title}" is available on SkillBridge.`,
+            type: "project",
+            isRead: false,
+            projectId,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+
+          return true;
+        });
+
+        if (wasCreated) {
+          createdCount++;
+        }
+      }
+
+      logger.info("Developer project notifications processed", {
+        projectId,
+        createdCount,
+      });
+    },
+
+);
