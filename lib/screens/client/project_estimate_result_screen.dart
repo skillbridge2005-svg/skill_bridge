@@ -8,6 +8,8 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:skill_bridge/services/supabase_storage_service.dart';
 
+import 'client_home.dart';
+
 const _primary = Color(0xFF2563EB);
 const _indigo = Color(0xFF4F46E5);
 const _background = Color(0xFFF5F7FB);
@@ -81,6 +83,41 @@ class _ProjectEstimateResultScreenState
     super.initState();
     _currentPlan = Map<String, dynamic>.from(widget.plan);
     _currentPlanId = widget.planId;
+
+    // Save the generated estimate as a draft on the existing project.
+    // This does not accept the estimate or create a new project.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _savePlanToExistingProject();
+    });
+  }
+
+  Future<void> _savePlanToExistingProject() async {
+    final projectId = widget.projectId?.trim();
+    if (projectId == null || projectId.isEmpty || _currentPlan.isEmpty) {
+      return;
+    }
+
+    try {
+      final draftData = <String, dynamic>{
+        'plan': _currentPlan,
+        'estimate': _estimate,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      final planId = _currentPlanId?.trim();
+      if (planId != null && planId.isNotEmpty) {
+        draftData['planId'] = planId;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('projects')
+          .doc(projectId)
+          .set(draftData, SetOptions(merge: true));
+    } catch (error, stackTrace) {
+      // Draft-save errors must not block estimate review or acceptance.
+      debugPrint('PROJECT ESTIMATE DRAFT SAVE ERROR: $error');
+      debugPrint('$stackTrace');
+    }
   }
 
   @override
@@ -1102,6 +1139,10 @@ class _ProjectEstimateResultScreenState
               _sectionTitle('Estimate at a glance', Icons.analytics_outlined),
               const SizedBox(height: 12),
               _buildEstimateCards(currency),
+              const SizedBox(height: 12),
+              _buildBudgetFeasibility(currency),
+              const SizedBox(height: 12),
+              _buildTaskRoleCostTable(currency),
               const SizedBox(height: 24),
 
               _sectionTitle('Project overview', Icons.description_outlined),
@@ -1396,6 +1437,249 @@ class _ProjectEstimateResultScreenState
     );
   }
 
+  /// Displays the backend's feasibility decision when the backend supplies it.
+  /// Supports the flag at plan or estimate level without inventing a result.
+  Widget _buildBudgetFeasibility(String currency) {
+    final dynamic feasibleValue =
+        _currentPlan['budgetFeasible'] ?? _estimate['budgetFeasible'];
+    if (feasibleValue is! bool) return const SizedBox.shrink();
+
+    final rawBudget =
+        _currentPlan['budgetMax'] ??
+        _currentPlan['budgetMaxINR'] ??
+        _estimate['budgetMax'] ??
+        _estimate['budgetMaxINR'];
+    final budget = _number(rawBudget);
+    final actualMax = _number(_estimate['costMaxINR']);
+    final withinBudget = feasibleValue;
+    final color = withinBudget ? _success : const Color(0xFFB45309);
+    final background = withinBudget ? _successBg : _warningBg;
+    final title = withinBudget ? 'Within target budget' : 'Budget needs review';
+    final detail = budget != null && actualMax != null
+        ? withinBudget
+              ? 'Estimated maximum ${_formatCurrency(actualMax, currency)} is within the target ${_formatCurrency(budget, currency)}.'
+              : 'Estimated maximum ${_formatCurrency(actualMax, currency)} exceeds the target ${_formatCurrency(budget, currency)}. Review the scope or revise the budget.'
+        : withinBudget
+        ? 'The backend marked this estimate as within budget.'
+        : 'The backend marked this estimate as exceeding the target budget. Review the scope or revise the budget.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            withinBudget
+                ? Icons.check_circle_outline
+                : Icons.warning_amber_rounded,
+            color: color,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: const TextStyle(
+                    color: _dark,
+                    fontSize: 12,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the backend's actual task-level prices and primary-role mapping
+  /// in one table near the project estimate. Missing prices remain unavailable;
+  /// they are never silently displayed as zero.
+  Widget _buildTaskRoleCostTable(String currency) {
+    final rows = <Map<String, String>>[];
+
+    for (final moduleValue in _modules) {
+      final module = _asMap(moduleValue);
+      final moduleName = _firstNonEmpty([module['name'], module['title']]);
+      for (final taskValue in _asList(module['tasks'])) {
+        final task = _asMap(taskValue);
+        final taskName = _firstNonEmpty([task['name'], task['title']]);
+        final role = _string(task['primaryRole']).trim();
+        final min = _number(task['priceMinINR']);
+        final max = _number(task['priceMaxINR']);
+        final effortMin = _number(task['effortHoursMin']);
+        final effortMax = _number(task['effortHoursMax']);
+        final price = min != null && max != null
+            ? '${_formatCurrency(min, currency)} – ${_formatCurrency(max, currency)}'
+            : 'Not available';
+        final effort = effortMin != null && effortMax != null
+            ? _range(effortMin, effortMax, 'h')
+            : 'Not available';
+
+        rows.add({
+          'module': moduleName.isEmpty ? 'Module' : moduleName,
+          'task': taskName.isEmpty ? 'Task' : taskName,
+          'role': role.isEmpty ? 'Not assigned' : role,
+          'price': price,
+          'effort': effort,
+        });
+      }
+    }
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.table_chart_outlined, color: _primary, size: 22),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Task & Role Cost Breakdown',
+                  style: TextStyle(
+                    color: _dark,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Task prices and roles returned by the backend. These are task-level estimates; contingency is included in the overall project estimate separately.',
+            style: TextStyle(color: _secondary, fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columnSpacing: 20,
+              headingRowHeight: 44,
+              dataRowMinHeight: 54,
+              dataRowMaxHeight: 84,
+              columns: const [
+                DataColumn(label: Text('Module / Task')),
+                DataColumn(label: Text('Primary role')),
+                DataColumn(label: Text('Task cost')),
+                DataColumn(label: Text('Effort')),
+              ],
+              rows: rows.map((row) {
+                return DataRow(
+                  cells: [
+                    DataCell(
+                      SizedBox(
+                        width: 210,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              row['module']!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _secondary,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              row['task']!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _dark,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    DataCell(SizedBox(width: 125, child: Text(row['role']!))),
+                    DataCell(SizedBox(width: 145, child: Text(row['price']!))),
+                    DataCell(Text(row['effort']!)),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildRoleWiseCosts(currency),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleWiseCosts(String currency) {
+    final roleWiseCosts = _asMap(_currentPlan['roleWiseCosts']);
+
+    if (roleWiseCosts.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final roles = roleWiseCosts.entries.toList()
+      ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Role-wise Cost Breakdown',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _dark,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Task prices grouped by the primary role responsible for each task. '
+            'Contingency is shown separately in the project estimate.',
+            style: TextStyle(color: _secondary, height: 1.5, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          ...roles.map((entry) {
+            final roleCost = _asMap(entry.value);
+            final min = _number(roleCost['costMinINR']);
+            final max = _number(roleCost['costMaxINR']);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _labelValue(
+                entry.key,
+                min != null && max != null
+                    ? '${_formatCurrency(min, currency)} – '
+                          '${_formatCurrency(max, currency)}'
+                    : 'Cost unavailable',
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEstimateCards(String currency) {
     final effort = _range(
       _estimate['effortHoursMin'],
@@ -1527,6 +1811,12 @@ class _ProjectEstimateResultScreenState
             const SizedBox(height: 10),
             ...tasks.asMap().entries.map((entry) {
               final task = _asMap(entry.value);
+              final taskPriceMin = _number(task['priceMinINR']);
+              final taskPriceMax = _number(task['priceMaxINR']);
+              final taskPrimaryRole = _string(task['primaryRole']);
+              final currency = _string(_estimate['currency']).isEmpty
+                  ? 'INR'
+                  : _string(_estimate['currency']);
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 14),
@@ -1550,6 +1840,14 @@ class _ProjectEstimateResultScreenState
                       ),
                       _labelValue('Description', _string(task['description'])),
                       _labelValue('Deliverable', _string(task['deliverable'])),
+                      if (taskPriceMin != null && taskPriceMax != null)
+                        _labelValue(
+                          'Fixed price',
+                          '${_formatCurrency(taskPriceMin, currency)} – '
+                              '${_formatCurrency(taskPriceMax, currency)}',
+                        ),
+                      if (taskPrimaryRole.isNotEmpty)
+                        _labelValue('Primary role', taskPrimaryRole),
                       _labelValue(
                         'Effort',
                         _range(
@@ -1844,6 +2142,116 @@ class _ProjectEstimateResultScreenState
     );
   }
 
+  Widget _buildActionLoadingAnimation() {
+    final isRegenerating = _isRegenerating;
+
+    final title = isRegenerating
+        ? 'AI is revising your project'
+        : 'Confirming your estimate';
+
+    final subtitle = isRegenerating
+        ? 'Reviewing your budget, timeline, features and team...'
+        : 'Saving your acceptance and preparing your project...';
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 450),
+      switchInCurve: Curves.easeOutBack,
+      switchOutCurve: Curves.easeIn,
+      child: Container(
+        key: ValueKey(isRegenerating),
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 18),
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0A2563EB),
+              blurRadius: 24,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            SizedBox(
+              width: 78,
+              height: 78,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 76,
+                    height: 76,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        isRegenerating ? _indigo : _success,
+                      ),
+                      backgroundColor: _border,
+                    ),
+                  ),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.85, end: 1.0),
+                    duration: const Duration(milliseconds: 900),
+                    curve: Curves.easeInOut,
+                    builder: (context, scale, child) {
+                      return Transform.scale(scale: scale, child: child);
+                    },
+                    child: Icon(
+                      isRegenerating
+                          ? Icons.auto_awesome_rounded
+                          : Icons.verified_rounded,
+                      color: isRegenerating ? _indigo : _success,
+                      size: 34,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+                color: _dark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: _secondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: const LinearProgressIndicator(
+                minHeight: 5,
+                backgroundColor: Color(0xFFEFF4FF),
+                valueColor: AlwaysStoppedAnimation<Color>(_primary),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Please wait. Do not close this screen.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: _secondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Client confirmation: cost Yes/No, timeline Yes/No, Terms checkbox only.
   // Selecting No reveals the relevant input and changes the primary action
@@ -1855,6 +2263,9 @@ class _ProjectEstimateResultScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_isSubmitting || _isRegenerating) ...[
+            _buildActionLoadingAnimation(),
+          ],
           const Text(
             'Client confirmation',
             style: TextStyle(
@@ -2372,6 +2783,8 @@ class _ProjectEstimateResultScreenState
         _submittedStatus = null;
       });
 
+      await _savePlanToExistingProject();
+
       _showMessage(
         'Updated estimate generated. Please review the new estimate and answer again.',
       );
@@ -2589,11 +3002,22 @@ class _ProjectEstimateResultScreenState
 
       setState(() => _submittedStatus = status);
 
-      _showMessage(
-        status == 'accepted'
-            ? 'Project created and estimate acceptance saved.'
-            : 'Your response has been submitted.',
-      );
+      if (status == 'accepted') {
+        _showMessage('Project created successfully!');
+
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(builder: (_) => const ClientHome()),
+          (route) => false,
+        );
+
+        return;
+      }
+
+      _showMessage('Your response has been submitted.');
     } catch (e, stackTrace) {
       debugPrint('ESTIMATE RESPONSE SAVE ERROR: $e');
       debugPrint('$stackTrace');

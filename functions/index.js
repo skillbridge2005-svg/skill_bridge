@@ -1713,19 +1713,68 @@ exports.generateAIProjectPlan = onCall(
       );
 
       const mode = data.mode === "replan" ? "replan" : "initial";
+      
+      function parseDeadlineDate(value) {
+        if (typeof value !== "string") return null;
 
+        // Accept only YYYY-MM-DD.
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+        const [year, month, day] = value.split("-").map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+
+        if (
+          date.getUTCFullYear() !== year ||
+          date.getUTCMonth() !== month - 1 ||
+          date.getUTCDate() !== day
+        ) {
+          return null;
+        }
+
+        return date;
+      }
+
+      const rawDeadline = data.deadline ?? null;
+      const parsedDeadline = rawDeadline == null
+        ? null
+        : parseDeadlineDate(rawDeadline);
+
+      if (rawDeadline != null && parsedDeadline == null) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Deadline must be a valid date in YYYY-MM-DD format.",
+        );
+      }
+
+      if (parsedDeadline) {
+        const today = new Date();
+        const todayUTC = Date.UTC(
+          today.getUTCFullYear(),
+          today.getUTCMonth(),
+          today.getUTCDate(),
+        );
+
+        if (parsedDeadline.getTime() < todayUTC) {
+          throw new HttpsError(
+            "invalid-argument",
+            "Deadline cannot be in the past.",
+          );
+        }
+      }
       const constraints = {
         budgetMin: Number.isFinite(data.budgetMin) &&
         data.budgetMin >= 0 ? data.budgetMin : null,
         budgetMax: Number.isFinite(data.budgetMax) &&
         data.budgetMax >= 0 ? data.budgetMax : null,
-        deadline: validatePlanText(data.deadline, 50, "deadline"),
-
+        deadline: parsedDeadline
+          ? rawDeadline
+          : null,
         clientFeedback: validatePlanText(
             data.clientFeedback, 3000, "clientFeedback",
         ),
         previousPlan: data.previousPlan || null,
       };
+      
 
       if (
         constraints.budgetMin != null &&
@@ -2878,6 +2927,73 @@ Explain material exclusions and avoid duplicate work.
 
 Each task must contain:
 
+MANDATORY TASK-FIRST PLANNING ORDER
+
+Follow this planning order for every project. Do not skip or reverse
+these stages.
+
+STAGE 1 — DISCOVER AND DEFINE TASKS
+
+1. Analyze the client's actual requirements and identify the work
+   necessary to deliver the requested project.
+2. Break the work into logical modules and meaningful, implementable
+   tasks.
+3. Give every task a clear name, specific scope, and verifiable
+   deliverable or completion outcome.
+4. Include necessary design, implementation, integration, testing,
+   defect fixing, and release tasks only when applicable.
+5. Identify dependencies and avoid duplicate or overlapping tasks.
+6. Do not create unnecessary tasks merely to increase the task count.
+7. Do not omit essential work merely to make the project appear cheaper.
+
+STAGE 2 — ASSIGN ROLES TO THE DEFINED TASKS
+
+1. After defining the task breakdown, assign exactly one primaryRole
+   to each task.
+2. The primaryRole must match a role in the team array.
+3. Add supporting roles only when they genuinely contribute to that task.
+4. When different roles own separate deliverables, create separate
+   tasks for those distinct deliverables.
+5. Do not count the same work or deliverable under multiple tasks.
+6. Ensure the proposed team roles and required skills are sufficient
+   to complete the identified tasks.
+
+STAGE 3 — ESTIMATE EACH TASK'S COST
+
+1. Estimate the fixed-price range only after the task scope,
+   deliverable, and primaryRole have been defined.
+2. Estimate each task independently using its actual complexity,
+   scope, integrations, testing, and delivery responsibility.
+3. Keep estimates affordable and proportionate to the actual work.
+   Prefer a simple, maintainable solution when it meets the client's
+   requirements; do not add unnecessary enterprise-level complexity.
+4. Respect the client's stated budget when supplied. If the required
+   scope cannot reasonably fit that budget, explain the mismatch and
+   identify optional scope reductions instead of inventing unrealistically
+   low prices.
+5. Do not calculate prices by multiplying effort hours by an hourly rate.
+6. Do not multiply a task's price by the number of assigned roles.
+7. Keep task prices pre-contingency. Do not add contingency separately
+   to individual tasks.
+
+STAGE 4 — RECONCILE THE COMPLETE PLAN
+
+1. Calculate project effort by summing task effort without duplication.
+2. Calculate the pre-contingency project price by summing every task's
+   price exactly once.
+3. Calculate role-wise cost by summing only tasks owned by each
+   primaryRole.
+4. Ensure role-wise subtotals reconcile with the project task-price
+   subtotal.
+5. Apply contingency once in application code.
+6. Ensure the project total, task breakdown, team roles, and timeline
+   are mutually consistent.
+
+The final JSON must contain the complete task breakdown, role assignments,
+and task-level price ranges. These stages describe the required reasoning
+order; they do not require separate AI calls unless the application
+architecture explicitly implements separate planning stages.
+
 * A clear, specific name.
 * A concise description of the work.
 * A tangible deliverable or completion outcome.
@@ -2935,6 +3051,54 @@ ROLE-BASED TASK DECOMPOSITION AND COST ATTRIBUTION:
 ==================================================
 6. EFFORT ESTIMATION
 ====================
+
+
+BUDGET-BASED TEAM AND ROLE OPTIMIZATION — MANDATORY
+
+When the client provides a lower target budget during replan:
+
+1. Compare the previous plan's tasks, deliverables, team roles,
+   and total estimated cost with the new target budget.
+
+2. Re-evaluate the required scope before recalculating costs.
+   Preserve all confirmed must-have requirements and essential
+   security, data integrity, and quality work.
+
+3. Remove or defer optional and low-priority features when
+   necessary. Clearly identify the scope changes.
+
+4. Rebuild the team array from the roles actually required by
+   the revised tasks. Do not automatically retain every role
+   from the previous plan.
+
+5. Combine responsibilities into a single role when one
+   suitably skilled developer can realistically perform them.
+   For example, combine basic UI implementation and frontend
+   integration under one Frontend Developer when appropriate.
+
+6. Remove a role only when its remaining responsibilities can
+   be handled safely by another role or are no longer required
+   by the approved reduced scope. Do not remove essential
+   expertise merely to make the budget appear affordable.
+
+7. Reassign every task's primaryRole to a role that exists
+   in the revised team array. Ensure the primaryRole also
+   appears in that task's roles array. Remove obsolete
+   supporting roles from tasks.
+
+8. Recalculate task effort, task prices, role-wise subtotals,
+   project subtotal, contingency, total cost, and timeline
+   from the revised plan. Do not merely reduce prices while
+   leaving the original tasks and team unchanged.
+
+9. Compare the final estimated total, including contingency,
+   against the client's target budget. If essential scope still
+   exceeds the budget, explicitly state the shortfall and offer
+   further scope options. Never fabricate a budget fit.
+
+10. Return only roles that own or genuinely support work in
+    the revised task breakdown. Ensure the team, tasks, role-wise
+    costs, and final total remain consistent.
 
 All effort values must represent total person-hours.
 
@@ -3029,6 +3193,61 @@ is unavailable, use null for the hourly-rate fields and disclose the
 limitation. Never invent hourly rates merely to calculate a project price.
 
 ==================================================
+TASK-FIRST COSTING — ABSOLUTE RULE
+==================================================
+
+The client's confirmed project requirements are the source of truth.
+
+1. First identify confirmed requirements and define concrete deliverables.
+
+2. Decompose the requirements into meaningful, non-duplicate main tasks.
+   Each task must represent identifiable work required to deliver the project.
+
+3. Finalize the task scope before estimating any task cost.
+
+4. Assign exactly one primary cost-owning role to every task.
+
+5. Estimate each task's fixed-price range independently based on its actual
+   deliverable, scope, technical complexity, integrations, testing,
+   security requirements, and delivery responsibility.
+
+6. Never calculate or adjust a task's fixed price using hours, days,
+   person-hours, hourly rates, headcount, or team size.
+   Effort and timeline may be estimated separately but must never determine
+   the mathematical formula for task pricing.
+
+7. Do not use low, medium, or high complexity labels as substitutes for
+   requirement analysis, task decomposition, or task-level cost estimation.
+
+8. Calculate role-wise cost by summing the fixed prices of tasks assigned
+   to that role as primaryRole. Count each task's price exactly once.
+   Supporting roles must not receive a duplicate allocation of that price.
+
+9. Calculate the pre-contingency project subtotal by summing every task's
+   price exactly once. The application must apply contingency exactly once.
+
+10. When the budget changes, revise the task scope first. Then reassess
+    required roles, task prices, effort, dependencies, and timeline.
+    Do not merely reduce prices while leaving the original scope unchanged.
+
+11. Preserve essential confirmed requirements, security, testing, data
+    integrity, and necessary quality work. If the full scope exceeds the
+    budget, identify specific optional tasks to defer or reduce and explain
+    the impact. Never fabricate prices to make the project appear affordable.
+
+12. The Estimate Cost breakdown must show actual main tasks, each task's
+    primary responsible role, and its task-based fixed-price range.
+    Displayed costs must come from task prices, not time-based calculations.
+
+13. Keep the team, tasks, primaryRole assignments, role-wise costs,
+    project subtotal, contingency, and final project total consistent.
+
+14. Before returning the plan, verify that every confirmed requirement is
+    addressed by one or more appropriate tasks, with no unjustified duplicate
+    work or charges. Ensure every task price is proportionate to its actual
+    deliverable and that all totals reconcile.
+
+==================================================
 8. COST ESTIMATION AND MARKET RATES
 ===================================
 
@@ -3067,6 +3286,233 @@ IMPORTANT FIXED-PRICE RULES:
 - Calculate the pre-contingency project subtotal by summing every task's fixed-price range exactly once. Role-wise subtotals must reconcile with the project subtotal across all primary cost-owning roles.
 - Hourly-rate fields may be null when unknown. Never invent an hourly rate or use one to derive a task price.
 - Mark marketRateStatus as "unverified" or "partially_verified" when evidence is insufficient. A provisional fixed-price estimate must not be presented as a verified market quotation.
+
+
+TECHNICAL TASK PRICING CALIBRATION — MANDATORY
+
+Apply these rules to every task in every module before returning the
+project plan. These rules refine the fixed-price rules above; they do
+not replace the required JSON schema or application calculations.
+
+1. PRICE THE ACTUAL DELIVERABLE
+
+Estimate each task's fixed-price range independently based on the
+work a competent developer must deliver and the completion criteria.
+
+Consider the following factors where relevant:
+
+- Functional scope and number of distinct behaviors.
+- Technical difficulty and architectural responsibility.
+- Frontend, backend, database, and API work actually required.
+- Integration complexity, including external services and SDKs.
+- Data modeling, migration, validation, and error handling.
+- Authentication, authorization, security, and privacy requirements.
+- Testing depth, defect correction, regression, and acceptance criteria.
+- Deployment, documentation, review, and handover responsibilities.
+- Existing reusable components, supplied assets, and implementation
+  foundations that genuinely reduce the required work.
+- Uncertainty, dependency risk, and explicitly stated assumptions.
+
+Do not charge for a factor that does not apply to the task.
+Do not price hypothetical features or unapproved alternatives as
+part of the confirmed core scope.
+
+2. KEEP PRICING PROPORTIONAL TO COMPLEXITY
+
+Compare tasks against one another before finalizing their prices.
+
+A small, well-defined UI adjustment, configuration change, or basic
+CRUD operation should generally cost less than a task involving
+substantial architecture, difficult business logic, complex external
+integration, or security-critical implementation, when their actual
+scope supports that comparison.
+
+Do not assume that every task in a particular category has the same
+price. A CRUD task with complex permissions, data migration, or
+transactional rules may require more work than a simple CRUD task.
+
+Tasks with comparable deliverables, complexity, risk, and acceptance
+criteria should have reasonably consistent price ranges. Explain
+material differences through the actual scope and assumptions, not
+arbitrary variation.
+
+Do not inflate prices merely because a task name sounds advanced.
+Do not undervalue a task merely because its name sounds simple.
+
+3. DO NOT USE HOURS OR RATES AS A PRICING FORMULA
+
+Estimate effortHoursMin and effortHoursMax separately from
+priceMinINR and priceMaxINR.
+
+Never calculate a task price as person-hours multiplied by an hourly
+rate, salary rate, freelancer rate, or agency rate.
+
+Use effort estimates only as a reasonableness check. If a task has
+substantial scope but an implausibly small effort estimate, revisit
+the effort estimate. If the price appears inconsistent with the
+deliverable, revisit the fixed-price estimate independently.
+
+Do not invent market rates to justify a price. Use supplied research
+only when it supports the specific claim being made.
+
+4. SET DEFENSIBLE PRICE RANGES
+
+For every task, provide numeric priceMinINR and priceMaxINR values
+in INR, with the minimum less than or equal to the maximum.
+
+The minimum should represent a plausible delivery outcome under
+the stated assumptions and favorable but realistic conditions.
+
+The maximum should represent a plausible delivery outcome under
+the stated assumptions and reasonable uncertainty.
+
+The range must reflect uncertainty in scope, complexity, integration,
+testing, dependencies, and delivery responsibility. It must not be
+an arbitrary percentage spread applied to every task.
+
+Do not give every task the same generic price range. Do not use
+round numbers without considering the task's actual deliverable.
+
+Do not use zero as a placeholder for an unknown price. If sufficient
+information exists for a provisional estimate, provide a responsible
+range and record the assumptions or unresolved questions. If scope
+is materially uncertain, widen the range only as justified and
+identify the uncertainty clearly.
+
+Do not claim that an estimate is market-verified unless the supplied
+research supports that conclusion.
+
+4A. AFFORDABILITY AND CLIENT-BUDGET CALIBRATION — MANDATORY
+
+Before finalizing any task price, evaluate the task against the actual project scope, client budget when supplied, and the simplest architecture that satisfies the confirmed requirements.
+
+1. Prefer the simplest maintainable implementation that meets the requirements. Do not include enterprise-level architecture, unnecessary abstractions, optional features, or excessive testing infrastructure unless the confirmed scope requires them.
+
+2. Estimate the fixed-price range for the actual task deliverable. Consider its complexity, integration work, security requirements, testing, acceptance criteria, and delivery responsibility. Do not use effort hours or hourly rates as a pricing formula.
+
+3. Compare tasks with similar scope and complexity. Keep their prices reasonably consistent unless a concrete difference in deliverables, risk, dependencies, or acceptance criteria justifies a difference.
+
+4. Do not assign a high price merely because a task uses AI, payments, cloud services, or advanced technology. Price the implementation actually required by the selected architecture.
+
+5. If the client supplied a project budget, compare the pre-contingency sum of all task prices and the final total including contingency against that budget. Do not claim the project fits the budget if the calculated total exceeds it.
+
+6. If the complete required scope exceeds the budget, preserve essential requirements and identify optional features or scope reductions that could make the project more affordable. Do not arbitrarily lower prices or omit essential tasks just to match the budget.
+
+7. Do not apply a universal fixed price, arbitrary price cap, or identical price range to every task. Each task must be priced according to its actual deliverable and complexity.
+
+8. Before returning the plan, review every task for duplicate work, unnecessary complexity, inconsistent pricing, and unjustified buffers. Revise estimates when the task scope does not support the proposed price.
+
+9. Task prices and role-wise cost subtotals must remain pre-contingency. The application code calculates the project subtotal and applies contingency exactly once.
+
+10. If the budget is not supplied, do not invent one. Provide a provisional, scope-based estimate and clearly disclose material assumptions and uncertainties.
+
+
+5. HANDLE AI, PAYMENTS, AND EXTERNAL INTEGRATIONS CORRECTLY
+
+For AI features, payment processing, messaging, maps, file storage,
+third-party APIs, or other integrations, price only the implementation
+work required by the selected architecture and confirmed scope.
+
+Account for relevant integration setup, API contracts, authentication,
+error handling, retries, failure states, data validation, testing,
+and security. Do not automatically assume that every integration
+requires all of these activities.
+
+Separate distinct deliverables when they are independently
+identifiable. For example, API implementation and end-to-end
+integration testing may be separate tasks when they represent
+genuinely different work.
+
+Do not create duplicate tasks simply to increase the estimate.
+Do not charge the same integration, configuration, or test coverage
+in multiple modules.
+
+Identify external subscription fees, AI usage, payment-provider
+charges, hosting, licenses, and other third-party expenses separately
+in calculationNotes as included, excluded, or unknown. Do not silently
+add recurring expenses to developer task prices.
+
+6. ACCOUNT FOR SHARED WORK EXACTLY ONCE
+
+Every task must have exactly one primaryRole that matches a role in
+the team array and is included in the task's roles array.
+
+Assign each task's complete fixed-price range to that primaryRole
+only. Supporting roles may contribute effort but must not receive
+another allocation of the same task price.
+
+Represent shared architecture, design systems, common API layers,
+security foundations, reusable components, test infrastructure,
+deployment setup, and project coordination only once when they are
+genuinely shared deliverables.
+
+Do not repeat the same work under individual features or modules.
+Include task dependencies where appropriate.
+
+7. HANDLE DEADLINES WITHOUT ARTIFICIAL PRICE INFLATION
+
+Estimate task prices from their deliverables, not from the number of
+calendar days available.
+
+A short deadline must not automatically increase every task price.
+Reflect a genuine rush premium only when the deadline creates a
+specific additional cost, such as necessary extra staffing, paid
+expedited services, additional coordination, or a justified change
+in delivery arrangements.
+
+Identify that reason in the relevant task assumptions or
+calculationNotes. Do not apply an unexplained percentage increase
+because a deadline is close.
+
+Estimate the calendar timeline separately from effort and price.
+Account for dependencies, critical-path work, team availability,
+parallel execution, reviews, and client approvals.
+
+8. KEEP CONTINGENCY AND TOTALS CONSISTENT
+
+All task prices are pre-contingency estimates.
+
+Do not add contingency to individual tasks or role-wise subtotals.
+Do not include the same uncertainty buffer in every task and then
+add another unexplained buffer to the project.
+
+Calculate the pre-contingency project subtotal by summing each task's
+price range exactly once.
+
+Calculate role-wise pre-contingency subtotals by summing only tasks
+owned by each primaryRole. The role-wise totals must reconcile with
+the project task-price subtotal.
+
+The application, not the AI, applies contingencyPercent exactly once
+to the task-price subtotal. Do not add contingency to costMinINR or
+costMaxINR yourself when the application recalculates those values.
+
+Do not invent project totals that contradict the task breakdown.
+Keep effort totals, costs, and timeline estimates as separate
+calculations.
+
+9. FINAL INTERNAL PRICE REVIEW
+
+Before returning the JSON, review every task and ask:
+
+- Is the deliverable concrete and necessary for the confirmed scope?
+- Is the price proportionate to its actual complexity and responsibility?
+- Is the range plausible under the stated assumptions?
+- Are comparable tasks priced consistently?
+- Has any effort-times-rate calculation influenced the price?
+- Has any work already been charged in another task?
+- Is the primaryRole valid and the only cost owner?
+- Have optional features and recurring third-party costs been kept
+  out of the core developer estimate unless explicitly included?
+- Has uncertainty been represented without arbitrary padding?
+- Will summing the task prices produce a consistent pre-contingency
+  subtotal?
+
+Correct inconsistencies before returning the required JSON.
+
+These are estimation rules, not proof of a market quotation. Where
+market evidence is incomplete, provide a clearly provisional estimate
+and set marketRateStatus appropriately.
 
 
 This response schema and application validation require a numeric priceMinINR and
@@ -3582,7 +4028,163 @@ Do not place Markdown fences around the JSON.
             String(planText ?? "").slice(-500),
         );
 
-        const plan = parseJsonObject(planText);
+        let plan = parseJsonObject(planText);
+        // If the first generated plan exceeds the client's maximum budget,
+        // ask the AI to revise the scope and roles once.
+        if (
+          Number.isFinite(constraints.budgetMax) &&
+          plan &&
+          Array.isArray(plan.modules) &&
+          plan.estimate &&
+          plan.modules.every((module) => Array.isArray(module.tasks))
+        ) {
+          const firstPassTaskMax = plan.modules.reduce(
+            (sum, module) =>
+              sum +
+              module.tasks.reduce(
+                (taskSum, task) =>
+                  taskSum +
+                  (
+                    Number.isFinite(task.priceMaxINR) &&
+                    task.priceMaxINR >= 0
+                      ? task.priceMaxINR
+                      : 0
+                  ),
+                0,
+              ),
+            0,
+          );
+
+          const rawContingency = plan.estimate.contingencyPercent;
+
+          const contingencyPercent =
+            Number.isFinite(rawContingency) &&
+            rawContingency >= 0 &&
+            rawContingency <= 50
+              ? rawContingency
+              : 15;
+
+          const firstPassTotalMax = Math.round(
+            firstPassTaskMax * (1 + contingencyPercent / 100),
+          );
+
+          if (firstPassTotalMax > constraints.budgetMax) {
+            logger.warn(
+              "Initial plan exceeds budget. Requesting automatic budget revision.",
+              {
+                firstPassTotalMax,
+                budgetMax: constraints.budgetMax,
+              },
+            );
+
+            const budgetRevisionPrompt = `${planningPrompt}
+
+        ==================================================
+        AUTOMATIC BUDGET REVISION — REQUIRED SECOND PASS
+        ==================================================
+
+        The first plan exceeds the client's maximum budget.
+
+        Maximum budget including contingency: INR ${constraints.budgetMax}
+        First candidate total: INR ${firstPassTotalMax}
+
+        FIRST CANDIDATE PLAN:
+        ${JSON.stringify(plan)}
+
+        Generate a revised plan using these rules:
+
+        1. Preserve all confirmed essential requirements and must-have features.
+        2. Never remove essential security, authentication, data integrity,
+          testing, or quality requirements just to reduce cost.
+        3. Identify optional features that can be deferred to a later phase.
+        4. Remove unnecessary tasks and modules where appropriate.
+        5. Rebuild the team roles according to the remaining tasks.
+        6. Remove roles that are no longer required.
+        7. Every task's primaryRole and roles must refer to valid roles
+          in the revised team.
+        8. Estimate each task's fixed price independently according to
+          its deliverable and complexity.
+        9. NEVER calculate a task price using hours multiplied by an
+          hourly rate.
+        10. NEVER arbitrarily discount task prices just to fit the budget.
+        11. Keep task prices before contingency.
+        12. Recalculate task effort, total effort, delivery phases,
+            and project timeline for the revised scope.
+        13. The maximum total, including contingency, should fit within
+            INR ${constraints.budgetMax} when realistically possible.
+        14. If essential requirements cannot fit within the budget,
+            preserve those requirements and explicitly report the
+            budget shortfall. Do not fabricate a lower estimate.
+        15. Update optionalLaterFeatures and replanningChanges to
+            explain what was deferred or changed.
+        16. Return only valid JSON matching the original schema.
+            Do not add unsupported schema fields.
+
+        The final estimate must be based on the revised tasks and
+        their independently estimated fixed prices.
+        `;
+
+            try {
+              const revisedPlanResponse = await generateContentWithRetry(
+                () =>
+                  ai.models.generateContent({
+                    model: "gemini-3.5-flash-lite",
+                    contents: budgetRevisionPrompt,
+                    config: {
+                      responseMimeType: "application/json",
+                      temperature: 0.15,
+                      maxOutputTokens: 12000,
+                    },
+                  }),
+              );
+
+              const revisedPlanText = extractGeneratedText(
+                revisedPlanResponse,
+              );
+
+              const revisedPlan = parseJsonObject(revisedPlanText);
+
+              if (
+                revisedPlan &&
+                typeof revisedPlan === "object" &&
+                !Array.isArray(revisedPlan) &&
+                revisedPlan.projectSummary &&
+                revisedPlan.recommendedArchitecture &&
+                Array.isArray(revisedPlan.modules) &&
+                Array.isArray(revisedPlan.team) &&
+                revisedPlan.estimate &&
+                Array.isArray(revisedPlan.deliveryPhases) &&
+                Array.isArray(revisedPlan.risks) &&
+                revisedPlan.modules.every(
+                  (module) => Array.isArray(module.tasks),
+                )
+              ) {
+                plan = revisedPlan;
+
+                logger.info(
+                  "Automatic budget revision generated successfully.",
+                  {
+                    revisedTaskCount: plan.modules.reduce(
+                      (sum, module) =>
+                        sum + module.tasks.length,
+                      0,
+                    ),
+                    revisedRoleCount: plan.team.length,
+                  },
+                );
+              } else {
+                logger.warn(
+                  "Budget revision returned an invalid plan. Keeping the original plan.",
+                );
+              }
+            } catch (error) {
+              logger.error(
+                "Automatic budget revision failed. Keeping the original plan.",
+                error,
+              );
+            }
+          }
+        }
 
         /*
        * Save the result privately under the requesting user's UID.
@@ -3591,16 +4193,16 @@ Do not place Markdown fences around the JSON.
         // Validate the basic structure of the AI-generated plan.
         if (
           !plan ||
-    typeof plan !== "object" ||
-    Array.isArray(plan) ||
-    !plan.projectSummary ||
-    !plan.recommendedArchitecture ||
-    !Array.isArray(plan.modules) ||
-    !Array.isArray(plan.team) ||
-    !plan.estimate ||
-    !Array.isArray(plan.deliveryPhases) ||
-    !Array.isArray(plan.risks) ||
-    !plan.constraintAssessment
+          typeof plan !== "object" ||
+          Array.isArray(plan) ||
+          !plan.projectSummary ||
+          !plan.recommendedArchitecture ||
+          !Array.isArray(plan.modules) ||
+          !Array.isArray(plan.team) ||
+          !plan.estimate ||
+          !Array.isArray(plan.deliveryPhases) ||
+          !Array.isArray(plan.risks) ||
+          !plan.constraintAssessment
         ) {
           throw new HttpsError(
               "internal",
@@ -3618,13 +4220,13 @@ Do not place Markdown fences around the JSON.
 
         const validRange = (min, max) =>
           Number.isFinite(min) &&
-    Number.isFinite(max) &&
-    min >= 0 &&
-    max >= min;
+          Number.isFinite(max) &&
+          min >= 0 &&
+          max >= min;
 
         if (
           !validRange(effortHoursMin, effortHoursMax) ||
-    !validRange(timelineMinWeeks, timelineMaxWeeks)
+          !validRange(timelineMinWeeks, timelineMaxWeeks)
         ) {
           throw new HttpsError(
               "internal",
@@ -3726,16 +4328,157 @@ Do not place Markdown fences around the JSON.
         plan.estimate.costMaxINR = Math.round(
             taskPriceMaxINR * (1 + contingencyPercent / 100),
         );
-        plan.estimate.calculationNotes = Array.isArray(plan.estimate.calculationNotes) ?
-    plan.estimate.calculationNotes :
-    [];
-        plan.estimate.calculationNotes.push(
-            `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${plan.estimate.marketRateStatus || "unverified"}.`,
-        );
+        
+        plan.estimate.calculationNotes = Array.isArray(
+          plan.estimate.calculationNotes
+        )
+          ? plan.estimate.calculationNotes
+          : [];
 
+        // Remove stale AI-generated role subtotal notes.
+        // Role-wise costs should be calculated from the validated task prices.
+        plan.estimate.calculationNotes =
+          plan.estimate.calculationNotes.filter(
+            (note) =>
+              typeof note === "string" &&
+              !/role-wise subtotals|role-wise costs|backend engineer.*₹|full-stack developer.*₹|qa.*test engineer.*₹/i.test(
+                note
+              )
+          );
+
+        const contingencyNote =
+          `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${
+            plan.estimate.marketRateStatus || "unverified"
+          }.`;
+
+        if (!plan.estimate.calculationNotes.includes(contingencyNote)) {
+          plan.estimate.calculationNotes.push(contingencyNote);
+        }
+
+        
+        // Enforce budget feasibility using server-calculated totals.
+        // The full estimated range must fit within the client's maximum budget.
+        const budgetMax = constraints.budgetMax;
+
+        if (
+          !plan.constraintAssessment ||
+          typeof plan.constraintAssessment !== "object"
+        ) {
+          plan.constraintAssessment = {
+            budgetFeasible: null,
+            deadlineFeasible: null,
+            explanation: "",
+            suggestedAdjustments: [],
+          };
+        }
+
+        plan.constraintAssessment.suggestedAdjustments =
+          Array.isArray(plan.constraintAssessment.suggestedAdjustments)
+            ? plan.constraintAssessment.suggestedAdjustments
+            : [];
+
+        // Server-side deadline feasibility check.
+        // Uses the AI's estimated maximum calendar duration.
+        if (constraints.deadline) {
+          const deadlineDate = parseDeadlineDate(constraints.deadline);
+          const now = new Date();
+
+          const todayUTC = Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+          );
+
+          const daysAvailable = Math.floor(
+            (deadlineDate.getTime() - todayUTC) /
+              (24 * 60 * 60 * 1000),
+          );
+
+          const estimatedMaxDays =
+            plan.estimate.timelineMaxWeeks * 7;
+
+          const deadlineFeasible =
+            daysAvailable >= estimatedMaxDays;
+
+          plan.constraintAssessment.deadlineFeasible =
+            deadlineFeasible;
+
+          const deadlineExplanation = deadlineFeasible
+            ? `Deadline check passed: ${daysAvailable} calendar days are available, compared with an estimated maximum duration of ${estimatedMaxDays} days. This is a preliminary estimate, not a delivery guarantee.`
+            : `Deadline check failed: only ${daysAvailable} calendar days are available, compared with an estimated maximum duration of ${estimatedMaxDays} days. The plan may require scope reduction or a later deadline.`;
+
+          const existingExplanation =
+            plan.constraintAssessment.explanation || "";
+
+          plan.constraintAssessment.explanation =
+            existingExplanation
+              ? `${existingExplanation} ${deadlineExplanation}`
+              : deadlineExplanation;
+
+          if (!deadlineFeasible) {
+            const adjustment =
+              "Review task dependencies and team availability, reduce or defer optional scope, or negotiate a later delivery date.";
+
+            if (
+              !plan.constraintAssessment.suggestedAdjustments.includes(
+                adjustment,
+              )
+            ) {
+              plan.constraintAssessment.suggestedAdjustments.push(
+                adjustment,
+              );
+            }
+          }
+        } else {
+          plan.constraintAssessment.deadlineFeasible = null;
+        }
+        if (Number.isFinite(budgetMax)) {
+          const budgetFeasible =
+            plan.estimate.costMaxINR <= budgetMax;
+
+          plan.constraintAssessment.budgetFeasible = budgetFeasible;
+
+          
+          const existingExplanation =
+            plan.constraintAssessment.explanation || "";
+
+          const budgetExplanation = budgetFeasible
+            ? `Budget check passed: the complete estimated range ` +
+              `of ₹${plan.estimate.costMinINR.toLocaleString("en-IN")}–` +
+              `₹${plan.estimate.costMaxINR.toLocaleString("en-IN")} ` +
+              `including contingency is within the maximum budget of ` +
+              `₹${budgetMax.toLocaleString("en-IN")}.`
+            : `Budget check failed: the estimated range is ` +
+              `₹${plan.estimate.costMinINR.toLocaleString("en-IN")}–` +
+              `₹${plan.estimate.costMaxINR.toLocaleString("en-IN")}, ` +
+              `including contingency, while the maximum budget is ` +
+              `₹${budgetMax.toLocaleString("en-IN")}. ` +
+              `The full estimated range does not fit within the budget.`;
+
+          plan.constraintAssessment.explanation = existingExplanation
+            ? `${existingExplanation} ${budgetExplanation}`
+            : budgetExplanation;
+
+          if (!budgetFeasible) {
+            const adjustment =
+              "Reduce or defer scope and recalculate task prices so the maximum estimated project cost, including contingency, fits within the client's budget.";
+
+            if (
+              !plan.constraintAssessment.suggestedAdjustments.includes(
+                adjustment,
+              )
+            ) {
+              plan.constraintAssessment.suggestedAdjustments.push(
+                adjustment,
+              );
+            }
+          }
+        } else {
+          // No maximum budget was supplied, so feasibility cannot be confirmed.
+          plan.constraintAssessment.budgetFeasible = null;
+        }
 
         const planRef = db.collection("aiProjectPlans").doc();
-
 
         // Validate team roles and allow unknown market rates.
         for (const member of plan.team) {
@@ -3786,28 +4529,81 @@ Do not place Markdown fences around the JSON.
           }
         }
 
+        
         // Calculate role-wise fixed-price totals from task prices.
+        // Each task is attributed to exactly one primary role.
         const roleWiseCosts = {};
 
         for (const member of plan.team) {
-          roleWiseCosts[member.role] = {
-            costMinINR: 0,
-            costMaxINR: 0,
-          };
+          const role = member.role.trim();
+
+          if (!roleWiseCosts[role]) {
+            roleWiseCosts[role] = {
+              costMinINR: 0,
+              costMaxINR: 0,
+            };
+          }
         }
 
         for (const module of plan.modules) {
           for (const task of module.tasks) {
-            roleWiseCosts[task.primaryRole].costMinINR +=
-              task.priceMinINR;
-            roleWiseCosts[task.primaryRole].costMaxINR +=
-              task.priceMaxINR;
+            const role = task.primaryRole.trim();
+
+            // The primary role must already exist in the team.
+            if (!Object.prototype.hasOwnProperty.call(
+              roleWiseCosts,
+              role,
+            )) {
+              throw new HttpsError(
+                "internal",
+                `Task "${task.name}" has no valid cost-owning role.`,
+              );
+            }
+
+            roleWiseCosts[role].costMinINR += task.priceMinINR;
+            roleWiseCosts[role].costMaxINR += task.priceMaxINR;
           }
         }
 
-        logger.info("Role-wise task costs calculated", {
+        // Verify that role-wise totals reconcile with task subtotals.
+        const roleCostMinINR = Object.values(roleWiseCosts).reduce(
+          (sum, role) => sum + role.costMinINR,
+          0,
+        );
+
+        const roleCostMaxINR = Object.values(roleWiseCosts).reduce(
+          (sum, role) => sum + role.costMaxINR,
+          0,
+        );
+
+        const COST_TOLERANCE = 0.01;
+
+        if (
+          Math.abs(roleCostMinINR - taskPriceMinINR) > COST_TOLERANCE ||
+          Math.abs(roleCostMaxINR - taskPriceMaxINR) > COST_TOLERANCE
+        ) {
+          logger.error("Role-wise costs do not reconcile with task totals.", {
+            planId: planRef.id,
+            roleCostMinINR,
+            taskPriceMinINR,
+            roleCostMaxINR,
+            taskPriceMaxINR,
+          });
+
+          throw new HttpsError(
+            "internal",
+            "The generated role-wise costs do not match the task-price totals.",
+          );
+        }
+
+        // Save the role-wise breakdown inside the persisted plan.
+        plan.roleWiseCosts = roleWiseCosts;
+
+        logger.info("Role-wise task costs reconciled successfully.", {
           planId: planRef.id,
           roleWiseCosts,
+          taskPriceMinINR,
+          taskPriceMaxINR,
         });
 
         await planRef.set({
