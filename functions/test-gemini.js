@@ -2,9 +2,6 @@ require("dotenv").config();
 
 const {GoogleGenAI} = require("@google/genai");
 
-/**
- * Tests the Google Gemini SDK configuration and API connection.
- */
 async function main() {
   console.log("STEP 1: Starting test");
 

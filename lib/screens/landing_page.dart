@@ -50,7 +50,7 @@ class _SkillBridgeLandingPageState extends State<SkillBridgeLandingPage>
     )..repeat();
 
     _youtubeController = YoutubePlayerController.fromVideoId(
-      videoId: '2fIg6FxzaxE',
+      videoId: 'DoaND20ZECM',
       autoPlay: false,
       params: const YoutubePlayerParams(
         showFullscreenButton: true,

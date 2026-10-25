@@ -1,4 +1,3 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -9,19 +8,16 @@ class TeamInvitationsScreen extends StatefulWidget {
   const TeamInvitationsScreen({super.key});
 
   @override
-  State<TeamInvitationsScreen> createState() =>
-      _TeamInvitationsScreenState();
+  State<TeamInvitationsScreen> createState() => _TeamInvitationsScreenState();
 }
 
-class _TeamInvitationsScreenState
-    extends State<TeamInvitationsScreen> {
+class _TeamInvitationsScreenState extends State<TeamInvitationsScreen> {
   final TeamInvitationService _service = TeamInvitationService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Set<String> _processing = {};
 
   Future<Map<String, dynamic>> _loadLeaderInfo(String uid) async {
-    final userSnapshot =
-        await _firestore.collection('users').doc(uid).get();
+    final userSnapshot = await _firestore.collection('users').doc(uid).get();
 
     final userData = userSnapshot.data() ?? {};
 
@@ -34,15 +30,13 @@ class _TeamInvitationsScreenState
     final profileData = profileSnapshot.data() ?? {};
 
     return {
-      'name': (userData['name'] ??
-              profileData['name'] ??
-              userData['displayName'] ??
-              'Team leader')
-          .toString(),
-      'email': (userData['email'] ??
-              profileData['email'] ??
-              '')
-          .toString(),
+      'name':
+          (userData['name'] ??
+                  profileData['name'] ??
+                  userData['displayName'] ??
+                  'Team leader')
+              .toString(),
+      'email': (userData['email'] ?? profileData['email'] ?? '').toString(),
       'headline': (profileData['headline'] ?? '').toString(),
       'photoUrl': (profileData['photoUrl'] ?? '').toString(),
     };
@@ -68,9 +62,7 @@ class _TeamInvitationsScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            accept
-                ? 'Invitation accepted.'
-                : 'Invitation declined.',
+            accept ? 'Invitation accepted.' : 'Invitation declined.',
           ),
         ),
       );
@@ -78,9 +70,7 @@ class _TeamInvitationsScreenState
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not respond to invitation: $error'),
-        ),
+        SnackBar(content: Text('Could not respond to invitation: $error')),
       );
     } finally {
       if (mounted) {
@@ -103,11 +93,7 @@ class _TeamInvitationsScreenState
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            size: 19,
-            color: const Color(0xFF4F46E5),
-          ),
+          Icon(icon, size: 19, color: const Color(0xFF4F46E5)),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -159,9 +145,7 @@ class _TeamInvitationsScreenState
           decoration: BoxDecoration(
             color: const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: const Color(0xFFE5EAF2),
-            ),
+            border: Border.all(color: const Color(0xFFE5EAF2)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,19 +216,14 @@ class _TeamInvitationsScreenState
     );
   }
 
-  Widget _buildInvitationCard(
-    TeamInvitationModel invitation,
-    bool busy,
-  ) {
+  Widget _buildInvitationCard(TeamInvitationModel invitation, bool busy) {
     return Card(
       color: Colors.white,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(
-          color: Color(0xFFE5EAF2),
-        ),
+        side: const BorderSide(color: Color(0xFFE5EAF2)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -286,9 +265,7 @@ class _TeamInvitationsScreenState
                         invitation.projectTitle.isEmpty
                             ? 'Project not specified'
                             : invitation.projectTitle,
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                        ),
+                        style: const TextStyle(color: Color(0xFF64748B)),
                       ),
                     ],
                   ),
@@ -324,10 +301,7 @@ class _TeamInvitationsScreenState
               const SizedBox(height: 16),
               Text(
                 'Received ${invitation.createdAt!.toLocal().toString().split('.').first}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF64748B),
-                ),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ],
 
@@ -339,10 +313,7 @@ class _TeamInvitationsScreenState
                   child: OutlinedButton(
                     onPressed: busy
                         ? null
-                        : () => _respond(
-                              invitation,
-                              accept: false,
-                            ),
+                        : () => _respond(invitation, accept: false),
                     child: const Text('Decline'),
                   ),
                 ),
@@ -351,10 +322,7 @@ class _TeamInvitationsScreenState
                   child: FilledButton(
                     onPressed: busy
                         ? null
-                        : () => _respond(
-                              invitation,
-                              accept: true,
-                            ),
+                        : () => _respond(invitation, accept: true),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF2563EB),
                     ),
@@ -407,9 +375,7 @@ class _TeamInvitationsScreenState
           }
 
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
           final invitations = (snapshot.data ?? [])
@@ -441,9 +407,7 @@ class _TeamInvitationsScreenState
                     Text(
                       'When a team invites you, it will appear here.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Color(0xFF64748B),
-                      ),
+                      style: TextStyle(color: Color(0xFF64748B)),
                     ),
                   ],
                 ),
@@ -454,8 +418,7 @@ class _TeamInvitationsScreenState
           return ListView.separated(
             padding: const EdgeInsets.all(18),
             itemCount: invitations.length,
-            separatorBuilder: (_, __) =>
-                const SizedBox(height: 14),
+            separatorBuilder: (_, __) => const SizedBox(height: 14),
             itemBuilder: (context, index) {
               final invitation = invitations[index];
               final busy = _processing.contains(invitation.id);

@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/developer_rating_summary.dart';
+import '../../widgets/developer_reviews_list.dart';
+
 /// Read-only profile view for a developer other than the signed-in user.
 /// The profile is loaded using the selected developer's UID.
 class DeveloperPublicProfileScreen extends StatelessWidget {
-  const DeveloperPublicProfileScreen({
-    super.key,
-    required this.developerId,
-  });
+  const DeveloperPublicProfileScreen({super.key, required this.developerId});
 
   final String developerId;
 
@@ -53,15 +53,30 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
             );
           }
           final docs = snapshot.data;
-          if (docs == null || docs.length < 2 ||
+          if (docs == null ||
+              docs.length < 2 ||
               (!docs[0].exists && !docs[1].exists)) {
-            return _message('Developer profile not found.', icon: Icons.person_off_outlined);
+            return _message(
+              'Developer profile not found.',
+              icon: Icons.person_off_outlined,
+            );
           }
 
           final user = docs[0].data() ?? <String, dynamic>{};
           final profile = docs[1].data() ?? <String, dynamic>{};
-          final name = _value(profile, 'name', _value(user, 'name',
-              _value(user, 'displayName', _value(user, 'fullName', 'Developer'))));
+          final name = _value(
+            profile,
+            'name',
+            _value(
+              user,
+              'name',
+              _value(
+                user,
+                'displayName',
+                _value(user, 'fullName', 'Developer'),
+              ),
+            ),
+          );
           final email = _value(profile, 'email', _value(user, 'email'));
           final headline = _value(profile, 'headline', 'Developer');
           final photoUrl = _value(profile, 'photoUrl');
@@ -92,17 +107,37 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
                           : null,
                       child: photoUrl.startsWith('http')
                           ? null
-                          : const Icon(Icons.person, size: 48, color: Color(0xFF4338CA)),
+                          : const Icon(
+                              Icons.person,
+                              size: 48,
+                              color: Color(0xFF4338CA),
+                            ),
                     ),
                     const SizedBox(height: 14),
-                    Text(name, textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
+                    Text(
+                      name,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    Text(headline, textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                    Text(
+                      headline,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                      ),
+                    ),
                     if (email.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      Text(email, style: const TextStyle(color: Colors.white70)),
+                      Text(
+                        email,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
                     ],
                   ],
                 ),
@@ -111,20 +146,57 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
               _section('About', _value(profile, 'bio', 'No bio added yet.')),
               _chipsSection('Skills', skills),
               _chipsSection('Technologies', technologies),
-              _section('Location', _value(profile, 'location', 'Not specified')),
-              _section('Experience', _value(profile, 'experience', 'Not specified')),
-              _section('Education', _value(profile, 'education', 'Not specified')),
-              _section('Availability', _value(profile, 'availability', 'Not specified')),
-              _section('Work mode', _value(profile, 'workMode', 'Not specified')),
-              _section('Project preference', _value(profile, 'projectType', 'Not specified')),
-              _section('Preferred duration', _value(profile, 'projectDuration', 'Not specified')),
-              _section('Hours per week', profile['hoursPerWeek']?.toString() ?? 'Not specified'),
-              _section('Hourly rate', _value(profile, 'hourlyRate', 'Not specified')),
+              _section(
+                'Location',
+                _value(profile, 'location', 'Not specified'),
+              ),
+              _section(
+                'Experience',
+                _value(profile, 'experience', 'Not specified'),
+              ),
+              _section(
+                'Education',
+                _value(profile, 'education', 'Not specified'),
+              ),
+              _section(
+                'Availability',
+                _value(profile, 'availability', 'Not specified'),
+              ),
+              _section(
+                'Work mode',
+                _value(profile, 'workMode', 'Not specified'),
+              ),
+              _section(
+                'Project preference',
+                _value(profile, 'projectType', 'Not specified'),
+              ),
+              _section(
+                'Preferred duration',
+                _value(profile, 'projectDuration', 'Not specified'),
+              ),
+              _section(
+                'Hours per week',
+                profile['hoursPerWeek']?.toString() ?? 'Not specified',
+              ),
+              _section(
+                'Hourly rate',
+                _value(profile, 'hourlyRate', 'Not specified'),
+              ),
               _chipsSection('Languages', languages),
               _section('GitHub', _value(profile, 'githubUrl', 'Not provided')),
-              _section('LinkedIn', _value(profile, 'linkedinUrl', 'Not provided')),
-              _section('Portfolio', _value(profile, 'portfolioUrl', 'Not provided')),
+              _section(
+                'LinkedIn',
+                _value(profile, 'linkedinUrl', 'Not provided'),
+              ),
+              _section(
+                'Portfolio',
+                _value(profile, 'portfolioUrl', 'Not provided'),
+              ),
               _section('Resume', _value(profile, 'resumeUrl', 'Not provided')),
+              const SizedBox(height: 24),
+              DeveloperRatingSummary(developerId: developerId),
+              const SizedBox(height: 24),
+              DeveloperReviewsList(developerId: developerId),
             ],
           );
         },
@@ -136,11 +208,14 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 44, color: const Color(0xFF64748B)),
-          const SizedBox(height: 12),
-          Text(text, textAlign: TextAlign.center),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 44, color: const Color(0xFF64748B)),
+            const SizedBox(height: 12),
+            Text(text, textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
@@ -154,11 +229,23 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF111827))),
-        const SizedBox(height: 8),
-        SelectableText(value, style: const TextStyle(height: 1.45, color: Color(0xFF4B5563))),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SelectableText(
+            value,
+            style: const TextStyle(height: 1.45, color: Color(0xFF4B5563)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -172,18 +259,38 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF111827))),
-        const SizedBox(height: 10),
-        if (values.isEmpty)
-          const Text('Not provided', style: TextStyle(color: Color(0xFF6B7280)))
-        else
-          Wrap(spacing: 8, runSpacing: 8, children: values.map((value) => Chip(
-            label: Text(value),
-            backgroundColor: const Color(0xFFEEF2FF),
-            side: BorderSide.none,
-          )).toList()),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (values.isEmpty)
+            const Text(
+              'Not provided',
+              style: TextStyle(color: Color(0xFF6B7280)),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: values
+                  .map(
+                    (value) => Chip(
+                      label: Text(value),
+                      backgroundColor: const Color(0xFFEEF2FF),
+                      side: BorderSide.none,
+                    ),
+                  )
+                  .toList(),
+            ),
+        ],
+      ),
     );
   }
 }

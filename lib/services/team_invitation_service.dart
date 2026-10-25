@@ -1,3 +1,4 @@
+// TODO Implement this library.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,11 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/team_invitation_model.dart';
 
 class TeamInvitationService {
-  TeamInvitationService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  TeamInvitationService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -42,10 +41,9 @@ class TeamInvitationService {
   Stream<List<TeamInvitationModel>> watchReceivedInvitations() {
     final uid = _currentUid;
 
-    return _invitations
-        .where('recipientId', isEqualTo: uid)
-        .snapshots()
-        .map((snapshot) {
+    return _invitations.where('recipientId', isEqualTo: uid).snapshots().map((
+      snapshot,
+    ) {
       final invitations = snapshot.docs
           .map(TeamInvitationModel.fromFirestore)
           .toList();
@@ -61,9 +59,7 @@ class TeamInvitationService {
     });
   }
 
-  Stream<List<TeamInvitationModel>> watchSentInvitations(
-    String teamId,
-  ) {
+  Stream<List<TeamInvitationModel>> watchSentInvitations(String teamId) {
     final uid = _currentUid;
 
     return _invitations
@@ -71,9 +67,8 @@ class TeamInvitationService {
         .where('senderId', isEqualTo: uid)
         .snapshots()
         .map(
-          (snapshot) => snapshot.docs
-              .map(TeamInvitationModel.fromFirestore)
-              .toList(),
+          (snapshot) =>
+              snapshot.docs.map(TeamInvitationModel.fromFirestore).toList(),
         );
   }
 
@@ -129,8 +124,7 @@ class TeamInvitationService {
 
     final userData = userSnapshot.data()!;
 
-    if ((userData['role'] ?? '').toString().toLowerCase() !=
-        'developer') {
+    if ((userData['role'] ?? '').toString().toLowerCase() != 'developer') {
       throw Exception('You can only invite developer accounts.');
     }
 
@@ -209,8 +203,7 @@ class TeamInvitationService {
     final notificationRef = _notifications.doc();
 
     await _firestore.runTransaction((transaction) async {
-      final invitationSnapshot =
-          await transaction.get(invitationRef);
+      final invitationSnapshot = await transaction.get(invitationRef);
 
       if (!invitationSnapshot.exists) {
         throw Exception('Invitation not found.');
@@ -219,15 +212,11 @@ class TeamInvitationService {
       final invitation = invitationSnapshot.data()!;
 
       if (invitation['recipientId'] != uid) {
-        throw Exception(
-          'This invitation belongs to another developer.',
-        );
+        throw Exception('This invitation belongs to another developer.');
       }
 
       if (invitation['status'] != 'pending') {
-        throw Exception(
-          'This invitation has already been processed.',
-        );
+        throw Exception('This invitation has already been processed.');
       }
 
       final teamId = invitation['teamId']?.toString() ?? '';
@@ -252,34 +241,28 @@ class TeamInvitationService {
       final team = teamSnapshot.data()!;
 
       if (team['status'] != 'active') {
-        throw Exception(
-          'This team is no longer accepting members.',
-        );
+        throw Exception('This team is no longer accepting members.');
       }
 
       // Prevent a stale or altered invitation from adding someone to a
       // team whose owner no longer matches the invitation sender.
       if (team['ownerId'] != senderId) {
-        throw Exception(
-          'The team owner no longer matches this invitation.',
-        );
+        throw Exception('The team owner no longer matches this invitation.');
       }
 
       final memberIds = List<String>.from(team['memberIds'] ?? []);
-      final memberRoles = Map<String, dynamic>.from(
-        team['memberRoles'] ?? {},
-      );
+      final memberRoles = Map<String, dynamic>.from(team['memberRoles'] ?? {});
       final memberResponsibilities = Map<String, dynamic>.from(
         team['memberResponsibilities'] ?? {},
       );
 
       final role = (invitation['role'] ?? '').toString().trim();
-      final responsibilities =
-          (invitation['responsibilities'] ?? '').toString().trim();
+      final responsibilities = (invitation['responsibilities'] ?? '')
+          .toString()
+          .trim();
 
-      final teamName =
-          (invitation['teamName'] ?? team['name'] ?? 'the team')
-              .toString();
+      final teamName = (invitation['teamName'] ?? team['name'] ?? 'the team')
+          .toString();
 
       // Add the developer and their role only if they are not already
       // a member. Keep existing member roles unchanged.
@@ -334,8 +317,7 @@ class TeamInvitationService {
     final notificationRef = _notifications.doc();
 
     await _firestore.runTransaction((transaction) async {
-      final invitationSnapshot =
-          await transaction.get(invitationRef);
+      final invitationSnapshot = await transaction.get(invitationRef);
 
       if (!invitationSnapshot.exists) {
         throw Exception('Invitation not found.');
@@ -344,15 +326,11 @@ class TeamInvitationService {
       final invitation = invitationSnapshot.data()!;
 
       if (invitation['recipientId'] != uid) {
-        throw Exception(
-          'This invitation belongs to another developer.',
-        );
+        throw Exception('This invitation belongs to another developer.');
       }
 
       if (invitation['status'] != 'pending') {
-        throw Exception(
-          'This invitation has already been processed.',
-        );
+        throw Exception('This invitation has already been processed.');
       }
 
       final senderId = invitation['senderId']?.toString() ?? '';
@@ -361,15 +339,13 @@ class TeamInvitationService {
         throw Exception('The invitation has no valid team owner.');
       }
 
-      final teamName =
-          (invitation['teamName'] ?? 'the team').toString();
+      final teamName = (invitation['teamName'] ?? 'the team').toString();
 
       final teamId = invitation['teamId']?.toString() ?? '';
       String? projectId;
 
       if (teamId.isNotEmpty) {
-        final teamSnapshot =
-            await transaction.get(_teams.doc(teamId));
+        final teamSnapshot = await transaction.get(_teams.doc(teamId));
 
         if (teamSnapshot.exists) {
           projectId = teamSnapshot.data()?['projectId']?.toString();

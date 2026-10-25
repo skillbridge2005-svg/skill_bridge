@@ -1,14 +1,12 @@
+// TODO Implement this library.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-
 class IndividualChatService {
-  IndividualChatService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _db = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  IndividualChatService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _db = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _db;
   final FirebaseAuth _auth;
@@ -26,12 +24,8 @@ class IndividualChatService {
     return '${ids[0]}_${ids[1]}';
   }
 
-  CollectionReference<Map<String, dynamic>> _messages(
-    String chatId,
-  ) =>
-      _db.collection('individualChats')
-          .doc(chatId)
-          .collection('messages');
+  CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
+      _db.collection('individualChats').doc(chatId).collection('messages');
 
   Future<String> openChat({
     required String otherUid,
@@ -100,19 +94,17 @@ class IndividualChatService {
     return chatId;
   }
 
-Stream<QuerySnapshot<Map<String, dynamic>>> watchConversations() {
-  final uid = _currentUid;
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchConversations() {
+    final uid = _currentUid;
 
-  return _db
-      .collection('individualChats')
-      .where('participants', arrayContains: uid)
-      .orderBy('updatedAt', descending: true)
-      .snapshots();
-}
+    return _db
+        .collection('individualChats')
+        .where('participants', arrayContains: uid)
+        .orderBy('updatedAt', descending: true)
+        .snapshots();
+  }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(
-    String chatId,
-  ) {
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String chatId) {
     return _messages(chatId)
         .orderBy('createdAt', descending: true)
         .limit(100)
@@ -144,11 +136,12 @@ Stream<QuerySnapshot<Map<String, dynamic>>> watchConversations() {
     final userSnapshot = await _db.collection('users').doc(uid).get();
     final user = userSnapshot.data() ?? {};
 
-    final senderName = (user['name'] ??
-            user['displayName'] ??
-            _auth.currentUser?.displayName ??
-            'Team member')
-        .toString();
+    final senderName =
+        (user['name'] ??
+                user['displayName'] ??
+                _auth.currentUser?.displayName ??
+                'Team member')
+            .toString();
 
     final batch = _db.batch();
 

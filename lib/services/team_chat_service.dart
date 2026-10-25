@@ -1,6 +1,8 @@
+// TODO Implement this library.
 
 import 'dart:typed_data';
 import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -10,9 +12,9 @@ class TeamChatService {
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
     FirebaseStorage? storage,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance,
-        _storage = storage ?? FirebaseStorage.instance;
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _auth = auth ?? FirebaseAuth.instance,
+       _storage = storage ?? FirebaseStorage.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -39,23 +41,18 @@ class TeamChatService {
       final data = snapshot.data();
       final members = List<String>.from(data?['memberIds'] ?? []);
 
-      return snapshot.exists &&
-          members.contains(_auth.currentUser?.uid);
+      return snapshot.exists && members.contains(_auth.currentUser?.uid);
     });
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(
-    String teamId,
-  ) {
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String teamId) {
     return _messages(teamId)
         .orderBy('createdAt', descending: true)
         .limit(100)
         .snapshots();
   }
 
-  Future<Map<String, dynamic>> _validateTeamMember(
-    String teamId,
-  ) async {
+  Future<Map<String, dynamic>> _validateTeamMember(String teamId) async {
     final uid = _uid;
     final teamSnapshot = await _team(teamId).get();
 
@@ -67,29 +64,24 @@ class TeamChatService {
     final members = List<String>.from(teamData['memberIds'] ?? []);
 
     if (!members.contains(uid)) {
-      throw StateError(
-        'Only accepted team members can send messages.',
-      );
+      throw StateError('Only accepted team members can send messages.');
     }
 
     if (teamData['status'] != 'active') {
       throw StateError('This team is not active.');
     }
 
-    final userSnapshot =
-        await _firestore.collection('users').doc(uid).get();
+    final userSnapshot = await _firestore.collection('users').doc(uid).get();
     final userData = userSnapshot.data() ?? {};
 
-    final name = (userData['name'] ??
-            userData['displayName'] ??
-            _auth.currentUser?.displayName ??
-            'Team member')
-        .toString();
+    final name =
+        (userData['name'] ??
+                userData['displayName'] ??
+                _auth.currentUser?.displayName ??
+                'Team member')
+            .toString();
 
-    return {
-      'uid': uid,
-      'name': name,
-    };
+    return {'uid': uid, 'name': name};
   }
 
   Future<void> sendMessage({
@@ -123,40 +115,34 @@ class TeamChatService {
     final sender = await _validateTeamMember(teamId);
     final uid = sender['uid'] as String;
 
-    final safeFileName =
-        fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    final safeFileName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
 
-    final storageRef = _storage
-        .ref()
-        .child('team_chat/$teamId/$uid/'
-            '${DateTime.now().millisecondsSinceEpoch}_$safeFileName');
-
-    final metadata = SettableMetadata(
-      contentType: _contentType(safeFileName),
+    final storageRef = _storage.ref().child(
+      'team_chat/$teamId/$uid/'
+      '${DateTime.now().millisecondsSinceEpoch}_$safeFileName',
     );
 
-   final uploadOperation = storageRef.putData(
-  imageBytes,
-  metadata,
-);
+    final metadata = SettableMetadata(contentType: _contentType(safeFileName));
 
-final TaskSnapshot uploadTask;
+    final uploadOperation = storageRef.putData(imageBytes, metadata);
 
-try {
-  uploadTask = await uploadOperation.timeout(
-    const Duration(seconds: 60),
-    onTimeout: () async {
-      await uploadOperation.cancel();
-      throw TimeoutException(
-        'Image upload timed out. Check Firebase Storage and your internet connection.',
+    final TaskSnapshot uploadTask;
+
+    try {
+      uploadTask = await uploadOperation.timeout(
+        const Duration(seconds: 60),
+        onTimeout: () async {
+          await uploadOperation.cancel();
+          throw TimeoutException(
+            'Image upload timed out. Check Firebase Storage and your internet connection.',
+          );
+        },
       );
-    },
-  );
-} catch (error) {
-  throw Exception('Firebase image upload failed: $error');
-}
+    } catch (error) {
+      throw Exception('Firebase image upload failed: $error');
+    }
 
-final imageUrl = await uploadTask.ref.getDownloadURL();
+    final imageUrl = await uploadTask.ref.getDownloadURL();
 
     await _messages(teamId).add({
       'senderId': uid,

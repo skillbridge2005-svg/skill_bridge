@@ -74,38 +74,35 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
 
       final imageBytes = await pickedFile.readAsBytes();
 
-final shouldSend = await showDialog<bool>(
-  context: context,
-  builder: (dialogContext) {
-    return AlertDialog(
-      title: const Text('Send image?'),
-      content: SizedBox(
-        width: 320,
-        height: 280,
-        child: Image.memory(
-          imageBytes,
-          width: 320,
-          height: 280,
-          fit: BoxFit.contain,
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () =>
-              Navigator.of(dialogContext).pop(false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          onPressed: () =>
-              Navigator.of(dialogContext).pop(true),
-          icon: const Icon(Icons.send),
-          label: const Text('Send'),
-        ),
-      ],
-    );
-  },
-);
-
+      final shouldSend = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Send image?'),
+            content: SizedBox(
+              width: 320,
+              height: 280,
+              child: Image.memory(
+                imageBytes,
+                width: 320,
+                height: 280,
+                fit: BoxFit.contain,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                icon: const Icon(Icons.send),
+                label: const Text('Send'),
+              ),
+            ],
+          );
+        },
+      );
 
       if (shouldSend != true || !mounted) return;
 

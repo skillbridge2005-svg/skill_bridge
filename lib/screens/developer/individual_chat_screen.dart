@@ -1,9 +1,26 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/individual_chat_service.dart';
+class IndividualChatService {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
+      _firestore.collection('chats').doc(chatId).collection('messages');
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String chatId) =>
+      _messages(chatId).orderBy('createdAt', descending: true).snapshots();
+
+  Future<void> sendMessage({required String chatId, required String text}) async {
+    final user = FirebaseAuth.instance.currentUser;
+    await _messages(chatId).add({
+      'senderId': user?.uid,
+      'senderName': user?.displayName ?? user?.email ?? 'User',
+      'text': text,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+}
 
 class IndividualChatScreen extends StatefulWidget {
   const IndividualChatScreen({
@@ -18,12 +35,10 @@ class IndividualChatScreen extends StatefulWidget {
   final String otherName;
 
   @override
-  State<IndividualChatScreen> createState() =>
-      _IndividualChatScreenState();
+  State<IndividualChatScreen> createState() => _IndividualChatScreenState();
 }
 
-class _IndividualChatScreenState
-    extends State<IndividualChatScreen> {
+class _IndividualChatScreenState extends State<IndividualChatScreen> {
   final IndividualChatService _service = IndividualChatService();
   final TextEditingController _controller = TextEditingController();
   bool _sending = false;
@@ -44,17 +59,14 @@ class _IndividualChatScreenState
     _controller.clear();
 
     try {
-      await _service.sendMessage(
-        chatId: widget.chatId,
-        text: text,
-      );
+      await _service.sendMessage(chatId: widget.chatId, text: text);
     } catch (error) {
       if (!mounted) return;
 
       _controller.text = text;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not send message: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not send message: $error')));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -70,18 +82,14 @@ class _IndividualChatScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.otherName),
-            const Text(
-              'Private conversation',
-              style: TextStyle(fontSize: 12),
-            ),
+            const Text('Private conversation', style: TextStyle(fontSize: 12)),
           ],
         ),
       ),
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder<
-                QuerySnapshot<Map<String, dynamic>>>(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _service.watchMessages(widget.chatId),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -91,9 +99,7 @@ class _IndividualChatScreenState
                 }
 
                 if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
+                  return const Center(child: CircularProgressIndicator());
                 }
 
                 final messages = snapshot.data!.docs;
@@ -115,7 +121,7 @@ class _IndividualChatScreenState
 
                     final time = timestamp is Timestamp
                         ? TimeOfDay.fromDateTime(timestamp.toDate())
-                            .format(context)
+                              .format(context)
                         : 'Sending…';
 
                     return Align(
@@ -124,8 +130,7 @@ class _IndividualChatScreenState
                           : Alignment.centerLeft,
                       child: Container(
                         constraints: BoxConstraints(
-                          maxWidth:
-                              MediaQuery.of(context).size.width * 0.78,
+                          maxWidth: MediaQuery.of(context).size.width * 0.78,
                         ),
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.symmetric(
@@ -136,8 +141,8 @@ class _IndividualChatScreenState
                           color: isMine
                               ? const Color(0xFF2563EB)
                               : Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
+                                    .colorScheme
+                                    .surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Column(
@@ -156,9 +161,7 @@ class _IndividualChatScreenState
                               style: TextStyle(
                                 color: isMine
                                     ? Colors.white
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onSurface,
+                                    : Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -171,8 +174,8 @@ class _IndividualChatScreenState
                                   color: isMine
                                       ? Colors.white70
                                       : Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                 ),
                               ),
                             ),
@@ -217,9 +220,7 @@ class _IndividualChatScreenState
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send),
                   ),

@@ -4,11 +4,18 @@ import 'package:flutter/material.dart';
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
+import 'client_applications_screen.dart';
+import 'developer_review_widget.dart';
+import 'project_meeting_screen.dart';
 
 class ProjectDetailsScreen extends StatelessWidget {
   final String projectId;
 
   const ProjectDetailsScreen({super.key, required this.projectId});
+
+  // ------------------------------------------------------------
+  // STATUS HELPERS
+  // ------------------------------------------------------------
 
   String _formatStatus(BuildContext context, String status) {
     final l10n = AppLocalizations.of(context);
@@ -31,6 +38,19 @@ class ProjectDetailsScreen extends StatelessWidget {
       default:
         return status;
     }
+  }
+
+  String _formatPlanLabel(String value) {
+    return value
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 
   Color _statusColor(String status) {
@@ -75,6 +95,10 @@ class ProjectDetailsScreen extends StatelessWidget {
     }
   }
 
+  // ------------------------------------------------------------
+  // NAVIGATION
+  // ------------------------------------------------------------
+
   void _openTeam(BuildContext context) {
     Navigator.push(
       context,
@@ -92,25 +116,33 @@ class ProjectDetailsScreen extends StatelessWidget {
     );
   }
 
-  bool _isStepActive(String currentStatus, String step) {
-    const order = [
-      'requirement',
-      'team_formation',
-      'development',
-      'testing',
-      'client_review',
-      'completed',
-    ];
-
-    final currentIndex = order.indexOf(currentStatus);
-    final stepIndex = order.indexOf(step);
-
-    if (currentIndex == -1 || stepIndex == -1) {
-      return false;
-    }
-
-    return stepIndex <= currentIndex;
+  void _openApplications(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientApplicationsScreen(
+          projectId: projectId,
+          projectTitle: projectTitle,
+        ),
+      ),
+    );
   }
+
+  void _openMeetings(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectMeetingScreen(
+          projectId: projectId,
+          projectTitle: projectTitle,
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // LOCALIZED FALLBACK TEXT
+  // ------------------------------------------------------------
 
   String _noDescriptionText(BuildContext context) {
     final languageCode = Localizations.localeOf(context).languageCode;
@@ -210,28 +242,219 @@ class ProjectDetailsScreen extends StatelessWidget {
     return 'Chat with your team';
   }
 
+  // ------------------------------------------------------------
+  // IMAGE PREVIEW
+  // ------------------------------------------------------------
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(12),
+          child: Stack(
+            children: [
+              InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 5,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) {
+                      return child;
+                    }
+
+                    return const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    );
+                  },
+                  errorBuilder: (_, _, _) {
+                    return const Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // VALUE HELPERS
+  // ------------------------------------------------------------
+
+  String _firstValidValue(List<dynamic> values) {
+    for (final value in values) {
+      if (value == null) continue;
+
+      if (value is num && value <= 0) {
+        continue;
+      }
+
+      final text = value.toString().trim();
+
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+
+    return '';
+  }
+
+  Map<String, dynamic> _mapValue(dynamic value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+
+    return <String, dynamic>{};
+  }
+
+  List<String> _stringList(dynamic value) {
+    if (value is! List) {
+      return <String>[];
+    }
+
+    return value
+        .where((item) => item != null)
+        .map((item) => item.toString())
+        .where((item) => item.trim().isNotEmpty)
+        .toList();
+  }
+
+  // ------------------------------------------------------------
+  // MAIN SCREEN
+  // ------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
+
+      // --------------------------------------------------------
+      // CUSTOM APP BAR
+      // --------------------------------------------------------
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: Text(
-          l10n.projectDetails,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.folder_copy_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 21,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.projectDetails,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'PROJECT OVERVIEW',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
+
+      // --------------------------------------------------------
+      // FIRESTORE PROJECT STREAM
+      // --------------------------------------------------------
       body: Stack(
         children: [
           const Positioned.fill(
@@ -239,11 +462,13 @@ class ProjectDetailsScreen extends StatelessWidget {
               child: CustomPaint(painter: _ProjectDetailsAmbientPainter()),
             ),
           ),
+
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
                 .collection('projects')
                 .doc(projectId)
                 .snapshots(),
+
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: _ProjectLoader());
@@ -290,21 +515,114 @@ class ProjectDetailsScreen extends StatelessWidget {
                 );
               }
 
+              // ------------------------------------------------
+              // PROJECT DATA
+              // ------------------------------------------------
+
               final title = data['title']?.toString() ?? l10n.project;
 
-              final category = data['category']?.toString() ?? '';
+              // Support both category and categories.
+              final categories = _stringList(data['categories']);
+
+              final category = _firstValidValue([
+                data['category'],
+                if (categories.isNotEmpty) categories.join(', '),
+              ]);
 
               final description = data['description']?.toString() ?? '';
 
               final requirements = data['requirements']?.toString() ?? '';
 
-              final budget = data['budget']?.toString() ?? '';
+              final plan = _mapValue(data['plan']);
 
-              final timeline = data['timeline']?.toString() ?? '';
+              final planEstimate = _mapValue(plan['estimate']);
+
+              final directEstimate = _mapValue(data['estimate']);
+
+              final estimate = directEstimate.isNotEmpty
+                  ? directEstimate
+                  : planEstimate;
+
+              // Support manually entered and AI-generated budgets.
+              final budget = _firstValidValue([
+                data['budget'],
+                data['amount'],
+                estimate['totalCost'],
+                estimate['totalBudget'],
+                estimate['budget'],
+                estimate['estimatedCost'],
+                estimate['amount'],
+              ]);
+
+              // Support both timeline and estimatedDuration.
+              final timeline = _firstValidValue([
+                data['timeline'],
+                data['estimatedDuration'],
+                estimate['timeline'],
+                estimate['duration'],
+                estimate['estimatedDuration'],
+                plan['timeline'],
+                plan['duration'],
+              ]);
+
+              final budgetType = data['budgetType']?.toString() ?? '';
+
+              final currency = data['currency']?.toString() ?? 'INR';
+
+              final deadline = data['deadline'];
+
+              final deadlineText = deadline is Timestamp
+                  ? '${deadline.toDate().day.toString().padLeft(2, '0')}/'
+                        '${deadline.toDate().month.toString().padLeft(2, '0')}/'
+                        '${deadline.toDate().year}'
+                  : '';
+
+              final experienceLevel = data['experienceLevel']?.toString() ?? '';
+
+              final workMode = data['workMode']?.toString() ?? '';
+
+              final priority = data['priority']?.toString() ?? '';
+
+              final additionalInfo = data['additionalInfo']?.toString() ?? '';
 
               final status = data['status']?.toString() ?? 'requirement';
 
               final statusColor = _statusColor(status);
+              final milestones = data['milestones'] is Map
+                  ? Map<String, dynamic>.from(data['milestones'] as Map)
+                  : <String, dynamic>{};
+              const milestoneKeys = [
+                'requirements',
+                'architecture',
+                'design',
+                'development',
+                'testing',
+                'deployment',
+              ];
+              final completedMilestones = milestoneKeys
+                  .where((key) => milestones[key] == true)
+                  .length;
+              final calculatedProgress =
+                  (completedMilestones / milestoneKeys.length * 100).round();
+              final isCompleted =
+                  calculatedProgress == 100 ||
+                  status.trim().toLowerCase() == 'completed';
+
+              final designImages = _stringList(data['designImageUrls'])
+                  .where((url) => url.startsWith('https://'))
+                  .toList();
+
+              final acceptedScope = _stringList(data['acceptedScope']);
+
+              final acceptedCost = data['acceptedCost'] == true;
+
+              final acceptedTimeline = data['acceptedTimeline'] == true;
+
+              final acceptedTerms = data['acceptedTerms'] == true;
+
+              // ------------------------------------------------
+              // RESPONSIVE PAGE
+              // ------------------------------------------------
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -326,6 +644,10 @@ class ProjectDetailsScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            // ------------------------------------
+                            // PROJECT HEADER
+                            // ------------------------------------
+
                             _ProjectHero(
                               title: title,
                               category: category,
@@ -334,41 +656,202 @@ class ProjectDetailsScreen extends StatelessWidget {
                               statusIcon: _statusIcon(status),
                               statusText: _formatStatus(context, status),
                             ),
+                            if (isCompleted) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Project Completed',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+
+                            // ------------------------------------
+                            // DESIGN IMAGES
+                            // ------------------------------------
+                            if (designImages.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+
+                              _DetailsCard(
+                                title: 'Project Design Images',
+                                icon: Icons.image_outlined,
+                                child: SizedBox(
+                                  height: 190,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: designImages.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 12),
+                                    itemBuilder: (context, index) {
+                                      final imageUrl = designImages[index];
+
+                                      return GestureDetector(
+                                        onTap: () =>
+                                            _showFullImage(context, imageUrl),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          child: Image.network(
+                                            imageUrl,
+                                            width: 250,
+                                            height: 190,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder:
+                                                (context, child, progress) {
+                                                  if (progress == null) {
+                                                    return child;
+                                                  }
+
+                                                  return const SizedBox(
+                                                    width: 250,
+                                                    child: Center(
+                                                      child:
+                                                          CircularProgressIndicator(),
+                                                    ),
+                                                  );
+                                                },
+                                            errorBuilder: (_, _, _) {
+                                              return Container(
+                                                width: 250,
+                                                color: const Color(0xFFF1F5F9),
+                                                child: const Icon(
+                                                  Icons.broken_image_outlined,
+                                                  size: 40,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ],
 
                             const SizedBox(height: 16),
 
+                            // ------------------------------------
+                            // ACTION BUTTONS
+                            // ------------------------------------
                             LayoutBuilder(
                               builder: (context, actionConstraints) {
                                 final buttons = [
+                                  _ActionButton(
+                                    icon: Icons.assignment_outlined,
+                                    title: 'View Applications',
+                                    subtitle: 'Review developer applications',
+                                    onTap: () =>
+                                        _openApplications(context, title),
+                                  ),
+
                                   _ActionButton(
                                     icon: Icons.groups_outlined,
                                     title: l10n.projectTeam,
                                     subtitle: _teamSubtitle(context),
                                     onTap: () => _openTeam(context),
                                   ),
+
                                   _ActionButton(
                                     icon: Icons.chat_bubble_outline_rounded,
                                     title: l10n.projectConversation,
                                     subtitle: _messagesSubtitle(context),
                                     onTap: () => _openMessages(context, title),
                                   ),
+
+                                  _ActionButton(
+                                    icon: Icons.video_call_rounded,
+                                    title: 'Schedule Meeting',
+                                    subtitle: 'Plan a meeting with your team',
+                                    onTap: () => _openMeetings(context, title),
+                                  ),
                                 ];
 
-                                if (actionConstraints.maxWidth > 650) {
-                                  return Row(
+                                if (actionConstraints.maxWidth > 900) {
+                                  return Column(
                                     children: [
-                                      Expanded(child: buttons[0]),
-                                      const SizedBox(width: 14),
-                                      Expanded(child: buttons[1]),
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[0]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[1]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[2]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[3]),
+                                        ],
+                                      ),
+                                    ],
+                                  );
+                                }
+
+                                if (actionConstraints.maxWidth > 650) {
+                                  return Column(
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[0]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[1]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[2]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[3]),
+                                        ],
+                                      ),
                                     ],
                                   );
                                 }
 
                                 return Column(
                                   children: [
-                                    buttons[0],
-                                    const SizedBox(height: 14),
-                                    buttons[1],
+                                    for (
+                                      int i = 0;
+                                      i < buttons.length;
+                                      i++
+                                    ) ...[
+                                      if (i > 0) const SizedBox(height: 14),
+                                      buttons[i],
+                                    ],
                                   ],
                                 );
                               },
@@ -376,6 +859,9 @@ class ProjectDetailsScreen extends StatelessWidget {
 
                             const SizedBox(height: 18),
 
+                            // ------------------------------------
+                            // DESCRIPTION
+                            // ------------------------------------
                             _DetailsCard(
                               title: l10n.projectDescription,
                               icon: Icons.description_outlined,
@@ -393,6 +879,9 @@ class ProjectDetailsScreen extends StatelessWidget {
 
                             const SizedBox(height: 14),
 
+                            // ------------------------------------
+                            // REQUIREMENTS
+                            // ------------------------------------
                             _DetailsCard(
                               title: l10n.requirements,
                               icon: Icons.checklist_rounded,
@@ -410,14 +899,19 @@ class ProjectDetailsScreen extends StatelessWidget {
 
                             const SizedBox(height: 14),
 
+                            // ------------------------------------
+                            // BUDGET AND TIMELINE
+                            // ------------------------------------
                             LayoutBuilder(
                               builder: (context, infoConstraints) {
+                                final budgetDisplay = budget.isEmpty
+                                    ? _notSpecifiedText(context)
+                                    : '$currency $budget';
+
                                 final budgetCard = _InfoCard(
                                   icon: Icons.currency_rupee_rounded,
                                   title: l10n.budget,
-                                  value: budget.isEmpty
-                                      ? _notSpecifiedText(context)
-                                      : budget,
+                                  value: budgetDisplay,
                                 );
 
                                 final timelineCard = _InfoCard(
@@ -448,16 +942,263 @@ class ProjectDetailsScreen extends StatelessWidget {
                               },
                             ),
 
+                            // ------------------------------------
+                            // ADDITIONAL PROJECT DETAILS
+                            // ------------------------------------
+                            if (budgetType.isNotEmpty ||
+                                deadlineText.isNotEmpty ||
+                                experienceLevel.isNotEmpty ||
+                                workMode.isNotEmpty ||
+                                priority.isNotEmpty ||
+                                additionalInfo.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+
+                              _DetailsCard(
+                                title: 'Additional Project Details',
+                                icon: Icons.tune_rounded,
+                                child: Column(
+                                  children: [
+                                    if (budgetType.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Payment Type',
+                                        value: budgetType,
+                                      ),
+
+                                    if (deadlineText.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Deadline',
+                                        value: deadlineText,
+                                      ),
+
+                                    if (experienceLevel.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Experience Level',
+                                        value: experienceLevel,
+                                      ),
+
+                                    if (workMode.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Work Arrangement',
+                                        value: workMode,
+                                      ),
+
+                                    if (priority.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Priority',
+                                        value: priority,
+                                      ),
+
+                                    if (additionalInfo.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Additional Instructions',
+                                        value: additionalInfo,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+
                             const SizedBox(height: 14),
 
+                            // ------------------------------------
+                            // PROJECT PROGRESS
+                            // ------------------------------------
                             _DetailsCard(
                               title: l10n.progress,
                               icon: Icons.timeline_rounded,
-                              child: _ProgressTimeline(
-                                currentStatus: status,
-                                isStepActive: _isStepActive,
+                              child: _MilestoneProgressTracker(
+                                milestones: data['milestones'],
+                                updatedAt: data['updatedAt'],
                               ),
                             ),
+
+                            const SizedBox(height: 24),
+
+                            DeveloperReviewWidget(
+                              projectId: projectId,
+                              projectTitle:
+                                  data['title']?.toString() ?? 'Project',
+                              developerId:
+                                  (data['developerId'] ??
+                                          data['assignedDeveloperId'] ??
+                                          '')
+                                      .toString(),
+                              projectStatus: data['status']?.toString() ?? '',
+                              progress: calculatedProgress,
+                            ),
+
+                            // ------------------------------------
+                            // FINAL ACCEPTED PLAN
+                            // ------------------------------------
+                            if (acceptedCost ||
+                                acceptedTimeline ||
+                                acceptedTerms ||
+                                plan.isNotEmpty ||
+                                estimate.isNotEmpty ||
+                                acceptedScope.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+
+                              _DetailsCard(
+                                title: 'Final Accepted Plan & Estimate',
+                                icon: Icons.task_alt_rounded,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if ((plan['projectSummary']?.toString() ??
+                                            '')
+                                        .isNotEmpty) ...[
+                                      const Text(
+                                        'Project Summary',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(plan['projectSummary'].toString()),
+                                      const SizedBox(height: 14),
+                                    ],
+
+                                    if (acceptedScope.isNotEmpty) ...[
+                                      const Text(
+                                        'Accepted Scope',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+
+                                      for (final item in acceptedScope)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 6,
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(
+                                                Icons.check_circle_outline,
+                                                size: 18,
+                                                color: Color(0xFF16A34A),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(child: Text(item)),
+                                            ],
+                                          ),
+                                        ),
+
+                                      const SizedBox(height: 14),
+                                    ],
+
+                                    if (estimate.isNotEmpty) ...[
+                                      const Text(
+                                        'Estimate Details',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+
+                                      for (final entry in estimate.entries)
+                                        if (entry.value != null &&
+                                            entry.value is! Map &&
+                                            entry.value is! List)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    _formatPlanLabel(entry.key),
+                                                    style: const TextStyle(
+                                                      color: Color(0xFF667085),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  flex: 3,
+                                                  child: Text(
+                                                    entry.value.toString(),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                    ],
+
+                                    if (plan['deliveryPhases'] is List &&
+                                        (plan['deliveryPhases'] as List)
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 14),
+                                      const Text(
+                                        'Delivery Phases',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+
+                                      for (final phase
+                                          in plan['deliveryPhases'] as List)
+                                        if (phase is Map)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
+                                            ),
+                                            child: Text(
+                                              (phase['name'] ??
+                                                      phase['title'] ??
+                                                      phase.toString())
+                                                  .toString(),
+                                            ),
+                                          )
+                                        else
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
+                                            child: Text(phase.toString()),
+                                          ),
+                                    ],
+
+                                    if (acceptedCost ||
+                                        acceptedTimeline ||
+                                        acceptedTerms) ...[
+                                      const SizedBox(height: 12),
+                                      const Divider(),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Acceptance Status',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+
+                                      if (acceptedCost)
+                                        const _AcceptedBadge(
+                                          label: 'Budget Accepted',
+                                        ),
+
+                                      if (acceptedTimeline)
+                                        const _AcceptedBadge(
+                                          label: 'Timeline Accepted',
+                                        ),
+
+                                      if (acceptedTerms)
+                                        const _AcceptedBadge(
+                                          label: 'Terms Accepted',
+                                        ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -472,6 +1213,10 @@ class ProjectDetailsScreen extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// PROJECT HERO
+// ============================================================================
 
 class _ProjectHero extends StatelessWidget {
   final String title;
@@ -532,7 +1277,9 @@ class _ProjectHero extends StatelessWidget {
                   size: 28,
                 ),
               ),
+
               const SizedBox(width: 14),
+
               Expanded(
                 child: Text(
                   title,
@@ -549,13 +1296,16 @@ class _ProjectHero extends StatelessWidget {
               ),
             ],
           ),
+
           const SizedBox(height: 17),
+
           Wrap(
             spacing: 9,
             runSpacing: 9,
             children: [
               if (category.isNotEmpty)
                 _HeroChip(icon: Icons.category_outlined, label: category),
+
               _HeroStatusChip(
                 icon: statusIcon,
                 label: statusText,
@@ -568,6 +1318,10 @@ class _ProjectHero extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// HERO CHIP
+// ============================================================================
 
 class _HeroChip extends StatelessWidget {
   final IconData icon;
@@ -602,6 +1356,10 @@ class _HeroChip extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// STATUS CHIP
+// ============================================================================
 
 class _HeroStatusChip extends StatelessWidget {
   final IconData icon;
@@ -641,6 +1399,10 @@ class _HeroStatusChip extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ACTION BUTTON
+// ============================================================================
 
 class _ActionButton extends StatelessWidget {
   final IconData icon;
@@ -688,7 +1450,9 @@ class _ActionButton extends StatelessWidget {
                 ),
                 child: Icon(icon, color: const Color(0xFF4F46E5), size: 22),
               ),
+
               const SizedBox(width: 13),
+
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -712,6 +1476,7 @@ class _ActionButton extends StatelessWidget {
                   ],
                 ),
               ),
+
               Container(
                 width: 30,
                 height: 30,
@@ -732,6 +1497,10 @@ class _ActionButton extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// DETAILS CARD
+// ============================================================================
 
 class _DetailsCard extends StatelessWidget {
   final String title;
@@ -775,7 +1544,9 @@ class _DetailsCard extends StatelessWidget {
                 ),
                 child: Icon(icon, size: 19, color: const Color(0xFF4F46E5)),
               ),
+
               const SizedBox(width: 11),
+
               Expanded(
                 child: Text(
                   title,
@@ -789,13 +1560,19 @@ class _DetailsCard extends StatelessWidget {
               ),
             ],
           ),
+
           const SizedBox(height: 15),
+
           child,
         ],
       ),
     );
   }
 }
+
+// ============================================================================
+// BUDGET / TIMELINE INFO CARD
+// ============================================================================
 
 class _InfoCard extends StatelessWidget {
   final IconData icon;
@@ -836,7 +1613,9 @@ class _InfoCard extends StatelessWidget {
             ),
             child: Icon(icon, size: 20, color: const Color(0xFF4F46E5)),
           ),
+
           const SizedBox(width: 12),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -869,129 +1648,433 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-class _ProgressTimeline extends StatelessWidget {
-  final String currentStatus;
-  final bool Function(String currentStatus, String step) isStepActive;
+// ============================================================================
+// ADDITIONAL DETAIL ROW
+// ============================================================================
 
-  const _ProgressTimeline({
-    required this.currentStatus,
-    required this.isStepActive,
-  });
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-
-    return Column(
-      children: [
-        _ProgressStep(
-          title: l10n.requirement,
-          icon: Icons.description_outlined,
-          active: isStepActive(currentStatus, 'requirement'),
-        ),
-        _ProgressStep(
-          title: l10n.teamFormation,
-          icon: Icons.groups_outlined,
-          active: isStepActive(currentStatus, 'team_formation'),
-        ),
-        _ProgressStep(
-          title: l10n.development,
-          icon: Icons.code_rounded,
-          active: isStepActive(currentStatus, 'development'),
-        ),
-        _ProgressStep(
-          title: l10n.testing,
-          icon: Icons.bug_report_outlined,
-          active: isStepActive(currentStatus, 'testing'),
-        ),
-        _ProgressStep(
-          title: l10n.clientReview,
-          icon: Icons.rate_review_outlined,
-          active: isStepActive(currentStatus, 'client_review'),
-        ),
-        _ProgressStep(
-          title: l10n.completed,
-          icon: Icons.check_circle_outline_rounded,
-          active: isStepActive(currentStatus, 'completed'),
-          isLast: true,
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF667085),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF344054),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _ProgressStep extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final bool active;
-  final bool isLast;
+// ============================================================================
+// ACCEPTED BADGE
+// ============================================================================
 
-  const _ProgressStep({
-    required this.title,
-    required this.icon,
-    required this.active,
-    this.isLast = false,
-  });
+class _AcceptedBadge extends StatelessWidget {
+  final String label;
+
+  const _AcceptedBadge({required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: active
-                    ? const Color(0xFFEEF2FF)
-                    : const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: active
-                      ? const Color(0xFFC7D2FE)
-                      : const Color(0xFFE5E7EB),
-                ),
-              ),
-              child: Icon(
-                active ? Icons.check_rounded : icon,
-                size: 17,
-                color: active
-                    ? const Color(0xFF4F46E5)
-                    : const Color(0xFF98A2B3),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF166534),
+                fontWeight: FontWeight.w600,
               ),
             ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 31,
-                margin: const EdgeInsets.symmetric(vertical: 3),
-                decoration: BoxDecoration(
-                  color: active
-                      ? const Color(0xFFC7D2FE)
-                      : const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(2),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// LIVE MILESTONE PROGRESS — CLIENT READ-ONLY VIEW
+// ============================================================================
+
+class _MilestoneProgressTracker extends StatelessWidget {
+  final dynamic milestones;
+  final dynamic updatedAt;
+
+  const _MilestoneProgressTracker({
+    required this.milestones,
+    required this.updatedAt,
+  });
+
+  static const Color _primary = Color(0xFF4F46E5);
+  static const Color _green = Color(0xFF059669);
+  static const Color _muted = Color(0xFF667085);
+  static const Color _border = Color(0xFFE5E7EB);
+
+  static const List<Map<String, String>> _steps = [
+    {
+      'key': 'requirements',
+      'title': 'Requirements',
+      'description': 'Finalize project requirements and specifications.',
+    },
+    {
+      'key': 'architecture',
+      'title': 'Architecture',
+      'description': 'Define the system architecture and database design.',
+    },
+    {
+      'key': 'design',
+      'title': 'UI/UX Design',
+      'description': 'Complete the user interface and experience design.',
+    },
+    {
+      'key': 'development',
+      'title': 'Development',
+      'description': 'Implement the planned project functionality.',
+    },
+    {
+      'key': 'testing',
+      'title': 'Testing',
+      'description': 'Test functionality and resolve identified issues.',
+    },
+    {
+      'key': 'deployment',
+      'title': 'Deployment',
+      'description': 'Deploy the completed project.',
+    },
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = milestones is Map
+        ? Map<String, dynamic>.from(milestones as Map)
+        : <String, dynamic>{};
+    final completedCount = _steps
+        .where((step) => completed[step['key']] == true)
+        .length;
+    final total = _steps.length;
+    final progress = completedCount / total;
+    final currentIndex = _steps.indexWhere(
+      (step) => completed[step['key']] != true,
+    );
+    final allCompleted = currentIndex == -1;
+
+    DateTime? lastUpdated;
+    if (updatedAt is Timestamp) {
+      lastUpdated = updatedAt.toDate();
+    } else if (updatedAt is DateTime) {
+      lastUpdated = updatedAt;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Expanded(
+              child: Text(
+                'Overall Completion',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
                 ),
+              ),
+            ),
+            Text(
+              '${(progress * 100).round()}%',
+              style: const TextStyle(
+                color: _primary,
+                fontSize: 23,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 10,
+            backgroundColor: const Color(0xFFE5E7EB),
+            color: allCompleted ? _green : _primary,
+          ),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            const Icon(Icons.check_circle_outline, size: 15, color: _muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$completedCount of $total milestones completed',
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+            ),
+            if (lastUpdated != null)
+              Text(
+                'Updated '
+                '${lastUpdated.day.toString().padLeft(2, '0')}/'
+                '${lastUpdated.month.toString().padLeft(2, '0')}/'
+                '${lastUpdated.year}',
+                style: const TextStyle(color: _muted, fontSize: 10),
               ),
           ],
         ),
-        const SizedBox(width: 13),
-        Padding(
-          padding: const EdgeInsets.only(top: 7),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-              color: active ? const Color(0xFF111827) : const Color(0xFF98A2B3),
+        const SizedBox(height: 24),
+        for (int i = 0; i < _steps.length; i++)
+          _buildStep(_steps[i], i, completed, currentIndex),
+        if (allCompleted)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.verified_rounded, color: _green, size: 25),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'All milestones completed! '
+                    'The project has reached 100% progress.',
+                    style: TextStyle(
+                      color: Color(0xFF065F46),
+                      fontWeight: FontWeight.w700,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _border),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Progress updates automatically when the '
+                    'developer completes a milestone.',
+                    style: TextStyle(color: _muted, fontSize: 12, height: 1.45),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
       ],
     );
   }
+
+  Widget _buildStep(
+    Map<String, String> step,
+    int index,
+    Map<String, dynamic> completed,
+    int currentIndex,
+  ) {
+    final key = step['key']!;
+    final isCompleted = completed[key] == true;
+    final isCurrent = index == currentIndex;
+    final isUpcoming = !isCompleted && !isCurrent;
+    final color = isCompleted
+        ? _green
+        : isCurrent
+        ? _primary
+        : const Color(0xFF98A2B3);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 38,
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? const Color(0xFFD1FAE5)
+                        : isCurrent
+                        ? const Color(0xFFEEF2FF)
+                        : const Color(0xFFF3F4F6),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 1.4),
+                  ),
+                  child: Icon(
+                    isCompleted
+                        ? Icons.check_rounded
+                        : isCurrent
+                        ? Icons.play_arrow_rounded
+                        : Icons.lock_outline_rounded,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+                if (index != _steps.length - 1)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      color: isCompleted ? _green : const Color(0xFFE5E7EB),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 15),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isCurrent ? const Color(0xFFF5F3FF) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCurrent ? const Color(0xFFC7D2FE) : _border,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          step['title']!,
+                          style: TextStyle(
+                            color: isUpcoming
+                                ? _muted
+                                : const Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      _statusPill(
+                        isCompleted
+                            ? 'COMPLETED'
+                            : isCurrent
+                            ? 'CURRENT'
+                            : 'UPCOMING',
+                        color,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    step['description']!,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                  if (isCompleted) ...[
+                    const SizedBox(height: 8),
+                    const Row(
+                      children: [
+                        Icon(Icons.verified_rounded, color: _green, size: 15),
+                        SizedBox(width: 5),
+                        Text(
+                          'Completed successfully',
+                          style: TextStyle(
+                            color: _green,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
 }
+
+// ============================================================================
+// LOADING INDICATOR
+// ============================================================================
 
 class _ProjectLoader extends StatelessWidget {
   const _ProjectLoader();
@@ -1008,6 +2091,10 @@ class _ProjectLoader extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ERROR CARD
+// ============================================================================
 
 class _ProjectErrorCard extends StatelessWidget {
   final String message;
@@ -1038,7 +2125,9 @@ class _ProjectErrorCard extends StatelessWidget {
               color: Color(0xFFD97706),
             ),
           ),
+
           const SizedBox(width: 13),
+
           Expanded(
             child: Text(
               message,
@@ -1054,6 +2143,10 @@ class _ProjectErrorCard extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// BACKGROUND AMBIENT PAINTER
+// ============================================================================
 
 class _ProjectDetailsAmbientPainter extends CustomPainter {
   const _ProjectDetailsAmbientPainter();

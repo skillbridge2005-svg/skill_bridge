@@ -39,8 +39,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
   StreamSubscription<Set<String>>? _savedProjectsSubscription;
   StreamSubscription<List<ProjectModel>>? _projectsSubscription;
-StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
-    _applicationStatusSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _applicationStatusSubscription;
 
   bool _projectsLoading = true;
   int? _profileCompletion;
@@ -120,7 +120,7 @@ StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
 
     _loadDeveloperProfile();
     _listenToSavedProjects();
-  _listenToApplicationStatuses();
+    _listenToApplicationStatuses();
 
     void _listenToProjects() {
       _projectsSubscription = _openProjectsStream.listen(
@@ -147,75 +147,70 @@ StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
     _listenToProjects();
   }
 
+  void _listenToApplicationStatuses() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-void _listenToApplicationStatuses() {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-
-  if (uid == null) {
-    setState(() {
-      _applicationStatusByProjectId = {};
-    });
-    return;
-  }
-
-  _applicationStatusSubscription?.cancel();
-
-  _applicationStatusSubscription = FirebaseFirestore.instance
-      .collection('applications')
-      .where('developerId', isEqualTo: uid)
-      .snapshots()
-      .listen(
-    (snapshot) {
-      if (!mounted) return;
-
-      // Sort newest application updates first.
-      final docs = [...snapshot.docs];
-
-      DateTime timestampOf(
-        QueryDocumentSnapshot<Map<String, dynamic>> doc,
-      ) {
-        final data = doc.data();
-        final value = data['updatedAt'] ?? data['createdAt'];
-
-        if (value is Timestamp) return value.toDate();
-        if (value is DateTime) return value;
-
-        return DateTime.fromMillisecondsSinceEpoch(0);
-      }
-
-      docs.sort(
-        (a, b) => timestampOf(b).compareTo(timestampOf(a)),
-      );
-
-      final statusByProjectId = <String, String>{};
-
-      for (final doc in docs) {
-        final data = doc.data();
-        final projectId = data['projectId']?.toString();
-
-        if (projectId == null ||
-            projectId.isEmpty ||
-            statusByProjectId.containsKey(projectId)) {
-          continue;
-        }
-
-        statusByProjectId[projectId] =
-            (data['status'] ?? 'pending')
-                .toString()
-                .trim()
-                .toLowerCase();
-      }
-
+    if (uid == null) {
       setState(() {
-        _applicationStatusByProjectId = statusByProjectId;
+        _applicationStatusByProjectId = {};
       });
-    },
-    onError: (Object error) {
-      debugPrint('Unable to listen to application statuses: $error');
-    },
-  );
-}
+      return;
+    }
 
+    _applicationStatusSubscription?.cancel();
+
+    _applicationStatusSubscription = FirebaseFirestore.instance
+        .collection('applications')
+        .where('developerId', isEqualTo: uid)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted) return;
+
+            // Sort newest application updates first.
+            final docs = [...snapshot.docs];
+
+            DateTime timestampOf(
+              QueryDocumentSnapshot<Map<String, dynamic>> doc,
+            ) {
+              final data = doc.data();
+              final value = data['updatedAt'] ?? data['createdAt'];
+
+              if (value is Timestamp) return value.toDate();
+              if (value is DateTime) return value;
+
+              return DateTime.fromMillisecondsSinceEpoch(0);
+            }
+
+            docs.sort((a, b) => timestampOf(b).compareTo(timestampOf(a)));
+
+            final statusByProjectId = <String, String>{};
+
+            for (final doc in docs) {
+              final data = doc.data();
+              final projectId = data['projectId']?.toString();
+
+              if (projectId == null ||
+                  projectId.isEmpty ||
+                  statusByProjectId.containsKey(projectId)) {
+                continue;
+              }
+
+              statusByProjectId[projectId] = (data['status'] ?? 'pending')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+            }
+
+            setState(() {
+              _applicationStatusByProjectId = statusByProjectId;
+            });
+          },
+          onError: (Object error) {
+            debugPrint('Unable to listen to application statuses: $error');
+          },
+        );
+  }
 
   @override
   void dispose() {
@@ -1611,7 +1606,8 @@ void _listenToApplicationStatuses() {
         return _ProjectPreviewSheet(
           project: project,
           isSaved: _savedProjectIds.contains(project.id),
-          isApplied: _applicationStatusByProjectId.containsKey(project.id) &&
+          isApplied:
+              _applicationStatusByProjectId.containsKey(project.id) &&
               _applicationStatusByProjectId[project.id] != 'withdrawn',
           applicationStatus: _applicationStatusByProjectId[project.id],
           matchPercentage: _getMatchPercentage(project),
@@ -2593,12 +2589,12 @@ class _ProjectPreviewSheet extends StatelessWidget {
                           icon: Icon(
                             isApplied
                                 ? (applicationStatus == 'shortlisted'
-                                    ? Icons.star_rounded
-                                    : applicationStatus == 'rejected'
-                                        ? Icons.cancel_outlined
-                                        : applicationStatus == 'accepted'
-                                            ? Icons.verified_rounded
-                                            : Icons.hourglass_top_rounded)
+                                      ? Icons.star_rounded
+                                      : applicationStatus == 'rejected'
+                                      ? Icons.cancel_outlined
+                                      : applicationStatus == 'accepted'
+                                      ? Icons.verified_rounded
+                                      : Icons.hourglass_top_rounded)
                                 : Icons.send_rounded,
                           ),
                           label: Text(
@@ -2617,18 +2613,19 @@ class _ProjectPreviewSheet extends StatelessWidget {
                             backgroundColor: !isApplied
                                 ? const Color(0xFF4F46E5)
                                 : applicationStatus == 'rejected'
-                                    ? const Color(0xFFDC2626)
-                                    : applicationStatus == 'shortlisted' ||
-                                            applicationStatus == 'accepted'
-                                        ? const Color(0xFF16A34A)
-                                        : const Color(0xFF64748B),
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: applicationStatus == 'rejected'
                                 ? const Color(0xFFDC2626)
                                 : applicationStatus == 'shortlisted' ||
-                                        applicationStatus == 'accepted'
-                                    ? const Color(0xFF16A34A)
-                                    : const Color(0xFF64748B),
+                                      applicationStatus == 'accepted'
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFF64748B),
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor:
+                                applicationStatus == 'rejected'
+                                ? const Color(0xFFDC2626)
+                                : applicationStatus == 'shortlisted' ||
+                                      applicationStatus == 'accepted'
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFF64748B),
                             disabledForegroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(

@@ -1,18 +1,32 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../services/presence_service.dart';
 import '../client/client_home.dart';
 import '../developer/developer_home.dart';
 import '../landing_page.dart';
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(PresenceService.instance.start());
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+      stream: FirebaseAuth.instance.idTokenChanges(),
       builder: (context, authSnapshot) {
         if (authSnapshot.connectionState == ConnectionState.waiting) {
           return const _LoadingScreen();
@@ -22,6 +36,14 @@ class AuthWrapper extends StatelessWidget {
 
         if (user == null) {
           return const SkillBridgeLandingPage();
+        }
+
+        final isGoogleUser = user.providerData.any(
+          (provider) => provider.providerId == 'google.com',
+        );
+
+        if (!isGoogleUser && !user.emailVerified) {
+          return const _EmailVerificationRequiredScreen();
         }
 
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -70,6 +92,111 @@ class AuthWrapper extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _EmailVerificationRequiredScreen extends StatelessWidget {
+  const _EmailVerificationRequiredScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.mark_email_unread_outlined,
+                  size: 72,
+                  color: Color(0xFF2563EB),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Verify Your Email',
+                  style: TextStyle(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Please verify ${FirebaseAuth.instance.currentUser?.email ?? 'your email address'} before accessing SkillBridge.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: Color(0xFF64748B),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+
+                      try {
+                        final user = FirebaseAuth.instance.currentUser;
+
+                        if (user == null) {
+                          return;
+                        }
+
+                        await user.reload();
+
+                        final refreshedUser = FirebaseAuth.instance.currentUser;
+
+                        if (refreshedUser?.emailVerified == true) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Email verified! Please wait...'),
+                            ),
+                          );
+                        } else {
+                          await refreshedUser?.sendEmailVerification();
+
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Email is not verified yet. A verification email has been sent.',
+                              ),
+                            ),
+                          );
+                        }
+                      } on FirebaseAuthException catch (e) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              e.message ??
+                                  'Unable to check email verification.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Check Verification Status'),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                  },
+                  child: const Text('Back to Home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

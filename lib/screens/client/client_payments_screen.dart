@@ -30,25 +30,111 @@ class ClientPaymentsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF173B2B),
-        titleSpacing: 20,
-        title: const Text(
-          'Payments',
-          style: TextStyle(
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF173B2B),
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEAF4EE),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF173B2B),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Payments icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEAF4EE),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.account_balance_wallet_outlined,
+                    color: Color(0xFF173B2B),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Payments',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF173B2B),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'PAYMENTS & TRANSACTIONS',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
       body: Stack(
         children: [
           const Positioned.fill(
-            child: CustomPaint(
-              painter: _PaymentsAmbientPainter(),
-            ),
+            child: CustomPaint(painter: _PaymentsAmbientPainter()),
           ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
@@ -57,9 +143,7 @@ class ClientPaymentsScreen extends StatelessWidget {
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: _PaymentsLoader(),
-                );
+                return const Center(child: _PaymentsLoader());
               }
 
               if (snapshot.hasError) {
@@ -67,8 +151,7 @@ class ClientPaymentsScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _PaymentsErrorCard(
-                      message:
-                          '${l10n.somethingWentWrong}\n${snapshot.error}',
+                      message: '${l10n.somethingWentWrong}\n${snapshot.error}',
                     ),
                   ),
                 );
@@ -97,9 +180,7 @@ class ClientPaymentsScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 1180,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 1180),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -258,10 +339,7 @@ class _PaymentCard extends StatelessWidget {
   final Map<String, dynamic> payment;
   final bool isPending;
 
-  const _PaymentCard({
-    required this.payment,
-    required this.isPending,
-  });
+  const _PaymentCard({required this.payment, required this.isPending});
 
   String _normalizedStatus(String status) {
     return status.trim().toLowerCase();
@@ -345,17 +423,13 @@ class _PaymentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
-    final projectTitle =
-        payment['projectTitle']?.toString() ?? l10n.project;
+    final projectTitle = payment['projectTitle']?.toString() ?? l10n.project;
 
-    final paymentType =
-        payment['paymentType']?.toString() ?? '';
+    final paymentType = payment['paymentType']?.toString() ?? '';
 
-    final projectId =
-        payment['projectId']?.toString() ?? '';
+    final projectId = payment['projectId']?.toString() ?? '';
 
-    final status =
-        payment['status']?.toString() ?? 'unknown';
+    final status = payment['status']?.toString() ?? 'unknown';
 
     final dynamic amountValue = payment['amount'];
 
@@ -375,9 +449,7 @@ class _PaymentCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: isPending
-              ? const Color(0xFFFDE3B0)
-              : const Color(0xFFE5E7EB),
+          color: isPending ? const Color(0xFFFDE3B0) : const Color(0xFFE5E7EB),
         ),
         boxShadow: [
           BoxShadow(
@@ -429,10 +501,7 @@ class _PaymentCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _formatPaymentType(
-                          context,
-                          paymentType,
-                        ),
+                        _formatPaymentType(context, paymentType),
                         style: const TextStyle(
                           fontSize: 12,
                           color: Colors.grey,
@@ -466,16 +535,11 @@ class _PaymentCard extends StatelessWidget {
             const SizedBox(height: 18),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 15,
-                vertical: 13,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(15),
-                border: Border.all(
-                  color: const Color(0xFFE5E7EB),
-                ),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
               ),
               child: Row(
                 children: [
@@ -503,11 +567,7 @@ class _PaymentCard extends StatelessWidget {
             const SizedBox(height: 13),
             Row(
               children: [
-                const Icon(
-                  Icons.folder_outlined,
-                  size: 15,
-                  color: Colors.grey,
-                ),
+                const Icon(Icons.folder_outlined, size: 15, color: Colors.grey),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -589,9 +649,7 @@ class _EmptyPayments extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: const Color(0xFFE5E7EB),
-                  ),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x070F172A),
@@ -629,11 +687,7 @@ class _EmptyPayments extends StatelessWidget {
               const Text(
                 'Your project payment history will appear here once you make a payment.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: Colors.grey,
-                ),
+                style: TextStyle(fontSize: 13, height: 1.5, color: Colors.grey),
               ),
             ],
           ),
@@ -670,9 +724,7 @@ class _PaymentsLoader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(
-      child: CircularProgressIndicator(
-        color: Color(0xFF249B50),
-      ),
+      child: CircularProgressIndicator(color: Color(0xFF249B50)),
     );
   }
 }
@@ -680,9 +732,7 @@ class _PaymentsLoader extends StatelessWidget {
 class _PaymentsErrorCard extends StatelessWidget {
   final String message;
 
-  const _PaymentsErrorCard({
-    required this.message,
-  });
+  const _PaymentsErrorCard({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -691,9 +741,7 @@ class _PaymentsErrorCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFE8EDF2),
-        ),
+        border: Border.all(color: const Color(0xFFE8EDF2)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -716,10 +764,7 @@ class _PaymentsErrorCard extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.grey,
-            ),
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
           ),
         ],
       ),
@@ -736,11 +781,7 @@ class _PaymentsAmbientPainter extends CustomPainter {
       ..color = const Color(0xFF249B50).withValues(alpha: 0.025)
       ..style = PaintingStyle.fill;
 
-    canvas.drawCircle(
-      Offset(size.width * 0.9, 80),
-      120,
-      paint,
-    );
+    canvas.drawCircle(Offset(size.width * 0.9, 80), 120, paint);
 
     canvas.drawCircle(
       Offset(size.width * 0.05, size.height * 0.75),

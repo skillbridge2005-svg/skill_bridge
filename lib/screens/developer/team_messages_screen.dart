@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../../models/team_model.dart';
@@ -9,15 +8,12 @@ class TeamMessagesScreen extends StatefulWidget {
   const TeamMessagesScreen({super.key});
 
   @override
-  State<TeamMessagesScreen> createState() =>
-      _TeamMessagesScreenState();
+  State<TeamMessagesScreen> createState() => _TeamMessagesScreenState();
 }
 
-class _TeamMessagesScreenState
-    extends State<TeamMessagesScreen> {
+class _TeamMessagesScreenState extends State<TeamMessagesScreen> {
   final TeamService _teamService = TeamService();
-  final TextEditingController _searchController =
-      TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
 
   String _searchQuery = '';
 
@@ -31,10 +27,7 @@ class _TeamMessagesScreenState
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => TeamChatScreen(
-          teamId: team.id,
-          teamName: team.name,
-        ),
+        builder: (_) => TeamChatScreen(teamId: team.id, teamName: team.name),
       ),
     );
   }
@@ -53,10 +46,7 @@ class _TeamMessagesScreenState
         elevation: 0,
         title: const Text(
           'Messages',
-          style: TextStyle(
-            color: ink,
-            fontWeight: FontWeight.w800,
-          ),
+          style: TextStyle(color: ink, fontWeight: FontWeight.w800),
         ),
         iconTheme: const IconThemeData(color: ink),
       ),
@@ -66,21 +56,14 @@ class _TeamMessagesScreenState
           Container(
             width: double.infinity,
             color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(
-              20, 4, 20, 20,
-            ),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
             child: const Text(
               'Connect with your project teams.',
-              style: TextStyle(
-                color: muted,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: muted, fontSize: 14),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
-              16, 18, 16, 12,
-            ),
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
             child: TextField(
               controller: _searchController,
               onChanged: (value) {
@@ -95,15 +78,11 @@ class _TeamMessagesScreenState
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(
-                    color: Color(0xFFE2E8F0),
-                  ),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(
-                    color: Color(0xFFE2E8F0),
-                  ),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
               ),
             ),
@@ -126,22 +105,15 @@ class _TeamMessagesScreenState
                   );
                 }
 
-                if (snapshot.connectionState ==
-                        ConnectionState.waiting &&
+                if (snapshot.connectionState == ConnectionState.waiting &&
                     !snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
+                  return const Center(child: CircularProgressIndicator());
                 }
 
-                final teams = (snapshot.data ?? <TeamModel>[])
-                    .where((team) {
-                  final matchesSearch = team.name
-                          .toLowerCase()
-                          .contains(_searchQuery) ||
-                      team.projectTitle
-                          .toLowerCase()
-                          .contains(_searchQuery);
+                final teams = (snapshot.data ?? <TeamModel>[]).where((team) {
+                  final matchesSearch =
+                      team.name.toLowerCase().contains(_searchQuery) ||
+                      team.projectTitle.toLowerCase().contains(_searchQuery);
 
                   return matchesSearch && team.isActive;
                 }).toList();
@@ -157,8 +129,7 @@ class _TeamMessagesScreenState
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
                               color: const Color(0xFFEFF6FF),
-                              borderRadius:
-                                  BorderRadius.circular(24),
+                              borderRadius: BorderRadius.circular(24),
                             ),
                             child: const Icon(
                               Icons.forum_outlined,
@@ -183,10 +154,7 @@ class _TeamMessagesScreenState
                             'Accept a team invitation or create a '
                             'team to get started.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: muted,
-                              height: 1.5,
-                            ),
+                            style: TextStyle(color: muted, height: 1.5),
                           ),
                         ],
                       ),
@@ -195,12 +163,9 @@ class _TeamMessagesScreenState
                 }
 
                 return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
-                    16, 4, 16, 24,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: teams.length,
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(height: 12),
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final team = teams[index];
 
@@ -213,11 +178,8 @@ class _TeamMessagesScreenState
                         child: Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            borderRadius:
-                                BorderRadius.circular(18),
-                            border: Border.all(
-                              color: const Color(0xFFE2E8F0),
-                            ),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
                           ),
                           child: Row(
                             children: [
@@ -226,8 +188,7 @@ class _TeamMessagesScreenState
                                 height: 54,
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFEFF6FF),
-                                  borderRadius:
-                                      BorderRadius.circular(17),
+                                  borderRadius: BorderRadius.circular(17),
                                 ),
                                 child: const Icon(
                                   Icons.groups_rounded,
@@ -238,20 +199,17 @@ class _TeamMessagesScreenState
                               const SizedBox(width: 14),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       team.name.isEmpty
                                           ? 'Unnamed team'
                                           : team.name,
                                       maxLines: 1,
-                                      overflow:
-                                          TextOverflow.ellipsis,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         fontSize: 15,
-                                        fontWeight:
-                                            FontWeight.w800,
+                                        fontWeight: FontWeight.w800,
                                         color: ink,
                                       ),
                                     ),
@@ -261,8 +219,7 @@ class _TeamMessagesScreenState
                                           ? 'Team group chat'
                                           : team.projectTitle,
                                       maxLines: 1,
-                                      overflow:
-                                          TextOverflow.ellipsis,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: muted,
                                         fontSize: 12,
@@ -288,8 +245,7 @@ class _TeamMessagesScreenState
                                         Container(
                                           width: 7,
                                           height: 7,
-                                          decoration:
-                                              const BoxDecoration(
+                                          decoration: const BoxDecoration(
                                             color: Color(0xFF16A34A),
                                             shape: BoxShape.circle,
                                           ),
@@ -300,8 +256,7 @@ class _TeamMessagesScreenState
                                           style: TextStyle(
                                             color: Color(0xFF15803D),
                                             fontSize: 11,
-                                            fontWeight:
-                                                FontWeight.w700,
+                                            fontWeight: FontWeight.w700,
                                           ),
                                         ),
                                       ],

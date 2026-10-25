@@ -34,9 +34,13 @@ dependencies:
   audioplayers: ^6.8.1
   flutter_webrtc: ^1.6.2+hotfix.4
   path_provider: ^2.1.6
+  fl_chart: ^0.71.0
   supabase_flutter: ^2.18.3
   firebase_storage: ^13.6.1
+  flutter_markdown: ^0.7.7+1
   path: ^1.9.1
+  file_picker: ^13.2.0
+  cached_network_image: ^4.0.5
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +59,7 @@ flutter:
     - assets/images/google_logo_dark.svg
     - assets/images/google_logo_light.png
     - assets/images/google_logo_dark.png
+    - assets/images/chat_background.png.jpeg
 
 flutter_launcher_icons:
   android: true

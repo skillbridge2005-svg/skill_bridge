@@ -1,10 +1,9 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/individual_chat_service.dart';
-import 'individual_chat_screen.dart';
+import 'individual_chat_screen.dart' hide IndividualChatService;
 
 class IndividualChatsScreen extends StatelessWidget {
   IndividualChatsScreen({super.key});
@@ -105,10 +104,7 @@ class IndividualChatsScreen extends StatelessWidget {
                       'Open a team, select a member, and tap '
                       '"Message privately" to start a conversation.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        height: 1.5,
-                        color: Color(0xFF6B7280),
-                      ),
+                      style: TextStyle(height: 1.5, color: Color(0xFF6B7280)),
                     ),
                   ],
                 ),
@@ -119,14 +115,14 @@ class IndividualChatsScreen extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: conversations.length,
-            separatorBuilder: (_, index) =>
-                const SizedBox(height: 8),
+            separatorBuilder: (_, index) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final document = conversations[index];
               final data = document.data();
 
-              final participants =
-                  List<String>.from(data['participants'] ?? []);
+              final participants = List<String>.from(
+                data['participants'] ?? [],
+              );
 
               final otherUsers = participants
                   .where((uid) => uid != currentUid)
@@ -142,25 +138,20 @@ class IndividualChatsScreen extends StatelessWidget {
                 data['participantNames'] ?? {},
               );
 
-              final otherName =
-                  (names[otherUid] ?? 'Team member').toString();
+              final otherName = (names[otherUid] ?? 'Team member').toString();
 
-              final lastMessage =
-                  (data['lastMessage'] ?? '').toString();
+              final lastMessage = (data['lastMessage'] ?? '').toString();
 
-              final lastSenderId =
-                  (data['lastSenderId'] ?? '').toString();
+              final lastSenderId = (data['lastSenderId'] ?? '').toString();
 
               final timestamp = data['updatedAt'];
-              final date = timestamp is Timestamp
-                  ? timestamp.toDate()
-                  : null;
+              final date = timestamp is Timestamp ? timestamp.toDate() : null;
 
               final preview = lastMessage.isEmpty
                   ? 'No messages yet'
                   : lastSenderId == currentUid
-                      ? 'You: $lastMessage'
-                      : lastMessage;
+                  ? 'You: $lastMessage'
+                  : lastMessage;
 
               return Card(
                 margin: EdgeInsets.zero,
@@ -168,9 +159,7 @@ class IndividualChatsScreen extends StatelessWidget {
                 color: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
-                  side: const BorderSide(
-                    color: Color(0xFFE5E7EB),
-                  ),
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
                 ),
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(
@@ -206,9 +195,7 @@ class IndividualChatsScreen extends StatelessWidget {
                       preview,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
-                      ),
+                      style: const TextStyle(color: Color(0xFF6B7280)),
                     ),
                   ),
                   trailing: Row(
@@ -252,9 +239,8 @@ class IndividualChatsScreen extends StatelessWidget {
   String _formatDate(DateTime date) {
     final now = DateTime.now();
 
-    final sameDay = date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day;
+    final sameDay =
+        date.year == now.year && date.month == now.month && date.day == now.day;
 
     if (sameDay) {
       final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;

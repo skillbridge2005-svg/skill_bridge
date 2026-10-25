@@ -1,6 +1,9 @@
-const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 
 require("dotenv").config();
+
+const { jsonrepair } = require("jsonrepair");
+
+const {getAuth} = require("firebase-admin/auth");
 
 const {initializeApp} = require("firebase-admin/app");
 const {
@@ -43,52 +46,55 @@ function getGeminiClient() {
 }
 
 /**
- * Read an image payload from a Gemini Interactions response.
- * @param {object} interaction Gemini interactions response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
+ * Extract useful diagnostic fields from a provider API error.
+ * @param {Error} error Provider error.
+ * @return {object} Sanitized error diagnostics.
  */
-function extractInteractionImage(interaction) {
-  const candidates = [
-    interaction?.output_image,
-    interaction?.outputImage,
-    interaction?.outputs?.find?.((item) => item?.type === "image"),
-  ];
 
-  for (const image of candidates) {
-    const imageBase64 = image?.data || image?.imageBytes || image?.b64_json;
-    if (typeof imageBase64 === "string" && imageBase64.trim()) {
-      return {
-        imageBase64: imageBase64.trim(),
-        mimeType: image.mime_type || image.mimeType || "image/png",
-      };
-    }
+function getProviderErrorFields(error) {
+  const body =
+    error?.error ??
+    error?.response?.data?.error ??
+    error?.response?.data ??
+    error?.response?.body ??
+    null;
+
+  const bodyObject =
+    body && typeof body === "object" ? body : null;
+
+  let providerDetails = null;
+
+  try {
+    providerDetails = body == null ?
+      null :
+      (
+          typeof body === "string" ?
+            body :
+            JSON.stringify(body)
+      ).slice(0, 1500);
+  } catch (_) {
+    providerDetails = "Unable to serialize provider details";
   }
 
-  return null;
-}
-
-/**
- * Read an inline image from a Gemini generateContent response.
- * @param {object} response Gemini SDK response.
- * @return {{imageBase64: string, mimeType: string}|null} Image payload.
- */
-function extractInlineImage(response) {
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return null;
-  }
-
-  for (const part of parts) {
-    const data = part.inlineData || part.inline_data;
-    if (data && typeof data.data === "string" && data.data.trim()) {
-      return {
-        imageBase64: data.data.trim(),
-        mimeType: data.mimeType || data.mime_type || "image/png",
-      };
-    }
-  }
-
-  return null;
+  return {
+    providerErrorName: error?.name ?? null,
+    providerHttpStatus:
+      error?.status ??
+      error?.statusCode ??
+      error?.response?.status ??
+      null,
+    providerErrorCode:
+      bodyObject?.status ??
+      bodyObject?.code ??
+      error?.code ??
+      null,
+    providerMessage: String(
+        bodyObject?.message ??
+      error?.message ??
+      "No provider error message returned",
+    ).slice(0, 1500),
+    providerDetails,
+  };
 }
 
 /**
@@ -98,47 +104,188 @@ function extractInlineImage(response) {
  * @param {string} aspectRatio Aspect ratio such as 16:9 or 9:16.
  * @return {Promise<{imageBase64: string, mimeType: string}>} Image payload.
  */
-async function generateOneDesignImage(ai, prompt, aspectRatio) {
-  try {
-    const interaction = await ai.interactions.create({
-      model: "gemini-nano-banana-2.1",
-      input: prompt,
-      generation_config: {
-        image_config: {
-          aspect_ratio: aspectRatio,
-          image_size: "1K",
-        },
-      },
-    });
 
-    const fromInteraction = extractInteractionImage(interaction);
-    if (fromInteraction) {
-      return fromInteraction;
-    }
-  } catch (error) {
-    logger.warn("Interactions image generation failed", {
-      message: error?.message,
-    });
+/**
+ * Generate a UI mockup using Cloudflare Workers AI.
+ *
+ * @param {*} _ai Retained for compatibility with existing callers.
+ * @param {string} prompt The screen-specific image prompt.
+ * @param {string} aspectRatio The requested image aspect ratio.
+ * @return {Promise<{imageBase64: string, mimeType: string}>}
+ *   The generated image payload.
+ */
+async function generateOneDesignImage(_ai, prompt, aspectRatio) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !apiToken) {
+    throw new Error(
+        "Cloudflare Workers AI credentials are not configured.",
+    );
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image",
-    contents: prompt,
-    config: {
-      responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: {
-        aspectRatio: aspectRatio,
-        imageSize: "1K",
-      },
+  const source = String(prompt || "").trim();
+
+  const clipText = (value, maxLength) => {
+    const text = String(value || "").trim();
+
+    if (text.length <= maxLength) return text;
+    if (maxLength <= 1) return text.slice(0, maxLength);
+
+    const startLength = Math.ceil((maxLength - 1) / 2);
+    const endLength = Math.floor((maxLength - 1) / 2);
+
+    return (
+      text.slice(0, startLength) +
+      "…" +
+      text.slice(-endLength)
+    );
+  };
+
+  const readLine = (label, maxLength) => {
+    const match = source.match(
+        new RegExp("^" + label + ":\\s*(.*)$", "mi"),
+    );
+
+    return clipText(match?.[1] || "", maxLength);
+  };
+
+  const screenName =
+    source.match(
+        /^This image is page\s+(.+?)\s+of a multi-page product design\./mi,
+    )?.[1] || "Main Screen";
+
+  const screenPurpose =
+    source.match(/^Screen purpose:\s*(.*)$/mi)?.[1] ||
+    "Primary user-facing application screen";
+
+  const requirementIndex =
+    source.toLowerCase().lastIndexOf("requirements:");
+
+  const requirements =
+    requirementIndex >= 0 ?
+      source.slice(requirementIndex + "requirements:".length).trim() :
+      source;
+
+  const fixedPrompt = [
+    "Act as a principal product designer at a world-class technology company.",
+    "Create ONE premium, enterprise-grade, high-fidelity software UI screen.",
+    aspectRatio === "9:16" ?
+      "MOBILE: portrait layout, touch-friendly controls, mobile navigation. " +
+        "Fill the canvas with the app interface only. Never draw a phone." :
+      "LAPTOP: landscape desktop layout, professional top or side navigation, " +
+        "spacious content panels. Fill the canvas with the interface only. " +
+        "Never draw a laptop or device frame.",
+    "DESIGN SYSTEM: establish a distinctive identity appropriate to the product.",
+    "Use consistent spacing, typography, colors, component sizes, alignment,",
+    "border radii, icon styles, shadows, and accessible color contrast.",
+    "VISUAL HIERARCHY: clear page title, section headings, key information,",
+    "well-grouped content, whitespace, and one obvious primary action.",
+    "COMPONENTS: use realistic buttons, forms, cards, tables, filters, charts,",
+    "tabs, navigation, and status indicators only when relevant to the project.",
+    "CONTENT: use concise, believable English labels and realistic domain data.",
+    "Avoid placeholder gibberish, excessive tiny text, dense paragraphs, and clutter.",
+    "UX QUALITY: make the main workflow intuitive, accessible, and easy to scan.",
+    "CONSISTENCY: screens from the same project must share the same design language.",
+    "Follow the stated requirements. Do not invent unrelated features.",
+    "Show ONE complete, straight-on application interface with key content visible.",
+    "Never produce collages, device mockups, presentation slides, wireframes,",
+    "watermarks, decorative backgrounds, or fake hardware.",
+    `Technologies: ${readLine("Suggested technologies", 60)}`,
+    `Project: ${readLine("Project title", 100)}`,
+    `Categories: ${readLine("Categories", 100)}`,
+    `Description: ${readLine("Description", 220)}`,
+    `Screen: ${clipText(screenName, 100)}`,
+    `Purpose: ${clipText(screenPurpose, 180)}`,
+    "Essential project requirements:",
+  ].join("\n");
+
+  // FLUX.1 schnell's 2048-character limit.
+  const maxPromptLength = 2048;
+
+  // Reserve space for project requirements.
+  const requirementsBudget = Math.min(requirements.length, 850);
+  const fixedPromptBudget =
+    maxPromptLength - requirementsBudget - 1;
+
+  // Shorten the design instructions too, if necessary.
+  const promptPrefix = fixedPrompt.slice(0, fixedPromptBudget);
+
+  // Calculate the remaining space after the design instructions.
+  const remaining = Math.max(
+      0,
+      maxPromptLength - promptPrefix.length - 1,
+  );
+
+  const finalPrompt = (
+    promptPrefix + "\n" + clipText(requirements, remaining)
+  ).slice(0, maxPromptLength);
+
+  const url =
+  "https://api.cloudflare.com/client/v4/accounts/" +
+  encodeURIComponent(accountId) +
+  "/ai/run/@cf/black-forest-labs/flux-2-klein-4b";
+
+  // Use a larger output image for sharper design details.
+  const width = aspectRatio === "9:16" ? 720 : 1536;
+  const height = aspectRatio === "9:16" ? 1280 : 864;
+
+  const formData = new FormData();
+  formData.set("prompt", finalPrompt);
+  formData.set("width", String(width));
+  formData.set("height", String(height));
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
     },
+    body: formData,
   });
 
-  const fromContent = extractInlineImage(response);
-  if (fromContent) {
-    return fromContent;
+  const responseText = await response.text();
+
+  let body = null;
+  try {
+    body = JSON.parse(responseText);
+  } catch (_) {
+    // The response may contain a non-JSON provider error.
   }
 
-  throw new Error("The AI returned no generated project image.");
+  if (!response.ok || body?.success === false) {
+    logger.error("Cloudflare image generation failed", {
+      status: response.status,
+      errors: body?.errors ?? null,
+      details: responseText.slice(0, 1200),
+    });
+
+    const error = new Error(
+        `Cloudflare image generation failed (HTTP ${response.status}).`,
+    );
+
+    error.status = response.status;
+    throw error;
+  }
+
+  const imageBase64 = body?.result?.image;
+
+  if (
+    typeof imageBase64 !== "string" ||
+    imageBase64.length === 0
+  ) {
+    logger.error("Cloudflare returned no image data", {
+      responseKeys: Object.keys(body?.result ?? {}),
+    });
+
+    throw new Error(
+        "Cloudflare returned no generated image.",
+    );
+  }
+
+  return {
+    imageBase64,
+    mimeType: "image/jpeg",
+  };
 }
 
 /**
@@ -232,13 +379,6 @@ const razorpay = new Razorpay({
 |--------------------------------------------------------------------------
 */
 
-
-/**
- * Gets the project payment amount from available fields.
- *
- * @param {Object} projectData - Project data with amount fields.
- * @return {number|null} Positive amount, or null if unavailable.
- */
 function getProjectAmount(projectData) {
   const possibleAmounts = [
     projectData.budget,
@@ -258,7 +398,6 @@ function getProjectAmount(projectData) {
 
   return null;
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -1002,7 +1141,7 @@ Return the analysis in clear, readable sections.
 exports.generateProjectDesign = onCall(
     {
       maxInstances: 5,
-      timeoutSeconds: 240,
+      timeoutSeconds: 540,
     },
     async (request) => {
       if (!request.auth) {
@@ -1088,10 +1227,27 @@ exports.generateProjectDesign = onCall(
         );
       }
 
-      const joinedCategories = categories.join(", ") || "Not specified";
-      const isMobile = joinedCategories.toLowerCase().includes("mobile");
-      const aspectRatio = isMobile ? "9:16" : "16:9";
+      const joinedCategories =
+        categories.join(", ") || "Not specified";
 
+      const designPlatforms = [
+        {
+          name: "Mobile",
+          aspectRatio: "9:16",
+          instructions:
+            "Create a portrait mobile app interface filling the image. " +
+            "Use touch-friendly controls and mobile navigation. " +
+            "Show the UI only; no phone hardware, frame, or device mockup.",
+        },
+        {
+          name: "Laptop",
+          aspectRatio: "16:9",
+          instructions:
+            "Create a landscape laptop or desktop web app interface filling " +
+            "the image. Use a professional desktop layout and wider content. " +
+            "Show the UI only; no laptop hardware, frame, or device mockup.",
+        },
+      ];
       try {
         const screenResponse = await ai.models.generateContent({
           model: "gemini-3.5-flash-lite",
@@ -1125,42 +1281,78 @@ Choose the 4 most important user-facing pages for this product.
             categories,
         );
 
-        const images = await Promise.all(screens.map(async (screen) => {
-          const prompt = `
-Create one polished, realistic software UI mockup image for a single
-application page. Show a complete high-fidelity ${isMobile ?
-    "mobile app" : "web or desktop"} screen with readable layout,
-consistent branding, and production-quality visual design.
+        const images = [];
 
-This image is page ${screen.name} of a multi-page product design.
-Screen purpose: ${screen.purpose}
+        for (const screen of screens) {
+          const platformImages = await Promise.all(
+              designPlatforms.map(async (platform) => {
+                const prompt = `
+                  PROJECT: ${title.trim()}
 
-Use the project requirements below so the layout, features, labels,
-and content match this software. Show only this one full page. Do not
-create a collage, extra device frames, watermarks, or captions outside
-the UI.
+                  PROJECT CATEGORY:
+                  ${joinedCategories}
 
-Project title: ${title.trim()}
-Categories: ${joinedCategories}
-Description: ${description || "Not provided"}
-Suggested technologies: ${technologies || "Not provided"}
-Requirements:
-${requirements}
-`;
+                  PROJECT DESCRIPTION:
+                  ${description || "Not provided"}
 
-          const generated = await generateOneDesignImage(
-              ai,
-              prompt,
-              aspectRatio,
+                  TARGET PLATFORM:
+                  ${platform.name}
+
+                  SCREEN NAME:
+                  ${screen.name}
+
+                  SCREEN PURPOSE:
+                  ${screen.purpose}
+
+                  ACTUAL USER REQUIREMENTS:
+                  ${requirements}
+
+                  SUGGESTED TECHNOLOGIES:
+                  ${technologies || "Not provided"}
+
+                  DESIGN INSTRUCTIONS:
+                  First understand the exact product described above.
+                  Identify its target users, main task, and essential features.
+                  Design this specific screen exclusively for this product.
+                  Every heading, card, button, form, navigation item, and sample
+                  data must be relevant to the stated project and screen purpose.
+                  Follow the actual requirements instead of inventing generic features.
+
+                  For example, a food delivery app should show relevant food,
+                  restaurant, menu, cart, and order-tracking elements when required.
+                  A learning app should show relevant courses, lessons, and progress.
+                  A project management app should show relevant tasks and workflows.
+                  These are examples only; do not use them unless they match this project.
+
+                  PLATFORM:
+                  ${platform.instructions}
+
+                  VISUAL QUALITY:
+                  Premium enterprise UI/UX, coherent design system, refined typography,
+                  clear hierarchy, realistic content, balanced spacing, accessible contrast,
+                  and a professional implementation-ready layout.
+
+                  Generate exactly ONE screen. Fill the image with the interface itself.
+                  No device mockups, unrelated dashboards, collages, or watermarks.
+                  `;
+
+                const generated = await generateOneDesignImage(
+                    ai,
+                    prompt,
+                    platform.aspectRatio,
+                );
+
+                return {
+                  label: `${screen.name} - ${platform.name}`,
+                  purpose: `${screen.purpose} (${platform.name} layout)`,
+                  mimeType: generated.mimeType,
+                  imageBase64: generated.imageBase64,
+                };
+              }),
           );
 
-          return {
-            label: screen.name,
-            purpose: screen.purpose,
-            mimeType: generated.mimeType,
-            imageBase64: generated.imageBase64,
-          };
-        }));
+          images.push(...platformImages);
+        }
 
         if (!images.length) {
           throw new Error("The AI returned no generated project pages.");
@@ -1178,10 +1370,7 @@ ${requirements}
         };
       } catch (error) {
         logger.error("AI project design generation failed", {
-          errorName: error?.name,
-          message: error?.message,
-          status: error?.status,
-          code: error?.code,
+          ...getProviderErrorFields(error),
           userId: request.auth.uid,
         });
 
@@ -1197,18 +1386,66 @@ ${requirements}
     },
 );
 
+/* --------------------------------------------------------------------------
+ * AI PROJECT RESEARCH & PLANNING
+ * Add below the existing callable functions.
+ * Requires TAVILY_API_KEY in functions/.env.
+ * -------------------------------------------------------------------------- */
 
-function validatePlanText(value, maxLength = 10000) {
+function validatePlanText(value, maxLength = 10000, fieldName = "unknown") {
   if (value == null) return "";
+
   if (typeof value !== "string" || value.length > maxLength) {
+    logger.error("AI PLAN INPUT VALIDATION FAILED", {
+      field: fieldName,
+      actualType: typeof value,
+      actualLength: typeof value === "string" ?
+        value.length :
+        null,
+      maxLength,
+    });
+
     throw new HttpsError(
         "invalid-argument",
         "One or more project fields are invalid or too long.",
     );
   }
+
   return value.trim();
 }
 
+/**
+ * Retry Gemini requests when the service is temporarily unavailable.
+ * @param {Function} request Function that performs the Gemini request.
+ * @param {number} maxAttempts Maximum number of attempts.
+ * @return {Promise<object>} Gemini response.
+ */
+async function generateContentWithRetry(request, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await request();
+    } catch (error) {
+      const message = String(error?.message || error);
+      const retryable =
+        /503|UNAVAILABLE|high demand|429|RESOURCE_EXHAUSTED|500|INTERNAL/i
+          .test(message);
+
+      if (!retryable || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = 1000 * (2 ** (attempt - 1));
+      console.warn(
+        `Gemini request failed (attempt ${attempt}/${maxAttempts}); ` +
+        `retrying in ${delayMs}ms: ${message}`
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error("Gemini request failed after retries.");
+}
 
 function parseJsonObject(text) {
   const cleaned = String(text || "")
@@ -1229,6 +1466,25 @@ function parseJsonObject(text) {
 
     return result;
   } catch (error) {
+    // Try repairing malformed JSON returned by the AI.
+    try {
+      const repaired = JSON.parse(jsonrepair(cleaned));
+
+      if (
+        repaired &&
+        typeof repaired === "object" &&
+        !Array.isArray(repaired)
+      ) {
+        console.warn("AI JSON repaired successfully.");
+        return repaired;
+      }
+    } catch (repairError) {
+      console.error(
+          "AI JSON REPAIR ERROR:",
+          repairError.message,
+      );
+    }
+
     console.error("AI JSON PARSE ERROR:", error.message);
     console.error("AI JSON LENGTH:", cleaned.length);
 
@@ -1305,50 +1561,97 @@ function asStringArray(value, maxItems = 15) {
       .slice(0, maxItems);
 }
 
+
 async function searchProjectResearch(query) {
   const apiKey = process.env.TAVILY_API_KEY;
 
   if (!apiKey) {
     throw new HttpsError(
-        "failed-precondition",
-        "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
+      "failed-precondition",
+      "Web research is not configured. Add TAVILY_API_KEY to functions/.env.",
     );
   }
 
-  const response = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      search_depth: "advanced",
-      max_results: 5,
-      include_answer: false,
-      include_raw_content: false,
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
+  let response;
+  const maxAttempts = 3;
 
-  if (!response.ok) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: "advanced",
+          max_results: 5,
+          include_answer: false,
+          include_raw_content: false,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (
+        response.ok ||
+        (response.status !== 429 && response.status < 500)
+      ) {
+        break;
+      }
+
+      if (attempt === maxAttempts) {
+        break;
+      }
+
+      console.warn(
+        `Tavily HTTP ${response.status}; retrying ` +
+        `(${attempt}/${maxAttempts}).`,
+      );
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        logger.error("Tavily request failed after retries", {
+          attempt,
+          errorName: error.name,
+          message: error.message,
+        });
+        throw new Error(
+          "The external research service could not be reached after retries.",
+        );
+      }
+
+      console.warn(
+        `Tavily network request failed (${attempt}/${maxAttempts}): ` +
+        `${error.message}`,
+      );
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1000 * attempt),
+    );
+  }
+
+  if (!response || !response.ok) {
     logger.error("Project research search failed", {
-      status: response.status,
+      status: response?.status ?? null,
     });
-    throw new Error("The external research service failed.");
+    throw new Error("The external research service failed after retries.");
   }
 
   const data = await response.json();
 
   return (Array.isArray(data.results) ? data.results : [])
-      .map((item) => ({
-        title: String(item.title || "").slice(0, 300),
-        url: String(item.url || "").slice(0, 1500),
-        content: String(item.content || "").slice(0, 2500),
-        score: Number.isFinite(item.score) ? item.score : null,
-      }))
-      .filter((item) => item.url.startsWith("https://") ||
-                      item.url.startsWith("http://"));
+    .map((item) => ({
+      title: String(item.title || "").slice(0, 300),
+      url: String(item.url || "").slice(0, 1500),
+      content: String(item.content || "").slice(0, 2500),
+      score: Number.isFinite(item.score) ? item.score : null,
+    }))
+    .filter(
+      (item) =>
+        item.url.startsWith("https://") ||
+        item.url.startsWith("http://"),
+    );
 }
 
 exports.generateAIProjectPlan = onCall(
@@ -1367,7 +1670,7 @@ exports.generateAIProjectPlan = onCall(
 
       const data = request.data || {};
 
-      const title = validatePlanText(data.title, 150);
+      const title = validatePlanText(data.title, 150, "title");
       if (!title) {
         throw new HttpsError(
             "invalid-argument",
@@ -1383,16 +1686,29 @@ exports.generateAIProjectPlan = onCall(
           .slice(0, 10) :
       [];
 
-      const description = validatePlanText(data.description, 5000);
-      const requirements = validatePlanText(data.requirements, 8000);
-      const technologies = validatePlanText(data.technologies, 5000);
-      const analysis = validatePlanText(data.analysis, 8000);
+      const description = validatePlanText(
+          data.description, 5000, "description",
+      );
 
+      const requirements = validatePlanText(
+          data.requirements, 8000, "requirements",
+      );
+
+      const technologies = validatePlanText(
+          data.technologies, 5000, "technologies",
+      );
+
+      const analysis = validatePlanText(
+        data.analysis,
+        12000,
+        "analysis",
+      );
       // Optional: design output can be screen descriptions or text metadata.
       // Do not send large base64 image payloads in this field.
       const designInformation = validatePlanText(
           data.designInformation,
           5000,
+          "designInformation",
       );
 
       const mode = data.mode === "replan" ? "replan" : "initial";
@@ -1402,8 +1718,11 @@ exports.generateAIProjectPlan = onCall(
         data.budgetMin >= 0 ? data.budgetMin : null,
         budgetMax: Number.isFinite(data.budgetMax) &&
         data.budgetMax >= 0 ? data.budgetMax : null,
-        deadline: validatePlanText(data.deadline, 50),
-        clientFeedback: validatePlanText(data.clientFeedback, 3000),
+        deadline: validatePlanText(data.deadline, 50, "deadline"),
+
+        clientFeedback: validatePlanText(
+            data.clientFeedback, 3000, "clientFeedback",
+        ),
         previousPlan: data.previousPlan || null,
       };
 
@@ -2161,7 +2480,8 @@ ${JSON.stringify(projectInput)}
 
         const projectAnalysis = parseJsonObject(analysisText);
 
-        const queryResponse = await ai.models.generateContent({
+        const queryResponse = await generateContentWithRetry(() =>
+  ai.models.generateContent({
           model: "gemini-3.5-flash-lite",
           contents: `
 You are SkillBridge's Principal Software Research Analyst, Solution Architect, and Technical Due-Diligence Specialist.
@@ -2248,7 +2568,8 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
             temperature: 0.2,
             maxOutputTokens: 1500,
           },
-        });
+        })
+      );
 
         const queryText = extractGeneratedText(queryResponse);
 
@@ -2272,26 +2593,53 @@ OUTPUT FORMAT — EXACTLY SIX QUERIES:
         }
 
 
+       
         /*
-       * Stage 2: Perform actual external web searches.
-       */
-        const researchBatches = await Promise.all(
-            queries.map((query) => searchProjectResearch(query)),
+         * Stage 2: Perform external web searches.
+         * Preserve successful results if an individual query fails.
+         */
+        const researchResults = await Promise.allSettled(
+          queries.map((query) => searchProjectResearch(query)),
         );
 
         const uniqueSources = new Map();
-        for (const results of researchBatches) {
-          for (const result of results) {
-            if (!uniqueSources.has(result.url)) {
-              uniqueSources.set(result.url, result);
+        let failedResearchCount = 0;
+
+        for (let i = 0; i < researchResults.length; i++) {
+          const result = researchResults[i];
+
+          if (result.status === "rejected") {
+            failedResearchCount++;
+
+            logger.warn("Project research query failed", {
+              queryIndex: i,
+              errorName: result.reason?.name || "Error",
+              message: result.reason?.message || String(result.reason),
+            });
+
+            continue;
+          }
+
+          for (const source of result.value) {
+            if (!uniqueSources.has(source.url)) {
+              uniqueSources.set(source.url, source);
             }
           }
         }
 
         const sources = Array.from(uniqueSources.values()).slice(0, 30);
 
+        logger.info("Project research completed", {
+          totalQueries: queries.length,
+          failedQueries: failedResearchCount,
+          successfulQueries: queries.length - failedResearchCount,
+          uniqueSourceCount: sources.length,
+        });
+
         if (!sources.length) {
-          throw new Error("No usable web research sources were returned.");
+          throw new Error(
+            "All project research queries failed or returned no usable sources.",
+          );
         }
 
         /*
@@ -2351,8 +2699,15 @@ without considering its source and context.
 
 If sources disagree, preserve the disagreement and explain its implications.
 
+
 Never invent client decisions, approvals, research results, source URLs,
 market rates, credentials, implementation status, or test results.
+
+Do not treat estimated person-hours, team hourly rates, or staffing
+assumptions as confirmed client requirements. Do not derive task fixed
+prices from person-hours multiplied by hourly rates. Task prices must
+be estimated independently from the actual deliverables, scope,
+complexity, and disclosed assumptions, following Sections 5 and 8.
 
 ==================================================
 2. PROJECT UNDERSTANDING AND REQUIREMENTS
@@ -2384,8 +2739,17 @@ requirements.
 Do not interpret an empty field as confirmation that the corresponding
 capability is unnecessary.
 
+
 Preserve the original project intent. Do not expand scope simply because
 additional features are technically possible.
+
+Only include confirmed requirements and necessary implementation work
+in the core project estimate. Clearly separate recommended improvements
+and optional features from the core scope. Do not assign costs for
+optional features to the core estimate unless the client explicitly
+includes them or approves them. Include essential design, integration,
+testing, security, deployment, and handover work when applicable to
+the confirmed scope, without duplicating these activities across tasks.
 
 Assign stable requirement IDs such as REQ-001 where practical. Use consistent
 IDs when mapping requirements to tasks, deliverables, and risks.
@@ -2431,8 +2795,19 @@ market prices, or research findings.
 If research is empty, unavailable, stale, or inconclusive, disclose this
 limitation. Do not present unsupported assumptions as researched facts.
 
+
 Do not confuse technical documentation with evidence of local labor-market
 rates. A technically authoritative source does not establish an hourly price.
+
+Do not use market hourly rates, salary data, or freelancer rates as a
+formula for calculating task fixed prices. Research may inform pricing
+context, but each task's fixed-price range must be estimated independently
+from its deliverables, scope, complexity, integration requirements,
+testing needs, and delivery responsibility.
+
+When research does not support a reliable market-rate conclusion, clearly
+state that limitation. Do not let missing market-rate evidence prevent
+a provisional fixed-price estimate when the task scope is sufficiently clear.
 
 ==================================================
 4. ARCHITECTURE AND TECHNOLOGY DECISIONS
@@ -2463,8 +2838,17 @@ paid services, or enterprise tooling without a requirement-based justification.
 
 Do not assume a technology is mandatory merely because it is popular.
 
+
 If a technical decision depends on missing information, identify the decision
 as provisional and state what the client or development team must confirm.
+
+For each major architecture or technology decision that materially affects
+the estimate, explain its impact on implementation scope, task deliverables,
+integration complexity, testing, deployment, and ongoing operating costs
+where applicable. Include only the implementation work required by the
+recommended architecture in the core task breakdown. Do not price rejected
+alternatives or optional technologies as part of the core estimate unless
+the client explicitly selects them.
 
 ==================================================
 5. SCOPE BREAKDOWN AND DELIVERY TASKS
@@ -2497,18 +2881,21 @@ Each task must contain:
 * A clear, specific name.
 * A concise description of the work.
 * A tangible deliverable or completion outcome.
-* Responsible roles.
+* A primaryRole string identifying exactly one primary cost-owning role. Its value must exactly match the role field of an entry in the team array.
+* A roles array containing the primary role and any optional supporting roles.
 * Minimum and maximum person-hours.
-* A task fixed-price range in INR (priceMinINR and priceMaxINR), based on scope and disclosed assumptions.
+* A task fixed-price range in INR (priceMinINR and priceMaxINR), estimated independently from the task's actual deliverables, scope, complexity, integrations, testing requirements, and disclosed assumptions. Never calculate this price by multiplying person-hours by an hourly rate.
 * Dependencies on other tasks.
 * Material task-level risks.
 
 Task price ranges are client-facing fixed-price planning estimates, not hourly rates.
 Use research-backed assumptions where available. If market evidence is incomplete, disclose
 that limitation and set marketRateStatus to unverified or partially_verified rather than
-pretending the price is a researched fact. Do not use null task prices when a responsible
-provisional range can be estimated from scope, effort, complexity, delivery responsibility,
-and explicit uncertainty assumptions.
+pretending the price is a researched fact. Do not use null task prices when a responsible provisional range can
+be estimated from deliverables, scope, complexity, integration and
+testing requirements, delivery responsibility, and explicit assumptions.
+Person-hours may support feasibility checks but must not determine
+the price through hourly-rate multiplication.
 
 Task descriptions must represent actual work, not vague labels such as
 "development", "testing", or "integration" without sufficient detail.
@@ -2522,6 +2909,28 @@ and release work where applicable.
 Map major tasks to requirement IDs, assumptions, or clearly identified
 technical necessities when those references are available in the input.
 Do not invent requirement IDs and then imply that the client supplied them.
+
+ROLE-BASED TASK DECOMPOSITION AND COST ATTRIBUTION:
+
+- Assign exactly one primary responsible role to every task for cost accounting. Additional supporting roles may be listed when needed, but they must not receive the same task price again in role-wise totals.
+- When work owned by different roles represents distinct deliverables, split it into separate tasks. For example, separate frontend implementation, backend API implementation, and integration testing when these are distinct work items.
+- Do not split a task merely to create more tasks. Each task must represent meaningful, independently identifiable work.
+- Do not duplicate the same deliverable, implementation effort, testing activity, or integration work across multiple modules.
+- Every task's fixed-price range must represent that task's deliverable only.
+- Person-hours are for workload planning and feasibility checks. They must not be used as the mathematical formula for task pricing.
+- Do not multiply task prices by the number of assigned roles or team headcount.
+- Ensure every primary responsible role matches a role defined in the team plan.
+- Keep dependencies explicit and avoid counting the same shared work in multiple tasks.
+- Every task must include primaryRole, and its value must exactly match
+  the role field of one entry in the team array.
+- The primaryRole must also appear in the task's roles array.
+- For role-wise cost attribution, assign the task's entire fixed-price
+  range only to primaryRole.
+- Supporting roles may contribute effort but must not receive any
+  additional allocation of that task's price.
+- priceMinINR and priceMaxINR must be valid non-negative numbers, and priceMinINR must not exceed priceMaxINR.
+- Every task must have a meaningful fixed-price range. Do not use zero as a placeholder for an unknown price; use a responsible provisional estimate when possible.
+- If the task scope is too ambiguous to estimate responsibly, identify the missing information in clarificationQuestions rather than inventing an arbitrary price.
 
 ==================================================
 6. EFFORT ESTIMATION
@@ -2561,9 +2970,21 @@ Do not invent project totals that contradict the breakdown.
 Include meetings, reviews, onboarding, coordination, defect fixing, and
 rework in task estimates where appropriate. Explain any material exclusions.
 
+
 Do not automatically multiply every task estimate by every assigned role.
 The task's effort is the combined effort of all contributors performing it,
 unless the task is explicitly decomposed into separate role-specific tasks.
+
+The primaryRole field identifies the task's cost owner; it does not mean
+that only this role contributes person-hours. Include the combined effort
+of the primary and supporting contributors in the task's effort range,
+without counting the same work twice.
+
+Do not derive task fixed prices by multiplying estimated person-hours
+by hourly rates. Effort estimates and fixed-price estimates are separate
+outputs: effort measures the work involved, while fixed price reflects
+the task's deliverables, scope, complexity, integration, testing,
+delivery responsibility, and disclosed assumptions.
 
 ==================================================
 7. TEAM AND RESOURCE PLANNING
@@ -2592,8 +3013,20 @@ holidays, onboarding, reviews, and non-project time in calculationNotes.
 Do not assume every team member contributes at full capacity throughout
 the entire project.
 
+
 The team section is a role and staffing recommendation. Do not imply that
 specific people have been hired or are available unless the input confirms it.
+
+Every task's primaryRole must exactly match the role field of one entry
+in the team array. Include all primary cost-owning roles required by the
+task breakdown in the team plan. Supporting roles may contribute to task
+effort, but must not receive the same task's fixed price again in
+role-wise cost totals.
+
+Hourly-rate fields are optional evidence about a role's pricing context,
+not inputs to the task fixed-price calculation. If reliable rate evidence
+is unavailable, use null for the hourly-rate fields and disclose the
+limitation. Never invent hourly rates merely to calculate a project price.
 
 ==================================================
 8. COST ESTIMATION AND MARKET RATES
@@ -2622,17 +3055,31 @@ geography, seniority, date, employment model, and source reliability.
 Do not fabricate verified rates or present illustrative rates as researched
 market facts.
 
-If credible market-rate evidence is insufficient, do not invent or claim verified
-market rates. You may still provide provisional fixed-price task estimates using task scope,
-person-hour range, complexity, delivery responsibility, and explicitly disclosed assumptions.
-Mark marketRateStatus as "unverified" or "partially_verified" where appropriate.
+If credible market-rate evidence is insufficient, do not invent or claim verified market rates. Still provide realistic provisional fixed-price estimates based on each task's actual deliverables, scope, complexity, integrations, testing requirements, and delivery responsibility.
+
+IMPORTANT FIXED-PRICE RULES:
+- Never calculate a task price by multiplying person-hours by an hourly rate.
+- Person-hours are for workload planning and feasibility checks only. They must not be used as the mathematical pricing formula.
+- Estimate the fixed price of each task independently according to the actual work and deliverables involved.
+- Keep prices proportionate to the task's complexity. Do not inflate prices simply because the estimated duration is long, and do not assign arbitrary prices without considering the work required.
+- Avoid adding excessive buffers to individual tasks. Represent uncertainty through reasonable price ranges and the project contingency, which the application applies once.
+- Assign each task to exactly one primaryRole for cost attribution. Calculate each role's pre-contingency cost range by summing priceMinINR and priceMaxINR for tasks whose primaryRole matches that role. Supporting roles may contribute effort but receive no additional allocation of the same task price.
+- Calculate the pre-contingency project subtotal by summing every task's fixed-price range exactly once. Role-wise subtotals must reconcile with the project subtotal across all primary cost-owning roles.
+- Hourly-rate fields may be null when unknown. Never invent an hourly rate or use one to derive a task price.
+- Mark marketRateStatus as "unverified" or "partially_verified" when evidence is insufficient. A provisional fixed-price estimate must not be presented as a verified market quotation.
+
 
 This response schema and application validation require a numeric priceMinINR and
-priceMaxINR for every task. Provide a provisional fixed-price range based on the described
-scope, effort, complexity, delivery responsibility, and explicit assumptions even when
-market-rate evidence is incomplete; never describe such an estimate as market-verified
-unless the supplied evidence supports that claim. If scope is too ambiguous for a responsible
-range, ask a focused clarification question before generating the plan rather than emitting
+priceMaxINR for every task. Provide a provisional fixed-price range based on the
+task's actual deliverables, scope, complexity, integration and testing requirements,
+delivery responsibility, and explicit assumptions, even when market-rate evidence
+is incomplete. Person-hours may be used to assess feasibility and challenge
+unreasonable estimates, but must not be used as the formula for calculating
+fixed prices. Never describe a provisional estimate as market-verified unless
+the supplied evidence supports that claim.
+
+If scope is too ambiguous for a responsible range, ask a focused
+clarification question before generating the plan rather than emitting
 null task prices.
 
 Task prices are pre-contingency amounts. The application independently sums task prices and
@@ -2648,9 +3095,13 @@ Do not silently include taxes, hosting, AI/API usage, subscriptions,
 licenses, maintenance, app-store fees, domains, or third-party services.
 Identify them as included, excluded, or unknown where relevant.
 
+
 The contingencyPercent field is a planning assumption, not proof that
-contingency has been applied correctly. Explain its treatment in
-calculationNotes and ensure it is not applied twice.
+contingency has been applied correctly. The application is responsible for
+applying contingency exactly once to the pre-contingency task-price subtotal.
+Keep task prices and role-wise subtotals pre-contingency. Do not add
+contingency to individual task prices or role-wise subtotals. Explain the
+contingency assumption and calculation in calculationNotes.
 
 AI-generated arithmetic is untrusted until independently recalculated
 and validated by application code.
@@ -2681,8 +3132,20 @@ Delivery-phase durations must be compatible with the proposed schedule.
 Do not simply add every phase duration when phases are expected to overlap.
 Explain material parallel-work assumptions.
 
+
 Use wider timeline ranges when scope, staffing, integration, or client
 availability is uncertain.
+
+Estimate calendar duration from task dependencies, critical-path work,
+role availability, and realistic parallel execution. Do not assume that
+adding more team members automatically shortens delivery time. Account
+for onboarding, coordination, handoffs, integration, reviews, and
+testing where applicable.
+
+Ensure that the proposed timeline is compatible with the task effort
+ranges and recommended staffing. If the timeline and effort estimates
+appear inconsistent, revise the estimates or explain the assumptions
+that account for the difference.
 
 If a defensible timeline cannot be estimated, use null where supported
 by the schema. If the schema requires numeric values, revise the schema
@@ -2698,12 +3161,15 @@ constraints.
 
 Do not invent a budget, deadline, or client preference.
 
+
 For budget feasibility:
 
-* Compare the available budget with a defensible comparable cost estimate.
-* If the budget or cost estimate is unavailable, use null.
-* Do not declare the budget feasible solely because the client has not
-  provided a budget.
+* Compare the available budget with the final project estimate, including the single application-calculated contingency, and ensure the currency and cost inclusions are comparable.
+* Distinguish the pre-contingency task-price subtotal from the final estimate after contingency.
+* Consider relevant exclusions such as taxes, hosting, subscriptions, API usage, licenses, and maintenance when comparing costs.
+* If the budget or a defensible final cost estimate is unavailable, use null.
+* Do not declare the budget feasible solely because the client has not provided a budget.
+
 
 For deadline feasibility:
 
@@ -2747,8 +3213,16 @@ changes, API compatibility, credentials, and vendor lock-in where relevant.
 
 Distinguish development completion from production readiness and launch.
 
+
 Include documentation, deployment configuration, release validation,
 rollback planning, and handover where applicable.
+
+Include the implementation, security testing, remediation, and release
+activities required by the confirmed project scope in the task breakdown.
+Assign each activity to one appropriate primaryRole for cost attribution.
+Do not duplicate the same security, testing, deployment, or operational
+deliverable across multiple tasks. Distinguish one-time implementation
+costs from recurring operational expenses, and identify exclusions clearly.
 
 Do not assume that ongoing maintenance, warranty, hosting, source-code
 transfer, or unlimited support is included unless the project input confirms it.
@@ -2776,8 +3250,16 @@ Do not invent probability statistics or claim that risks have been eliminated.
 
 Separate known facts from assumptions and predictions.
 
+
 Assess effort, cost, and timeline confidence separately in calculationNotes.
 Explain why each confidence assessment is appropriate.
+
+Identify uncertainties that could materially change task scope, fixed prices,
+total project cost, or delivery timeline. Reflect uncertainty in reasonable
+task-price ranges and the project contingency, without adding arbitrary
+buffers to every task. Do not apply contingency more than once or treat
+uncertainty as justification for unsupported prices. Clearly distinguish
+provisional estimates from market-verified quotations.
 
 Use overallConfidence for the overall reliability of the plan, taking into
 account requirements completeness, research quality, estimation uncertainty,
@@ -2793,8 +3275,19 @@ the solution, scope, effort, cost, security, or timeline.
 Prioritize questions by decision impact. Avoid repeating information already
 confirmed in the supplied input.
 
+
 Identify the decisions required before a provisional estimate can become
 a more reliable estimate.
+
+Prioritize unresolved questions that could materially change the core
+scope, task deliverables, fixed-price ranges, third-party costs, or
+delivery timeline. If a responsible provisional estimate is possible,
+state the assumptions and proceed. If essential scope information is
+missing and no defensible price range can be estimated, ask a focused
+clarification question instead of inventing a price or silently expanding
+the scope. Do not block estimation solely because verified market-rate
+evidence is unavailable.
+
 
 Do not claim that the client approved scope, budget, timeline, architecture,
 terms, or commercial conditions unless the input confirms explicit approval.
@@ -2828,8 +3321,20 @@ For every distinct request in clientFeedback:
 * Re-estimate affected tasks, dependencies, testing, security, deployment,
   staffing, effort, cost, timeline, and operating costs. Do not just change
   the narrative while leaving the numbers and tasks unchanged.
+
 * Recalculate project totals from the revised task breakdown. Preserve the
   meaning of the original plan fields and use null for unsupported cost data.
+* Assign exactly one primaryRole to every task, and ensure it matches a role
+  in the revised team array. Recalculate role-wise pre-contingency costs by
+  summing only the fixed prices of tasks owned by each primaryRole.
+* Estimate revised task prices independently from deliverables, scope,
+  complexity, integration, testing, and delivery responsibility. Never
+  calculate fixed prices by multiplying person-hours by hourly rates.
+* Ensure each task's price is counted exactly once in the project subtotal.
+  Keep task prices and role-wise subtotals pre-contingency, and apply
+  contingency exactly once to the revised project subtotal.
+* Recalculate effort and timeline separately from cost, and ensure that
+  removed, added, or changed tasks are reflected consistently in all totals.
 * Add a concise, specific before/after explanation to replanningChanges.
   Mention what was added, removed, reduced, deferred, or kept unchanged.
 * If the client asks for alternatives, provide a recommended complete option
@@ -2871,8 +3376,39 @@ outside the schema.
 Do not silently convert unknown values into zero, guessed rates, or invented
 dates. Use null for unknown values where the schema permits it.
 
+
 If the required schema cannot represent an unknown value safely, identify
 that as a limitation requiring an application-schema change.
+
+Before accepting or saving the generated plan, independently validate
+the following in application code:
+- Every task contains a non-empty primaryRole matching a role in the team array.
+- The primaryRole appears in the task's roles array.
+- Every task has finite, non-negative numeric priceMinINR and priceMaxINR,
+  with priceMinINR less than or equal to priceMaxINR.
+- Every task's effort values are finite, non-negative numbers, with
+  effortHoursMin less than or equal to effortHoursMax.
+- Task prices are counted exactly once in the pre-contingency project subtotal.
+- Role-wise pre-contingency totals include each task only under its primaryRole
+  and reconcile with the project subtotal.
+- Contingency is applied exactly once by application code, not by the AI.
+- The final cost and effort totals reconcile with independently calculated
+  task-level totals.
+
+Reject or safely repair invalid generated values before persisting the plan.
+Do not silently replace invalid values with arbitrary prices or rates.
+If a value cannot be repaired responsibly, return a clear validation error
+and request clarification where necessary.
+
+* Make replanningChanges specific and traceable:
+  - Identify the affected module and task wherever possible.
+  - Describe the previous state and the revised state.
+  - Distinguish added, removed, modified, reduced, deferred, and unchanged scope.
+  - Mention budget, effort, or timeline changes only when supported by
+    the previous plan and revised plan.
+  - Do not invent previous values or report a change when the values
+    are unchanged.
+  - Keep each change concise and understandable to the client.
 
 ==================================================
 16. FINAL OUTPUT CONTRACT
@@ -2896,12 +3432,20 @@ Use:
 Ensure all strings are valid JSON strings and all numeric values are valid
 JSON numbers. Do not place explanatory text inside numeric fields.
 
+
 Ensure:
 
 * Minimum values never exceed maximum values.
 * Task estimates reconcile with project effort totals.
+* Every task has exactly one primaryRole matching a role in the team array, and primaryRole appears in the task's roles array.
+* Every task's fixed-price range is estimated independently from hourly-rate multiplication.
+* Role-wise pre-contingency costs sum the prices of tasks owned by each primaryRole, without duplicate allocation to supporting roles.
+* The project pre-contingency subtotal equals the sum of all task prices, with each task counted exactly once.
+* Final project cost equals the pre-contingency subtotal plus contingency applied exactly once by application code.
 * Cost assumptions and calculations are internally consistent.
-* Contingency is not counted more than once.
+* Task prices and role-wise subtotals remain pre-contingency.
+* Contingency is applied exactly once by application code.
+* Project effort totals equal the independently calculated task-level effort totals, without double-counting shared work.
 * Timeline and delivery phases reflect realistic dependencies.
 * Research URLs come only from supplied research results.
 * Unknown information is not represented as confirmed fact.
@@ -2938,6 +3482,7 @@ REQUIRED JSON SCHEMA:
 "name": "string",
 "description": "string",
 "deliverable": "string",
+"primaryRole": "string",
 "roles": ["string"],
 "effortHoursMin": 1,
 "effortHoursMax": 2,
@@ -3004,15 +3549,17 @@ Use JSON null when a cost or rate cannot be responsibly calculated.
 Do not place Markdown fences around the JSON.
 `;
 
-        const planResponse = await ai.models.generateContent({
-          model: "gemini-3.5-flash-lite",
-          contents: planningPrompt,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-            maxOutputTokens: 12000,
-          },
-        });
+        const planResponse = await generateContentWithRetry(() =>
+          ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents: planningPrompt,
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
+              maxOutputTokens: 12000,
+            },
+          })
+        );
 
 
         const planText = extractGeneratedText(planResponse);
@@ -3098,10 +3645,14 @@ Do not place Markdown fences around the JSON.
           for (const task of module.tasks) {
             if (
               !task ||
-        !task.name ||
-        !validRange(task.effortHoursMin, task.effortHoursMax) ||
-        !validRange(task.priceMinINR, task.priceMaxINR) ||
-        task.priceMaxINR <= 0
+              !task.name ||
+              !validRange(task.effortHoursMin, task.effortHoursMax) ||
+              !validRange(task.priceMinINR, task.priceMaxINR) ||
+              task.priceMaxINR <= 0 ||
+              typeof task.primaryRole !== "string" ||
+              !task.primaryRole.trim() ||
+              !Array.isArray(task.roles) ||
+              !task.roles.includes(task.primaryRole)
             ) {
               throw new HttpsError(
                   "internal",
@@ -3219,6 +3770,46 @@ Do not place Markdown fences around the JSON.
           }
         }
 
+        // Validate task primary roles against the defined team.
+        const teamRoles = new Set(
+          plan.team.map((member) => member.role.trim()),
+        );
+
+        for (const module of plan.modules) {
+          for (const task of module.tasks) {
+            if (!teamRoles.has(task.primaryRole.trim())) {
+              throw new HttpsError(
+                "internal",
+                `Task "${task.name}" has a primary role not defined in the team.`,
+              );
+            }
+          }
+        }
+
+        // Calculate role-wise fixed-price totals from task prices.
+        const roleWiseCosts = {};
+
+        for (const member of plan.team) {
+          roleWiseCosts[member.role] = {
+            costMinINR: 0,
+            costMaxINR: 0,
+          };
+        }
+
+        for (const module of plan.modules) {
+          for (const task of module.tasks) {
+            roleWiseCosts[task.primaryRole].costMinINR +=
+              task.priceMinINR;
+            roleWiseCosts[task.primaryRole].costMaxINR +=
+              task.priceMaxINR;
+          }
+        }
+
+        logger.info("Role-wise task costs calculated", {
+          planId: planRef.id,
+          roleWiseCosts,
+        });
+
         await planRef.set({
           planId: planRef.id,
           ownerUid: request.auth.uid,
@@ -3270,86 +3861,41 @@ Do not place Markdown fences around the JSON.
     },
 );
 
-/**
- * Notify developers when a new project document is created.
- * Uses deterministic notification IDs to prevent duplicates on retries.
- */
-exports.notifyDevelopersOnProjectCreated = onDocumentCreated(
-    "projects/{projectId}",
-    async (event) => {
-      const snapshot = event.data;
+exports.ensureSupabaseRole = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in.",
+    );
+  }
 
-      if (!snapshot) {
-        return;
-      }
+  const uid = request.auth.uid;
+  const auth = getAuth();
 
-      const project = snapshot.data();
-      const projectId = event.params.projectId;
-      const status = String(project.status || "").toLowerCase();
+  try {
+    const user = await auth.getUser(uid);
+    const existingClaims = user.customClaims || {};
 
-      // Support the two project statuses used by the app.
-      if (!["open", "requirement"].includes(status)) {
-        logger.info("Project notification skipped due to status", {
-          projectId,
-          status,
-        });
-        return;
-      }
-
-      const title = String(project.title || "New project").trim();
-      const developersSnapshot = await db
-          .collection("users")
-          .where("role", "==", "developer")
-          .get();
-
-      if (developersSnapshot.empty) {
-        logger.info("No developers found for project notification", {
-          projectId,
-        });
-        return;
-      }
-
-      let createdCount = 0;
-
-      for (const developer of developersSnapshot.docs) {
-      // Do not notify the project owner if they also have a developer role.
-        if (developer.id === project.clientId) {
-          continue;
-        }
-
-        const notificationRef = db
-            .collection("notifications")
-            .doc(`${projectId}_${developer.id}`);
-
-        const wasCreated = await db.runTransaction(async (transaction) => {
-          const existing = await transaction.get(notificationRef);
-
-          if (existing.exists) {
-            return false;
-          }
-
-          transaction.create(notificationRef, {
-            developerId: developer.id,
-            title: "New project available",
-            body: `A new project "${title}" is available on SkillBridge.`,
-            type: "project",
-            isRead: false,
-            projectId,
-            createdAt: FieldValue.serverTimestamp(),
-          });
-
-          return true;
-        });
-
-        if (wasCreated) {
-          createdCount++;
-        }
-      }
-
-      logger.info("Developer project notifications processed", {
-        projectId,
-        createdCount,
+    if (existingClaims.role !== "authenticated") {
+      await auth.setCustomUserClaims(uid, {
+        ...existingClaims,
+        role: "authenticated",
       });
-    },
+    }
 
-);
+    return {
+      success: true,
+      message: "Supabase role configured.",
+    };
+  } catch (error) {
+    logger.error("Failed to configure Supabase role", {
+      uid,
+      error: error.message,
+    });
+
+    throw new HttpsError(
+      "internal",
+      "Could not configure Supabase authentication.",
+    );
+  }
+});

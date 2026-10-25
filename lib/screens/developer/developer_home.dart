@@ -1,9 +1,9 @@
-
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import 'developer_profile.dart';
 import 'my_applications.dart';
 import 'discover_projects.dart';
@@ -15,6 +15,7 @@ import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
 import 'team_messages_screen.dart';
+
 /// SkillBridge Developer Dashboard
 ///
 /// This screen is intentionally self-contained and uses only Flutter + the
@@ -45,8 +46,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
   bool _showProfileReminder = true;
   bool _notificationsOpen = false;
   bool _messagesOpen = false;
-  final NotificationService _notificationService =
-    NotificationService();
+  final NotificationService _notificationService = NotificationService();
 
   late final AnimationController _pageController;
   late final AnimationController _ambientController;
@@ -62,14 +62,12 @@ class _DeveloperHomeState extends State<DeveloperHome>
     _NavItem(Icons.folder_copy_rounded, 'Portfolio'),
   ];
 
-void _openTeamInvitations() {
-  Navigator.push(
-    context,
-    MaterialPageRoute<void>(
-      builder: (_) => const TeamInvitationsScreen(),
-    ),
-  );
-}
+  void _openTeamInvitations() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const TeamInvitationsScreen()),
+    );
+  }
 
   @override
   void initState() {
@@ -95,68 +93,55 @@ void _openTeamInvitations() {
     await FirebaseAuth.instance.signOut();
   }
 
-void _selectNav(int index) {
-  // Discover Projects
-  if (index == 1) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const DiscoverProjects(),
-      ),
-    );
-    return;
+  void _selectNav(int index) {
+    // Discover Projects
+    if (index == 1) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DiscoverProjects()),
+      );
+      return;
+    }
+
+    // My Applications
+    if (index == 2) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MyApplications()),
+      );
+      return;
+    }
+
+    // Active Projects
+    if (index == 3) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ActiveProjects()),
+      );
+      return;
+    }
+
+    // Teams
+    if (index == 4) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const Teams()));
+      return;
+    }
+
+    // My Profile
+    if (index == 6) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DeveloperProfile()),
+      );
+      return;
+    }
+
+    setState(() {
+      _selectedNav = index;
+      _notificationsOpen = false;
+      _messagesOpen = false;
+    });
   }
-
-  // My Applications
-  if (index == 2) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const MyApplications(),
-      ),
-    );
-    return;
-  }
-
-  // Active Projects
-  if (index == 3) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const ActiveProjects(),
-      ),
-    );
-    return;
-  }
-
-  // Teams
-if (index == 4) {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const Teams(),
-    ),
-  );
-  return;
-}
-
-  // My Profile
-  if (index == 6) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const DeveloperProfile(),
-      ),
-    );
-    return;
-  }
-
-  setState(() {
-    _selectedNav = index;
-    _notificationsOpen = false;
-    _messagesOpen = false;
-  });
-}
 
   void _showFeatureSnack(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -580,48 +565,48 @@ if (index == 4) {
                 ),
               ),
             const SizedBox(width: 8),
-           StreamBuilder<int>(
-  stream: _notificationService.watchUnreadCount(),
-  builder: (context, snapshot) {
-    final unreadCount = snapshot.data ?? 0;
+            StreamBuilder<int>(
+              stream: _notificationService.watchUnreadCount(),
+              builder: (context, snapshot) {
+                final unreadCount = snapshot.data ?? 0;
 
-    return _HeaderIcon(
-      icon: Icons.notifications_none_rounded,
-      badge: unreadCount,
-      selected: _notificationsOpen,
-     onTap: () {
-  setState(() {
-    _notificationsOpen = false;
-    _messagesOpen = false;
-  });
+                return _HeaderIcon(
+                  icon: Icons.notifications_none_rounded,
+                  badge: unreadCount,
+                  selected: _notificationsOpen,
+                  onTap: () {
+                    setState(() {
+                      _notificationsOpen = false;
+                      _messagesOpen = false;
+                    });
 
-  Navigator.push(
-    context,
-    MaterialPageRoute<void>(
-      builder: (_) => const NotificationsScreen(),
-    ),
-  );
-},
-    );
-  },
-),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
             _HeaderIcon(
               icon: Icons.chat_bubble_outline_rounded,
               badge: 2,
               selected: _messagesOpen,
-     onTap: () {
-  setState(() {
-    _messagesOpen = false;
-    _notificationsOpen = false;
-  });
+              onTap: () {
+                setState(() {
+                  _messagesOpen = false;
+                  _notificationsOpen = false;
+                });
 
-  Navigator.push(
-    context,
-    MaterialPageRoute<void>(
-      builder: (_) => const TeamMessagesScreen(),
-    ),
-  );
-},
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TeamMessagesScreen(),
+                  ),
+                );
+              },
             ),
             const SizedBox(width: 4),
             PopupMenuButton<String>(
@@ -1245,9 +1230,7 @@ if (index == 4) {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const Teams(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const Teams()),
                   );
                 },
                 child: const Text('Invite'),
@@ -1279,9 +1262,7 @@ if (index == 4) {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const Teams(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const Teams()),
                   );
                 },
                 child: const Text('Invite'),
@@ -1501,177 +1482,151 @@ if (index == 4) {
     );
   }
 
- Widget _notificationPanel() {
-  return StreamBuilder<List<NotificationModel>>(
-    stream: _notificationService.watchMyNotifications(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return _FloatingPanel(
-          title: 'Notifications',
-          action: 'Mark all read',
-          onAction: null,
-          children: const [
-            Padding(
-              padding: EdgeInsets.all(20),
-              child: Text(
-                'Unable to load notifications.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _AppColors.muted,
+  Widget _notificationPanel() {
+    return StreamBuilder<List<NotificationModel>>(
+      stream: _notificationService.watchMyNotifications(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _FloatingPanel(
+            title: 'Notifications',
+            action: 'Mark all read',
+            onAction: null,
+            children: const [
+              Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Unable to load notifications.',
+                  style: TextStyle(fontSize: 12, color: _AppColors.muted),
                 ),
               ),
-            ),
-          ],
-        );
-      }
+            ],
+          );
+        }
 
-      if (snapshot.connectionState ==
-          ConnectionState.waiting) {
-        return _FloatingPanel(
-          title: 'Notifications',
-          action: 'Mark all read',
-          onAction: null,
-          children: const [
-            Padding(
-              padding: EdgeInsets.all(20),
-              child: Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _FloatingPanel(
+            title: 'Notifications',
+            action: 'Mark all read',
+            onAction: null,
+            children: const [
+              Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 ),
               ),
-            ),
-          ],
-        );
-      }
+            ],
+          );
+        }
 
-      final notifications =
-          snapshot.data ?? <NotificationModel>[];
+        final notifications = snapshot.data ?? <NotificationModel>[];
 
-      return _FloatingPanel(
-        title: 'Notifications',
-        action: 'Mark all read',
-        onAction: notifications.any(
-          (notification) => notification.isUnread,
-        )
-            ? _markAllNotificationsRead
-            : null,
-        children: [
-          if (notifications.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(22),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.notifications_none_rounded,
-                    size: 32,
-                    color: _AppColors.muted,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'No notifications yet',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'New updates will appear here.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 10,
+        return _FloatingPanel(
+          title: 'Notifications',
+          action: 'Mark all read',
+          onAction: notifications.any((notification) => notification.isUnread)
+              ? _markAllNotificationsRead
+              : null,
+          children: [
+            if (notifications.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(22),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.notifications_none_rounded,
+                      size: 32,
                       color: _AppColors.muted,
                     ),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...notifications.take(8).map(_buildNotificationItem),
-          const Divider(height: 12),
-          Align(
-            alignment: Alignment.center,
-            child: TextButton.icon(
-              onPressed: _openAllNotifications,
-              icon: const Icon(Icons.open_in_new_rounded, size: 15),
-              label: const Text('View all notifications'),
-              style: TextButton.styleFrom(
-                foregroundColor: _AppColors.primary,
-                visualDensity: VisualDensity.compact,
+                    SizedBox(height: 8),
+                    Text(
+                      'No notifications yet',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'New updates will appear here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: _AppColors.muted),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...notifications.take(8).map(_buildNotificationItem),
+            const Divider(height: 12),
+            Align(
+              alignment: Alignment.center,
+              child: TextButton.icon(
+                onPressed: _openAllNotifications,
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: const Text('View all notifications'),
+                style: TextButton.styleFrom(
+                  foregroundColor: _AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        );
+      },
+    );
+  }
+
+  void _openAllNotifications() {
+    setState(() {
+      _notificationsOpen = false;
+      _messagesOpen = false;
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
+  Future<void> _markNotificationRead(NotificationModel notification) async {
+    if (notification.isRead) {
+      return;
+    }
+
+    try {
+      await _notificationService.markAsRead(notification.id);
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update notification: $error')),
       );
-    },
-  );
-}
-void _openAllNotifications() {
-  setState(() {
-    _notificationsOpen = false;
-    _messagesOpen = false;
-  });
-
-  Navigator.push(
-    context,
-    MaterialPageRoute<void>(
-      builder: (_) => const NotificationsScreen(),
-    ),
-  );
-}
-
-Future<void> _markNotificationRead(
-  NotificationModel notification,
-) async {
-  if (notification.isRead) {
-    return;
+    }
   }
 
-  try {
-    await _notificationService.markAsRead(
-      notification.id,
-    );
-  } catch (error) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Could not update notification: $error',
-        ),
-      ),
+  Widget _buildNotificationItem(NotificationModel notification) {
+    return _NotificationItem(
+      notification: notification,
+      onTap: () => _markNotificationRead(notification),
     );
   }
-}
-Widget _buildNotificationItem(
-  NotificationModel notification,
-) {
-  return _NotificationItem(
-    notification: notification,
-    onTap: () => _markNotificationRead(
-      notification,
-    ),
-  );
-}
-Future<void> _markAllNotificationsRead() async {
-  try {
-    await _notificationService.markAllAsRead();
-  } catch (error) {
-    if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Could not mark notifications as read: $error',
-        ),
-      ),
-    );
+  Future<void> _markAllNotificationsRead() async {
+    try {
+      await _notificationService.markAllAsRead();
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not mark notifications as read: $error')),
+      );
+    }
   }
-}
+
   Widget _messagePanel() {
     return _FloatingPanel(
       title: 'Messages',
@@ -3096,15 +3051,15 @@ class _QuickActionCard extends StatelessWidget {
 class _FloatingPanel extends StatelessWidget {
   final String title;
   final String action;
-final List<Widget> children;
-final VoidCallback? onAction;
+  final List<Widget> children;
+  final VoidCallback? onAction;
 
-const _FloatingPanel({
-  required this.title,
-  required this.action,
-  required this.children,
-  this.onAction,
-});
+  const _FloatingPanel({
+    required this.title,
+    required this.action,
+    required this.children,
+    this.onAction,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3135,17 +3090,17 @@ const _FloatingPanel({
               ),
               const Spacer(),
               TextButton(
-  onPressed: onAction,
-  child: Text(
-    action,
-    style: TextStyle(
-      fontSize: 10,
-      color: onAction == null
-          ? _AppColors.muted
-          : _AppColors.primary,
-    ),
-  ),
-),
+                onPressed: onAction,
+                child: Text(
+                  action,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: onAction == null
+                        ? _AppColors.muted
+                        : _AppColors.primary,
+                  ),
+                ),
+              ),
             ],
           ),
           const Divider(height: 1),
@@ -3160,10 +3115,7 @@ class _NotificationItem extends StatelessWidget {
   final NotificationModel notification;
   final VoidCallback onTap;
 
-  const _NotificationItem({
-    required this.notification,
-    required this.onTap,
-  });
+  const _NotificationItem({required this.notification, required this.onTap});
 
   IconData _iconForType(String type) {
     switch (type.trim().toLowerCase()) {
@@ -3201,8 +3153,7 @@ class _NotificationItem extends StatelessWidget {
       return '';
     }
 
-    final difference =
-        DateTime.now().difference(dateTime);
+    final difference = DateTime.now().difference(dateTime);
 
     if (difference.inMinutes < 1) {
       return 'now';
@@ -3231,27 +3182,20 @@ class _NotificationItem extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          vertical: 7,
-          horizontal: 4,
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
         decoration: BoxDecoration(
-          color: unread
-              ? const Color(0xFFF8FAFF)
-              : Colors.transparent,
+          color: unread ? const Color(0xFFF8FAFF) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               width: 38,
               height: 38,
               decoration: BoxDecoration(
                 color: const Color(0xFFEFF4FF),
-                borderRadius:
-                    BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(
                 _iconForType(notification.type),
@@ -3262,8 +3206,7 @@ class _NotificationItem extends StatelessWidget {
             const SizedBox(width: 9),
             Expanded(
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
@@ -3271,8 +3214,7 @@ class _NotificationItem extends StatelessWidget {
                         child: Text(
                           notification.title,
                           maxLines: 1,
-                          overflow:
-                              TextOverflow.ellipsis,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight: unread
                                 ? FontWeight.w900
@@ -3285,14 +3227,9 @@ class _NotificationItem extends StatelessWidget {
                         Container(
                           width: 6,
                           height: 6,
-                          margin:
-                              const EdgeInsets.only(
-                            left: 5,
-                          ),
-                          decoration:
-                              const BoxDecoration(
-                            color:
-                                _AppColors.primary,
+                          margin: const EdgeInsets.only(left: 5),
+                          decoration: const BoxDecoration(
+                            color: _AppColors.primary,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -3302,8 +3239,7 @@ class _NotificationItem extends StatelessWidget {
                   Text(
                     notification.body,
                     maxLines: 2,
-                    overflow:
-                        TextOverflow.ellipsis,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 10,
                       height: 1.35,

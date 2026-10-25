@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 
-import '../../services/notification_service.dart';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../localization/app_localizations.dart';
 import 'ai_project_assistant_screen.dart';
+import 'project_budget_details_screen.dart';
 
 class CreateProjectScreen extends StatefulWidget {
   const CreateProjectScreen({super.key});
@@ -24,7 +23,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _descriptionController = TextEditingController();
   final _requirementsController = TextEditingController();
 
-  List<String> _selectedCategories = [];
+  final List<String> _selectedCategories = [];
   bool _isLoading = false;
   XFile? _designImage;
   Uint8List? _designImageBytes;
@@ -210,30 +209,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       await projectRef.set(projectData);
 
-      // Notify all developers about the new project.
-      try {
-        final developersSnapshot = await FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'developer')
-            .get();
-
-        final notificationService = NotificationService();
-
-        for (final developer in developersSnapshot.docs) {
-          await notificationService.createNotification(
-            developerId: developer.id,
-            title: 'New project available',
-            body:
-                'A new project "${_titleController.text.trim()}" '
-                'has been published.',
-            type: 'project',
-            projectId: projectRef.id,
-          );
-        }
-      } catch (e) {
-        debugPrint('Could not notify developers: $e');
-      }
-
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -347,8 +322,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       return;
     }
 
-    if (target == 'design' &&
-        _requirementsController.text.trim().isEmpty) {
+    if (target == 'design' && _requirementsController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -369,6 +343,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           description: _descriptionController.text.trim(),
           requirements: _requirementsController.text.trim(),
           initialTarget: target,
+          initialDesignImageBytes: _designImageBytes,
         ),
       ),
     );
@@ -382,6 +357,52 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       _requirementsController.text =
           result['requirements'] ?? _requirementsController.text;
     });
+  }
+
+  Future<void> _continueWithoutAI() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (_selectedCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one project category.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to continue.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectBudgetDetailsScreen(
+          title: _titleController.text.trim(),
+          categories: List<String>.from(_selectedCategories),
+          description: _descriptionController.text.trim(),
+          requirements: _requirementsController.text.trim(),
+        ),
+      ),
+    );
+
+    if (!mounted || result != true) {
+      return;
+    }
+
+    Navigator.pop(context);
   }
 
   Widget _aiGenerateButton(String target) {
@@ -420,18 +441,104 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: const Text(
-          'Get Project Estimate',
-          style: TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.add_business_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 21,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Get Project Estimate',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'CREATE YOUR PROJECT',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -994,36 +1101,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                               ),
 
                               const SizedBox(height: 14),
-
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _openAIAssistant('requirements'),
-                                  icon: const Icon(
-                                    Icons.auto_awesome_rounded,
-                                    size: 20,
-                                  ),
-                                  label: const Text(
-                                    'Generate with AI',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF4F46E5),
-                                    backgroundColor: const Color(0xFFF5F3FF),
-                                    side: const BorderSide(
-                                      color: Color(0xFFE0E7FF),
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),
@@ -1033,7 +1110,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                         SizedBox(
                           height: 55,
                           child: FilledButton(
-                            onPressed: _isLoading ? null : _createProject,
+                            onPressed: _isLoading
+                                ? null
+                                : () => _openAIAssistant('requirements'),
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFF4F46E5),
                               disabledBackgroundColor: const Color(0xFFA5B4FC),
@@ -1080,7 +1159,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                         ),
                                         SizedBox(width: 9),
                                         Text(
-                                          'Get Project Estimate',
+                                          'Generate with AI',
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w800,
@@ -1089,6 +1168,47 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                                       ],
                                     ),
                             ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        SizedBox(
+                          width: double.infinity,
+                          height: 55,
+                          child: OutlinedButton.icon(
+                            onPressed: _isLoading ? null : _continueWithoutAI,
+                            icon: const Icon(Icons.edit_note_rounded, size: 22),
+                            label: const Text(
+                              'Continue Without AI',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF4F46E5),
+                              side: const BorderSide(
+                                color: Color(0xFF818CF8),
+                                width: 1.4,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        const Text(
+                          'Prefer manual setup? Continue without AI and enter your '
+                          'project budget, timeline, and other details.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.5,
+                            color: Color(0xFF98A2B3),
                           ),
                         ),
 

@@ -16,8 +16,7 @@ class _MyApplicationsState extends State<MyApplications> {
   final ApplicationService _applicationService = ApplicationService();
   final ProjectService _projectService = ProjectService();
 
-  final TextEditingController _searchController =
-      TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
 
   String _selectedStatus = 'All';
   String _searchQuery = '';
@@ -34,7 +33,8 @@ class _MyApplicationsState extends State<MyApplications> {
     final query = _searchQuery.trim().toLowerCase();
 
     return applications.where((application) {
-      final statusMatches = _selectedStatus == 'All' ||
+      final statusMatches =
+          _selectedStatus == 'All' ||
           application.status.toLowerCase() == _selectedStatus.toLowerCase();
 
       if (!statusMatches) {
@@ -130,16 +130,10 @@ class _MyApplicationsState extends State<MyApplications> {
     }
   }
 
-  Future<void> _withdrawApplication(
-    ApplicationModel application,
-  ) async {
+  Future<void> _withdrawApplication(ApplicationModel application) async {
     if (!application.canWithdraw) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'This application cannot be withdrawn.',
-          ),
-        ),
+        const SnackBar(content: Text('This application cannot be withdrawn.')),
       );
       return;
     }
@@ -175,20 +169,14 @@ class _MyApplicationsState extends State<MyApplications> {
     }
 
     try {
-      await _applicationService.withdrawApplication(
-        application.id,
-      );
+      await _applicationService.withdrawApplication(application.id);
 
       if (!mounted) {
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Application withdrawn successfully.',
-          ),
-        ),
+        const SnackBar(content: Text('Application withdrawn successfully.')),
       );
     } catch (e) {
       if (!mounted) {
@@ -196,11 +184,7 @@ class _MyApplicationsState extends State<MyApplications> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Unable to withdraw application: $e',
-          ),
-        ),
+        SnackBar(content: Text('Unable to withdraw application: $e')),
       );
     }
   }
@@ -214,22 +198,17 @@ class _MyApplicationsState extends State<MyApplications> {
           stream: _applicationService.watchMyApplications(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return _buildErrorState(
-                snapshot.error.toString(),
-              );
+              return _buildErrorState(snapshot.error.toString());
             }
 
-            if (snapshot.connectionState ==
-                    ConnectionState.waiting &&
+            if (snapshot.connectionState == ConnectionState.waiting &&
                 !snapshot.hasData) {
               return _buildLoadingState();
             }
 
-            final applications =
-                snapshot.data ?? <ApplicationModel>[];
+            final applications = snapshot.data ?? <ApplicationModel>[];
 
-            final filteredApplications =
-                _filterApplications(applications);
+            final filteredApplications = _filterApplications(applications);
 
             return RefreshIndicator(
               onRefresh: () async {
@@ -240,14 +219,8 @@ class _MyApplicationsState extends State<MyApplications> {
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: _buildHeader(
-                      applications.length,
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: _buildFilters(),
-                  ),
+                  SliverToBoxAdapter(child: _buildHeader(applications.length)),
+                  SliverToBoxAdapter(child: _buildFilters()),
                   if (filteredApplications.isEmpty)
                     SliverFillRemaining(
                       hasScrollBody: false,
@@ -264,46 +237,28 @@ class _MyApplicationsState extends State<MyApplications> {
                         32,
                       ),
                       sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final application =
-                                filteredApplications[index];
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final application = filteredApplications[index];
 
-                            return Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: 16),
-                              child: _ApplicationCard(
-                                application: application,
-                                projectLoader: () {
-                                  return _getProject(
-                                    application.projectId,
-                                  );
-                                },
-                                statusColor: _statusColor(
-                                  application.status,
-                                ),
-                                statusLabel: _statusLabel(
-                                  application.status,
-                                ),
-                                statusIcon: _statusIcon(
-                                  application.status,
-                                ),
-                                formattedDate: _formatDate(
-                                  application.createdAt,
-                                ),
-                                onWithdraw: application.canWithdraw
-                                    ? () {
-                                        _withdrawApplication(
-                                          application,
-                                        );
-                                      }
-                                    : null,
-                              ),
-                            );
-                          },
-                          childCount:
-                              filteredApplications.length,
-                        ),
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: _ApplicationCard(
+                              application: application,
+                              projectLoader: () {
+                                return _getProject(application.projectId);
+                              },
+                              statusColor: _statusColor(application.status),
+                              statusLabel: _statusLabel(application.status),
+                              statusIcon: _statusIcon(application.status),
+                              formattedDate: _formatDate(application.createdAt),
+                              onWithdraw: application.canWithdraw
+                                  ? () {
+                                      _withdrawApplication(application);
+                                    }
+                                  : null,
+                            ),
+                          );
+                        }, childCount: filteredApplications.length),
                       ),
                     ),
                 ],
@@ -336,9 +291,7 @@ class _MyApplicationsState extends State<MyApplications> {
                 onPressed: () {
                   Navigator.of(context).maybePop();
                 },
-                icon: const Icon(
-                  Icons.arrow_back_rounded,
-                ),
+                icon: const Icon(Icons.arrow_back_rounded),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -373,9 +326,7 @@ class _MyApplicationsState extends State<MyApplications> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: const Color(0xFFE5E7EB),
-              ),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
             ),
             child: Row(
               children: [
@@ -394,8 +345,7 @@ class _MyApplicationsState extends State<MyApplications> {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
                         'Applications',
@@ -416,10 +366,7 @@ class _MyApplicationsState extends State<MyApplications> {
                     ],
                   ),
                 ),
-                const Icon(
-                  Icons.trending_up_rounded,
-                  color: Color(0xFF16A34A),
-                ),
+                const Icon(Icons.trending_up_rounded, color: Color(0xFF16A34A)),
               ],
             ),
           ),
@@ -454,14 +401,9 @@ class _MyApplicationsState extends State<MyApplications> {
 
           return Row(
             children: [
-              Expanded(
-                child: _buildSearchField(),
-              ),
+              Expanded(child: _buildSearchField()),
               const SizedBox(width: 12),
-              SizedBox(
-                width: 190,
-                child: _buildStatusDropdown(),
-              ),
+              SizedBox(width: 190, child: _buildStatusDropdown()),
             ],
           );
         },
@@ -479,9 +421,7 @@ class _MyApplicationsState extends State<MyApplications> {
       },
       decoration: InputDecoration(
         hintText: 'Search applications...',
-        prefixIcon: const Icon(
-          Icons.search_rounded,
-        ),
+        prefixIcon: const Icon(Icons.search_rounded),
         suffixIcon: _searchQuery.isNotEmpty
             ? IconButton(
                 onPressed: () {
@@ -491,31 +431,22 @@ class _MyApplicationsState extends State<MyApplications> {
                     _searchQuery = '';
                   });
                 },
-                icon: const Icon(
-                  Icons.clear_rounded,
-                ),
+                icon: const Icon(Icons.clear_rounded),
               )
             : null,
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Color(0xFFE5E7EB),
-          ),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Color(0xFFE5E7EB),
-          ),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Color(0xFF4F46E5),
-            width: 1.5,
-          ),
+          borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 1.5),
         ),
       ),
     );
@@ -527,47 +458,23 @@ class _MyApplicationsState extends State<MyApplications> {
       decoration: InputDecoration(
         filled: true,
         fillColor: Colors.white,
-        prefixIcon: const Icon(
-          Icons.filter_list_rounded,
-        ),
+        prefixIcon: const Icon(Icons.filter_list_rounded),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Color(0xFFE5E7EB),
-          ),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Color(0xFFE5E7EB),
-          ),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
         ),
       ),
       items: const [
-        DropdownMenuItem(
-          value: 'All',
-          child: Text('All Status'),
-        ),
-        DropdownMenuItem(
-          value: 'pending',
-          child: Text('Pending'),
-        ),
-        DropdownMenuItem(
-          value: 'shortlisted',
-          child: Text('Shortlisted'),
-        ),
-        DropdownMenuItem(
-          value: 'accepted',
-          child: Text('Accepted'),
-        ),
-        DropdownMenuItem(
-          value: 'rejected',
-          child: Text('Rejected'),
-        ),
-        DropdownMenuItem(
-          value: 'withdrawn',
-          child: Text('Withdrawn'),
-        ),
+        DropdownMenuItem(value: 'All', child: Text('All Status')),
+        DropdownMenuItem(value: 'pending', child: Text('Pending')),
+        DropdownMenuItem(value: 'shortlisted', child: Text('Shortlisted')),
+        DropdownMenuItem(value: 'accepted', child: Text('Accepted')),
+        DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+        DropdownMenuItem(value: 'withdrawn', child: Text('Withdrawn')),
       ],
       onChanged: (value) {
         if (value == null) {
@@ -583,9 +490,7 @@ class _MyApplicationsState extends State<MyApplications> {
 
   Widget _buildLoadingState() {
     return const Center(
-      child: CircularProgressIndicator(
-        color: Color(0xFF4F46E5),
-      ),
+      child: CircularProgressIndicator(color: Color(0xFF4F46E5)),
     );
   }
 
@@ -604,18 +509,13 @@ class _MyApplicationsState extends State<MyApplications> {
             const SizedBox(height: 14),
             const Text(
               'Unable to load applications',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             Text(
               error,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF6B7280),
-              ),
+              style: const TextStyle(color: Color(0xFF6B7280)),
             ),
           ],
         ),
@@ -623,9 +523,7 @@ class _MyApplicationsState extends State<MyApplications> {
     );
   }
 
-  Widget _buildEmptyState({
-    required bool hasApplications,
-  }) {
+  Widget _buildEmptyState({required bool hasApplications}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -662,10 +560,7 @@ class _MyApplicationsState extends State<MyApplications> {
                   ? 'Try changing your search or status filter.'
                   : 'Applications you submit will appear here.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF6B7280),
-                height: 1.5,
-              ),
+              style: const TextStyle(color: Color(0xFF6B7280), height: 1.5),
             ),
           ],
         ),
@@ -704,15 +599,14 @@ class _ApplicationCard extends StatelessWidget {
       builder: (context, snapshot) {
         final project = snapshot.data;
 
-        final title = project?.title ??
-            'Project ${application.projectId}';
+        final title = project?.title ?? 'Project ${application.projectId}';
 
         final skills = project?.skills ?? <String>[];
 
         final budget = project != null
             ? project.hasBudgetRange
-                ? '₹${project.effectiveBudgetMin.toStringAsFixed(0)} - ₹${project.effectiveBudgetMax.toStringAsFixed(0)}'
-                : _budget(project.effectiveBudgetMin)
+                  ? '₹${project.effectiveBudgetMin.toStringAsFixed(0)} - ₹${project.effectiveBudgetMax.toStringAsFixed(0)}'
+                  : _budget(project.effectiveBudgetMin)
             : 'Budget unavailable';
 
         final compact = MediaQuery.sizeOf(context).width < 600;
@@ -722,9 +616,7 @@ class _ApplicationCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFFE5E7EB),
-            ),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: const [
               BoxShadow(
                 blurRadius: 20,
@@ -734,20 +626,17 @@ class _ApplicationCard extends StatelessWidget {
             ],
           ),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
                       color: const Color(0xFFEEF2FF),
-                      borderRadius:
-                          BorderRadius.circular(15),
+                      borderRadius: BorderRadius.circular(15),
                     ),
                     child: const Icon(
                       Icons.work_outline_rounded,
@@ -757,8 +646,7 @@ class _ApplicationCard extends StatelessWidget {
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           title,
@@ -785,20 +673,13 @@ class _ApplicationCard extends StatelessWidget {
                       vertical: 7,
                     ),
                     decoration: BoxDecoration(
-                      color: statusColor.withValues(
-                        alpha: 0.10,
-                      ),
-                      borderRadius:
-                          BorderRadius.circular(20),
+                      color: statusColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          statusIcon,
-                          size: 16,
-                          color: statusColor,
-                        ),
+                        Icon(statusIcon, size: 16, color: statusColor),
                         const SizedBox(width: 6),
                         Text(
                           statusLabel,
@@ -849,8 +730,7 @@ class _ApplicationCard extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF3F4F6),
-                          borderRadius:
-                              BorderRadius.circular(9),
+                          borderRadius: BorderRadius.circular(9),
                         ),
                         child: Text(
                           skill,
@@ -865,10 +745,7 @@ class _ApplicationCard extends StatelessWidget {
                   ),
               ],
               const SizedBox(height: 18),
-              const Divider(
-                height: 1,
-                color: Color(0xFFE5E7EB),
-              ),
+              const Divider(height: 1, color: Color(0xFFE5E7EB)),
               const SizedBox(height: 14),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -964,10 +841,7 @@ class _ApplicationCard extends StatelessWidget {
 }
 
 class _InfoChip extends StatelessWidget {
-  const _InfoChip({
-    required this.icon,
-    required this.text,
-  });
+  const _InfoChip({required this.icon, required this.text});
 
   final IconData icon;
   final String text;
@@ -975,25 +849,16 @@ class _InfoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 7,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(9),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-        ),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 15,
-            color: const Color(0xFF6B7280),
-          ),
+          Icon(icon, size: 15, color: const Color(0xFF6B7280)),
           const SizedBox(width: 6),
           Text(
             text,

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../services/project_service.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../../models/project_model.dart';
 import '../../services/application_service.dart';
 
@@ -106,10 +108,7 @@ class _ApplyProjectState extends State<ApplyProject> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      _showMessage(
-        'Please log in before applying.',
-        isError: true,
-      );
+      _showMessage('Please log in before applying.', isError: true);
       return false;
     }
 
@@ -189,11 +188,11 @@ class _ApplyProjectState extends State<ApplyProject> {
       _showMessage('You have already applied to this project.', isError: true);
       return;
     }
-final canApply = await _checkProfileCompletion();
+    final canApply = await _checkProfileCompletion();
 
-if (!canApply || !mounted) {
-  return;
-}
+    if (!canApply || !mounted) {
+      return;
+    }
 
     if (!_formKey.currentState!.validate()) {
       return;
