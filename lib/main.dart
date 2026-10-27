@@ -4,8 +4,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'firebase_options.dart';
 import 'screens/splash_screen.dart';
@@ -17,7 +19,39 @@ import 'theme/theme_provider.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  try {
+    await dotenv.load(fileName: '.env');
+    debugPrint('Root .env loaded successfully.');
+  } catch (error) {
+    debugPrint('Could not load root .env: $error');
+  }
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  const defineSupabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const defineSupabasePublishableKey = String.fromEnvironment(
+    'SUPABASE_PUBLISHABLE_KEY',
+  );
+  final envSupabaseUrl = dotenv.env['SUPABASE_URL']?.trim() ?? '';
+  final envSupabasePublishableKey =
+      dotenv.env['SUPABASE_PUBLISHABLE_KEY']?.trim() ?? '';
+  final supabaseUrl = defineSupabaseUrl.trim().isNotEmpty
+      ? defineSupabaseUrl.trim()
+      : envSupabaseUrl;
+  final supabasePublishableKey = defineSupabasePublishableKey.trim().isNotEmpty
+      ? defineSupabasePublishableKey.trim()
+      : envSupabasePublishableKey;
+  if (supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty) {
+    await Supabase.initialize(
+      url: supabaseUrl,
+      publishableKey: supabasePublishableKey,
+    );
+  } else {
+    debugPrint(
+      'Supabase was not initialized. Check the root .env file or provide '
+      'SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY using --dart-define.',
+    );
+  }
 
   // Use live Firebase services by default. Opt into local emulators explicitly
   // when needed for isolated development testing.

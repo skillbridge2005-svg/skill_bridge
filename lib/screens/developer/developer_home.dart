@@ -11,6 +11,7 @@ import 'active_projects.dart';
 import 'teams.dart';
 import '../../models/notification_model.dart';
 import '../../services/notification_service.dart';
+import '../../widgets/skillbridge_avatar.dart';
 import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
@@ -168,6 +169,8 @@ class _DeveloperHomeState extends State<DeveloperHome>
         final email =
             (data['email'] ?? FirebaseAuth.instance.currentUser?.email ?? '')
                 .toString();
+        final profileImageUrl =
+            data['profileImageUrl']?.toString().trim() ?? '';
 
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: _developerProfileStream(),
@@ -213,6 +216,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                                 name: name,
                                 email: email,
                                 completion: completion,
+                                profileImageUrl: profileImageUrl,
                               ),
                             Expanded(
                               child: Column(
@@ -221,6 +225,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                                     mobile: mobile,
                                     name: name,
                                     email: email,
+                                    profileImageUrl: profileImageUrl,
                                   ),
                                   Expanded(
                                     child: _buildContent(
@@ -324,6 +329,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
     required String name,
     required String email,
     required int completion,
+    required String profileImageUrl,
   }) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
@@ -399,7 +405,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
           if (!compact)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: _buildMiniProfile(completion, name),
+              child: _buildMiniProfile(completion, name, profileImageUrl),
             ),
           Padding(
             padding: const EdgeInsets.all(10),
@@ -437,7 +443,11 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
-  Widget _buildMiniProfile(int completion, String name) {
+  Widget _buildMiniProfile(
+    int completion,
+    String name,
+    String profileImageUrl,
+  ) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -455,7 +465,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
           children: [
             Row(
               children: [
-                const _Avatar(size: 38),
+                _Avatar(size: 38, name: name, profileImageUrl: profileImageUrl),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -516,6 +526,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
     required bool mobile,
     required String name,
     required String email,
+    required String profileImageUrl,
   }) {
     return Padding(
       padding: EdgeInsets.fromLTRB(mobile ? 14 : 20, 14, mobile ? 14 : 20, 4),
@@ -630,7 +641,11 @@ class _DeveloperHomeState extends State<DeveloperHome>
                   value: 'profile',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const _Avatar(size: 36),
+                    leading: _Avatar(
+                      size: 36,
+                      name: name,
+                      profileImageUrl: profileImageUrl,
+                    ),
                     title: Text(
                       name,
                       style: const TextStyle(fontWeight: FontWeight.w800),
@@ -646,12 +661,16 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 const PopupMenuItem(value: 'settings', child: Text('Settings')),
                 const PopupMenuItem(value: 'logout', child: Text('Logout')),
               ],
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(
                   children: [
-                    _Avatar(size: 38),
-                    Icon(Icons.keyboard_arrow_down_rounded),
+                    _Avatar(
+                      size: 38,
+                      name: name,
+                      profileImageUrl: profileImageUrl,
+                    ),
+                    const Icon(Icons.keyboard_arrow_down_rounded),
                   ],
                 ),
               ),
@@ -1959,10 +1978,44 @@ class _BrandMark extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final double size;
   final String? initials;
-  const _Avatar({required this.size, this.initials});
+  final String? name;
+  final String? profileImageUrl;
+
+  const _Avatar({
+    required this.size,
+    this.initials,
+    this.name,
+    this.profileImageUrl,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (profileImageUrl?.trim().isNotEmpty == true) {
+      return Container(
+        width: size,
+        height: size,
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFDBEAFE), Color(0xFFE0E7FF)],
+          ),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+        child: SkillBridgeAvatar(
+          profileImageUrl: profileImageUrl,
+          name: name ?? initials,
+          size: size - 4,
+          backgroundColor: Colors.transparent,
+          foregroundColor: const Color(0xFF3730A3),
+        ),
+      );
+    }
+
+    final displayInitials =
+        initials ??
+        (name?.trim().isNotEmpty == true ? name!.trim()[0].toUpperCase() : 'A');
+
     return Container(
       width: size,
       height: size,
@@ -1975,7 +2028,7 @@ class _Avatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(
-        initials ?? 'A',
+        displayInitials,
         style: TextStyle(
           fontWeight: FontWeight.w900,
           color: const Color(0xFF3730A3),

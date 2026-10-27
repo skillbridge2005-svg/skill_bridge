@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/team_invitation_model.dart';
 import '../../services/team_invitation_service.dart';
+import '../../widgets/skillbridge_avatar.dart';
 
 class TeamInvitationsScreen extends StatefulWidget {
   const TeamInvitationsScreen({super.key});
@@ -38,7 +39,8 @@ class _TeamInvitationsScreenState extends State<TeamInvitationsScreen> {
               .toString(),
       'email': (userData['email'] ?? profileData['email'] ?? '').toString(),
       'headline': (profileData['headline'] ?? '').toString(),
-      'photoUrl': (profileData['photoUrl'] ?? '').toString(),
+      'photoUrl': (userData['profileImageUrl'] ?? profileData['photoUrl'] ?? '')
+          .toString(),
     };
   }
 
@@ -150,18 +152,12 @@ class _TeamInvitationsScreenState extends State<TeamInvitationsScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 23,
+              SkillBridgeAvatar(
+                profileImageUrl: photoUrl,
+                name: name,
+                size: 46,
                 backgroundColor: const Color(0xFFE0E7FF),
-                backgroundImage: photoUrl.startsWith('http')
-                    ? NetworkImage(photoUrl)
-                    : null,
-                child: photoUrl.startsWith('http')
-                    ? null
-                    : const Icon(
-                        Icons.person_outline_rounded,
-                        color: Color(0xFF4338CA),
-                      ),
+                foregroundColor: const Color(0xFF4338CA),
               ),
               const SizedBox(width: 12),
               Expanded(

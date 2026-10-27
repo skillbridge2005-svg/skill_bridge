@@ -13,6 +13,8 @@ import 'apply_project.dart';
 import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
 
+import '../../widgets/skillbridge_avatar.dart';
+
 class ProjectDetails extends StatefulWidget {
   const ProjectDetails({
     super.key,
@@ -1295,20 +1297,27 @@ class _ProjectDetailsState extends State<ProjectDetails> {
         children: [
           Row(
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFEEF2FF), Color(0xFFE0E7FF)],
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.business_rounded,
-                  color: _primary,
-                  size: 25,
-                ),
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: project.clientId.isEmpty
+                    ? null
+                    : FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(project.clientId)
+                          .snapshots(),
+                builder: (context, snapshot) {
+                  final client = snapshot.data?.data() ?? {};
+
+                  return SkillBridgeAvatar(
+                    profileImageUrl: client['profileImageUrl']?.toString(),
+                    name:
+                        client['name']?.toString() ??
+                        (clientName.isEmpty ? 'Client' : clientName),
+                    size: 52,
+                    borderRadius: BorderRadius.circular(16),
+                    backgroundColor: const Color(0xFFEEF2FF),
+                    foregroundColor: _primary,
+                  );
+                },
               ),
               const SizedBox(width: 13),
               Expanded(

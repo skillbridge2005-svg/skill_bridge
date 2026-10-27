@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../localization/app_localizations.dart';
+import '../../widgets/skillbridge_avatar.dart';
 
 class ClientMessagesScreen extends StatelessWidget {
   const ClientMessagesScreen({super.key});
@@ -88,6 +89,13 @@ class ClientMessagesScreen extends StatelessWidget {
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: _ConversationCard(
                                     projectId: projectDoc.id,
+                                    developerId:
+                                        (projectDoc.data()['developerId'] ??
+                                                projectDoc
+                                                    .data()['assignedDeveloperId'])
+                                            ?.toString()
+                                            .trim() ??
+                                        '',
                                     projectTitle:
                                         projectDoc
                                             .data()['title']
@@ -161,11 +169,13 @@ class _MessagesSectionHeading extends StatelessWidget {
 
 class _ConversationCard extends StatelessWidget {
   final String projectId;
+  final String developerId;
   final String projectTitle;
   final String category;
 
   const _ConversationCard({
     required this.projectId,
+    required this.developerId,
     required this.projectTitle,
     required this.category,
   });
@@ -226,23 +236,44 @@ class _ConversationCard extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFFEEF2FF), Color(0xFFE0E7FF)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.all(Radius.circular(17)),
-                    ),
-                    child: const Icon(
-                      Icons.chat_bubble_rounded,
-                      color: Color(0xFF4F46E5),
-                      size: 24,
-                    ),
-                  ),
+                  developerId.isEmpty
+                      ? Container(
+                          width: 56,
+                          height: 56,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFFEEF2FF), Color(0xFFE0E7FF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.all(Radius.circular(17)),
+                          ),
+                          child: const Icon(
+                            Icons.chat_bubble_rounded,
+                            color: Color(0xFF4F46E5),
+                            size: 24,
+                          ),
+                        )
+                      : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(developerId)
+                              .snapshots(),
+                          builder: (context, profileSnapshot) {
+                            final developer =
+                                profileSnapshot.data?.data() ?? {};
+
+                            return SkillBridgeAvatar(
+                              profileImageUrl: developer['profileImageUrl']
+                                  ?.toString(),
+                              name: developer['name']?.toString(),
+                              size: 56,
+                              borderRadius: BorderRadius.circular(17),
+                              backgroundColor: const Color(0xFFEEF2FF),
+                              foregroundColor: const Color(0xFF4F46E5),
+                            );
+                          },
+                        ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -1618,68 +1649,113 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
                           return const _EmptyChatState();
                         }
 
-                        return ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
-                          itemCount: messages.length,
-                          itemBuilder: (context, index) {
-                            final messageDoc = messages[index];
-                            final data = messageDoc.data();
+                        final participantIds = messages.reversed
+                            .map(
+                              (message) =>
+                                  message.data()['senderId']?.toString() ?? '',
+                            )
+                            .where(
+                              (senderId) =>
+                                  senderId.isNotEmpty && senderId != user?.uid,
+                            )
+                            .toSet()
+                            .take(30)
+                            .toList();
 
-                            final message = data['message']?.toString() ?? '';
-
-                            final senderId = data['senderId']?.toString() ?? '';
-
-                            final senderName =
-                                data['senderName']?.toString() ?? '';
-
-                            final isMine = senderId == user?.uid;
-                            final isRead = data['isRead'] == true;
-                            final isEdited = data['isEdited'] == true;
-                            final replyToMessage = data['replyToMessage']
-                                ?.toString();
-                            final replyToSenderName = data['replyToSenderName']
-                                ?.toString();
-                            final messageType =
-                                data['messageType']?.toString() ?? 'text';
-                            final fileUrl = data['fileUrl']?.toString();
-                            final fileName =
-                                data['fileName']?.toString() ?? 'Attachment';
-                            final createdAt = data['createdAt'];
-                            final timestamp = createdAt is Timestamp
-                                ? createdAt.toDate()
-                                : null;
-
-                            return _MessageBubble(
-                              messageId: messageDoc.id,
-                              message: message,
-                              senderName: senderName,
-                              isMine: isMine,
-                              isRead: isRead,
-                              isEdited: isEdited,
-                              timestamp: timestamp,
-                              replyToMessage: replyToMessage,
-                              replyToSenderName: replyToSenderName,
-                              messageType: messageType,
-                              fileUrl: fileUrl,
-                              fileName: fileName,
-                              onOpenFile: fileUrl == null
-                                  ? null
-                                  : () => _openAttachment(fileUrl),
-                              onReply: () => _startReply(
-                                messageId: messageDoc.id,
-                                message: message,
-                                senderName: senderName,
-                              ),
-                              onEdit: isMine
-                                  ? () => _editMessage(
-                                      messageId: messageDoc.id,
-                                      currentMessage: message,
+                        return StreamBuilder<
+                          QuerySnapshot<Map<String, dynamic>>
+                        >(
+                          stream: participantIds.isEmpty
+                              ? null
+                              : _firestore
+                                    .collection('users')
+                                    .where(
+                                      FieldPath.documentId,
+                                      whereIn: participantIds,
                                     )
-                                  : null,
-                              onDelete: isMine
-                                  ? () =>
-                                        _deleteMessage(messageId: messageDoc.id)
-                                  : null,
+                                    .snapshots(),
+                          builder: (context, profilesSnapshot) {
+                            final profiles = {
+                              for (final profile
+                                  in profilesSnapshot.data?.docs ?? [])
+                                profile.id: profile.data(),
+                            };
+
+                            return ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(
+                                18,
+                                20,
+                                18,
+                                20,
+                              ),
+                              itemCount: messages.length,
+                              itemBuilder: (context, index) {
+                                final messageDoc = messages[index];
+                                final data = messageDoc.data();
+
+                                final message =
+                                    data['message']?.toString() ?? '';
+                                final senderId =
+                                    data['senderId']?.toString() ?? '';
+                                final senderName =
+                                    data['senderName']?.toString() ?? '';
+                                final isMine = senderId == user?.uid;
+                                final isRead = data['isRead'] == true;
+                                final isEdited = data['isEdited'] == true;
+                                final replyToMessage = data['replyToMessage']
+                                    ?.toString();
+                                final replyToSenderName =
+                                    data['replyToSenderName']?.toString();
+                                final messageType =
+                                    data['messageType']?.toString() ?? 'text';
+                                final fileUrl = data['fileUrl']?.toString();
+                                final fileName =
+                                    data['fileName']?.toString() ??
+                                    'Attachment';
+                                final createdAt = data['createdAt'];
+                                final timestamp = createdAt is Timestamp
+                                    ? createdAt.toDate()
+                                    : null;
+                                final senderProfile = profiles[senderId];
+
+                                return _MessageBubble(
+                                  messageId: messageDoc.id,
+                                  message: message,
+                                  senderName: senderName,
+                                  profileImageUrl:
+                                      senderProfile?['profileImageUrl']
+                                          ?.toString() ??
+                                      '',
+                                  isMine: isMine,
+                                  isRead: isRead,
+                                  isEdited: isEdited,
+                                  timestamp: timestamp,
+                                  replyToMessage: replyToMessage,
+                                  replyToSenderName: replyToSenderName,
+                                  messageType: messageType,
+                                  fileUrl: fileUrl,
+                                  fileName: fileName,
+                                  onOpenFile: fileUrl == null
+                                      ? null
+                                      : () => _openAttachment(fileUrl),
+                                  onReply: () => _startReply(
+                                    messageId: messageDoc.id,
+                                    message: message,
+                                    senderName: senderName,
+                                  ),
+                                  onEdit: isMine
+                                      ? () => _editMessage(
+                                          messageId: messageDoc.id,
+                                          currentMessage: message,
+                                        )
+                                      : null,
+                                  onDelete: isMine
+                                      ? () => _deleteMessage(
+                                          messageId: messageDoc.id,
+                                        )
+                                      : null,
+                                );
+                              },
                             );
                           },
                         );
@@ -1711,6 +1787,7 @@ class _MessageBubble extends StatelessWidget {
   final String messageId;
   final String message;
   final String senderName;
+  final String profileImageUrl;
   final bool isMine;
   final bool isRead;
   final bool isEdited;
@@ -1729,6 +1806,7 @@ class _MessageBubble extends StatelessWidget {
     required this.messageId,
     required this.message,
     required this.senderName,
+    required this.profileImageUrl,
     required this.isMine,
     required this.isRead,
     required this.isEdited,
@@ -1743,14 +1821,6 @@ class _MessageBubble extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
   });
-
-  String _initial() {
-    if (senderName.trim().isEmpty) {
-      return isMine ? 'C' : 'U';
-    }
-
-    return senderName.trim()[0].toUpperCase();
-  }
 
   String _formatTime(DateTime? dateTime) {
     if (dateTime == null) return '';
@@ -1856,26 +1926,12 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMine) ...[
-            Container(
-              width: 34,
-              height: 34,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFFEEF2FF), Color(0xFFE0E7FF)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _initial(),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF4338CA),
-                ),
-              ),
+            SkillBridgeAvatar(
+              profileImageUrl: profileImageUrl,
+              name: senderName.trim().isEmpty ? 'U' : senderName,
+              size: 34,
+              backgroundColor: const Color(0xFFEEF2FF),
+              foregroundColor: const Color(0xFF4338CA),
             ),
             const SizedBox(width: 9),
           ],

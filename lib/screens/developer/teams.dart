@@ -11,6 +11,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/team_invitation_service.dart';
 import '../../services/individual_chat_service.dart';
+import '../../widgets/skillbridge_avatar.dart';
 import '../developer/team_chat_screen.dart';
 import 'individual_chat_screen.dart' hide IndividualChatService;
 import 'developer_public_profile_screen.dart';
@@ -801,7 +802,12 @@ class _TeamsState extends State<Teams> {
             'email': (profileData['email'] ?? userData['email'] ?? '')
                 .toString(),
             'headline': (profileData['headline'] ?? '').toString(),
-            'photoUrl': (profileData['photoUrl'] ?? '').toString(),
+            'photoUrl':
+                (userData['profileImageUrl'] ??
+                        userData['photoUrl'] ??
+                        profileData['photoUrl'] ??
+                        '')
+                    .toString(),
             'skills': profileData['skills'] is List
                 ? List<String>.from(profileData['skills'])
                 : <String>[],
@@ -1003,6 +1009,8 @@ class _TeamsState extends State<Teams> {
                                       .toString();
                                   final photoUrl = developer['photoUrl']
                                       .toString();
+                                  final developerName = developer['name']
+                                      .toString();
                                   final busy = sendingUid == developerId;
                                   final skills = <String>[
                                     ...(developer['skills'] as List<String>),
@@ -1025,21 +1033,15 @@ class _TeamsState extends State<Teams> {
                                     contentPadding: const EdgeInsets.symmetric(
                                       vertical: 5,
                                     ),
-                                    leading: CircleAvatar(
+                                    leading: SkillBridgeAvatar(
+                                      profileImageUrl: photoUrl,
+                                      name: developerName,
+                                      size: 40,
                                       backgroundColor: const Color(0xFFE0E7FF),
-                                      backgroundImage:
-                                          photoUrl.startsWith('http')
-                                          ? NetworkImage(photoUrl)
-                                          : null,
-                                      child: photoUrl.startsWith('http')
-                                          ? null
-                                          : const Icon(
-                                              Icons.person_outline_rounded,
-                                              color: Color(0xFF4338CA),
-                                            ),
+                                      foregroundColor: const Color(0xFF4338CA),
                                     ),
                                     title: Text(
-                                      developer['name'].toString(),
+                                      developerName,
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -1157,9 +1159,9 @@ class _TeamsState extends State<Teams> {
           'name': name,
           'email': (profileData['email'] ?? userData['email'] ?? '').toString(),
           'photoUrl':
-              (profileData['photoUrl'] ??
+              (userData['profileImageUrl'] ??
                       userData['photoUrl'] ??
-                      userData['profileImageUrl'] ??
+                      profileData['photoUrl'] ??
                       '')
                   .toString(),
           'headline': (profileData['headline'] ?? '').toString(),
@@ -1366,17 +1368,12 @@ class _TeamsState extends State<Teams> {
                                 horizontal: 10,
                                 vertical: 4,
                               ),
-                              leading: CircleAvatar(
+                              leading: SkillBridgeAvatar(
+                                profileImageUrl: photoUrl,
+                                name: member['name']?.toString(),
+                                size: 40,
                                 backgroundColor: const Color(0xFFE0E7FF),
-                                backgroundImage: photoUrl.startsWith('http')
-                                    ? NetworkImage(photoUrl)
-                                    : null,
-                                child: photoUrl.startsWith('http')
-                                    ? null
-                                    : const Icon(
-                                        Icons.person_outline_rounded,
-                                        color: Color(0xFF4338CA),
-                                      ),
+                                foregroundColor: const Color(0xFF4338CA),
                               ),
                               title: Text(
                                 member['name'].toString(),

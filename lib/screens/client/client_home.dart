@@ -8,6 +8,7 @@ import '../../localization/language_provider.dart';
 
 import '../../services/payment_service.dart';
 import '../settings/settings_screen.dart';
+import '../../widgets/skillbridge_avatar.dart';
 import 'create_project_screen.dart';
 import 'my_projects_screen.dart';
 import 'client_profile_screen.dart';
@@ -660,12 +661,15 @@ class _ClientDashboardSection extends StatelessWidget {
           .snapshots(),
       builder: (context, userSnapshot) {
         String name = '';
+        String profileImageUrl = '';
 
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           final userData = userSnapshot.data!.data();
 
-          if (userData != null && userData['name'] != null) {
-            name = userData['name'].toString();
+          if (userData != null) {
+            name = userData['name']?.toString() ?? '';
+            profileImageUrl =
+                userData['profileImageUrl']?.toString().trim() ?? '';
           }
         }
 
@@ -718,6 +722,7 @@ class _ClientDashboardSection extends StatelessWidget {
                     children: [
                       _DashboardWelcome(
                         name: name,
+                        profileImageUrl: profileImageUrl,
                         projectCount: totalProjects,
                       ),
                       const SizedBox(height: 18),
@@ -786,17 +791,14 @@ class _ClientDashboardSection extends StatelessWidget {
 
 class _DashboardWelcome extends StatelessWidget {
   final String name;
+  final String profileImageUrl;
   final int projectCount;
 
-  const _DashboardWelcome({required this.name, required this.projectCount});
-
-  String _initial() {
-    if (name.trim().isEmpty) {
-      return 'U';
-    }
-
-    return name.trim()[0].toUpperCase();
-  }
+  const _DashboardWelcome({
+    required this.name,
+    required this.profileImageUrl,
+    required this.projectCount,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -838,13 +840,13 @@ class _DashboardWelcome extends StatelessWidget {
               ],
             ),
             alignment: Alignment.center,
-            child: Text(
-              _initial(),
-              style: const TextStyle(
-                fontSize: 23,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-              ),
+            child: SkillBridgeAvatar(
+              profileImageUrl: profileImageUrl,
+              name: name,
+              size: 59,
+              borderRadius: BorderRadius.circular(18),
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
             ),
           ),
           const SizedBox(width: 16),
@@ -1996,7 +1998,7 @@ class _SidebarAccount extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const _UserAvatar(size: 39),
+                  _UserAvatar(size: 39, name: name),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2071,39 +2073,62 @@ class _SidebarAccount extends StatelessWidget {
 
 class _UserAvatar extends StatelessWidget {
   final double size;
+  final String? name;
 
-  const _UserAvatar({this.size = 40});
+  const _UserAvatar({this.size = 40, this.name});
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final l10n = AppLocalizations.of(context);
+    final fallbackName =
+        name ??
+        user?.displayName ??
+        user?.email?.split('@').first ??
+        l10n.client;
 
-    final name = user?.displayName ?? user?.email ?? l10n.client;
+    if (user == null) {
+      return SkillBridgeAvatar(
+        name: fallbackName,
+        size: size,
+        backgroundColor: const Color(0xFFDBEAFE),
+        foregroundColor: const Color(0xFF3730A3),
+      );
+    }
 
-    final initial = name.trim().isEmpty ? 'C' : name.trim()[0].toUpperCase();
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final userData = snapshot.data?.data();
+        final profileName = userData?['name']?.toString() ?? fallbackName;
+        final profileImageUrl =
+            userData?['profileImageUrl']?.toString().trim() ?? '';
 
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFDBEAFE), Color(0xFFE0E7FF)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: TextStyle(
-          fontSize: size * .34,
-          fontWeight: FontWeight.w900,
-          color: const Color(0xFF3730A3),
-        ),
-      ),
+        return Container(
+          width: size,
+          height: size,
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFDBEAFE), Color(0xFFE0E7FF)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+          child: SkillBridgeAvatar(
+            profileImageUrl: profileImageUrl,
+            name: profileName,
+            size: size - 4,
+            backgroundColor: Colors.transparent,
+            foregroundColor: const Color(0xFF3730A3),
+          ),
+        );
+      },
     );
   }
 }

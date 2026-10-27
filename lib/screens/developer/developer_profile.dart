@@ -2,9 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../client/how_to_use_skillbridge_screen.dart';
+import '../shared/leaderboard_screen.dart';
+import '../../widgets/skillbridge_avatar.dart';
 import 'developer_reviews_screen.dart';
 import 'developer_repositories_screen.dart';
 
@@ -261,6 +265,17 @@ class DeveloperProfile extends StatelessWidget {
                       name: userData['name']?.toString() ?? '',
                       email: userData['email']?.toString() ?? user.email ?? '',
                       profile: profile,
+                      profileImageUrl:
+                          [
+                                userData['profileImageUrl'],
+                                profile['photoUrl'],
+                                user.photoURL,
+                              ]
+                              .map((value) => value?.toString().trim() ?? '')
+                              .firstWhere(
+                                (value) => value.isNotEmpty,
+                                orElse: () => '',
+                              ),
                     );
                   },
                 );
@@ -278,17 +293,90 @@ class _ProfileBody extends StatelessWidget {
   final String name;
   final String email;
   final Map<String, dynamic> profile;
+  final String profileImageUrl;
 
   const _ProfileBody({
     required this.uid,
     required this.name,
     required this.email,
     required this.profile,
+    required this.profileImageUrl,
   });
 
   String _text(String key) => profile[key]?.toString().trim() ?? '';
 
   String _orDash(String value) => value.isEmpty ? 'Not added yet' : value;
+
+  Future<void> _changeProfilePhoto(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      _snack(context, 'Please log in again.');
+      return;
+    }
+
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+      );
+
+      if (pickedFile == null || !context.mounted) return;
+
+      final bytes = await pickedFile.readAsBytes();
+      if (!context.mounted) return;
+
+      final extension = pickedFile.name.contains('.')
+          ? pickedFile.name.split('.').last.toLowerCase()
+          : '';
+      final contentType = switch (extension) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        _ => null,
+      };
+
+      if (contentType == null) {
+        _snack(context, 'Please select a JPG, PNG, or WEBP image.');
+        return;
+      }
+
+      final filePath =
+          '${user.uid}/profile_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      final supabase = Supabase.instance.client;
+
+      _snack(context, 'Uploading profile photo...');
+
+      await supabase.storage
+          .from('profile-photos')
+          .uploadBinary(
+            filePath,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
+
+      final imageUrl = supabase.storage
+          .from('profile-photos')
+          .getPublicUrl(filePath);
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'profileImageUrl': imageUrl,
+        'profileImagePath': filePath,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await user.updatePhotoURL(imageUrl);
+
+      if (context.mounted) {
+        _snack(context, 'Profile photo updated successfully.');
+      }
+    } catch (error) {
+      if (context.mounted) {
+        _snack(context, 'Unable to upload profile photo: $error');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -353,9 +441,10 @@ class _ProfileBody extends StatelessWidget {
                 name: name,
                 email: email,
                 headline: _text('headline'),
-                photoUrl: _text('photoUrl'),
+                photoUrl: profileImageUrl,
                 availability: availability,
                 location: _text('location'),
+                onChangePhoto: () => _changeProfilePhoto(context),
               ),
               const SizedBox(height: 18),
 
@@ -404,6 +493,20 @@ class _ProfileBody extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => const DeveloperRepositoriesScreen(),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 12),
+              _ProfileActionButton(
+                icon: Icons.emoji_events_rounded,
+                title: 'Leaderboard',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LeaderboardScreen(),
                     ),
                   );
                 },
@@ -709,6 +812,7 @@ class _ProfileHero extends StatelessWidget {
   final String photoUrl;
   final String availability;
   final String location;
+  final VoidCallback onChangePhoto;
 
   const _ProfileHero({
     required this.name,
@@ -717,12 +821,11 @@ class _ProfileHero extends StatelessWidget {
     required this.photoUrl,
     required this.availability,
     required this.location,
+    required this.onChangePhoto,
   });
 
   @override
   Widget build(BuildContext context) {
-    final initial = name.trim().isEmpty ? 'D' : name.trim()[0].toUpperCase();
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(23),
@@ -746,39 +849,60 @@ class _ProfileHero extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    width: 2,
-                  ),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x304F46E5),
-                      blurRadius: 18,
-                      offset: Offset(0, 7),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        width: 2,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x304F46E5),
+                          blurRadius: 18,
+                          offset: Offset(0, 7),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: photoUrl.isNotEmpty
-                      ? Image.network(
-                          photoUrl,
-                          fit: BoxFit.cover,
-                          width: 72,
-                          height: 72,
-                          errorBuilder: (_, __, ___) => _initialText(initial),
-                        )
-                      : _initialText(initial),
-                ),
+                    child: SkillBridgeAvatar(
+                      profileImageUrl: photoUrl,
+                      name: name,
+                      size: 72,
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  Positioned(
+                    right: -3,
+                    bottom: -3,
+                    child: Material(
+                      color: Colors.white,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        onTap: onChangePhoto,
+                        customBorder: const CircleBorder(),
+                        child: const Padding(
+                          padding: EdgeInsets.all(5),
+                          child: Icon(
+                            Icons.camera_alt_rounded,
+                            size: 15,
+                            color: _primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -846,19 +970,6 @@ class _ProfileHero extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _initialText(String initial) {
-    return Center(
-      child: Text(
-        initial,
-        style: const TextStyle(
-          fontSize: 27,
-          fontWeight: FontWeight.w900,
-          color: Colors.white,
-        ),
       ),
     );
   }
@@ -1619,9 +1730,9 @@ class _DeveloperProfileEditScreenState
           .doc(user.uid)
           .get();
 
-      if (userDoc.exists) {
-        _name = userDoc.data()?['name']?.toString() ?? '';
-      }
+      final userData = userDoc.data() ?? <String, dynamic>{};
+      _name = userData['name']?.toString() ?? '';
+      _photoUrlController.text = userData['profileImageUrl']?.toString() ?? '';
 
       final profileDoc = await FirebaseFirestore.instance
           .collection('developerProfiles')
@@ -1633,7 +1744,9 @@ class _DeveloperProfileEditScreenState
       _headlineController.text = data['headline']?.toString() ?? '';
       _bioController.text = data['bio']?.toString() ?? '';
       _locationController.text = data['location']?.toString() ?? '';
-      _photoUrlController.text = data['photoUrl']?.toString() ?? '';
+      if (_photoUrlController.text.trim().isEmpty) {
+        _photoUrlController.text = data['photoUrl']?.toString() ?? '';
+      }
       _experienceController.text = data['experience']?.toString() ?? '';
       _educationController.text = data['education']?.toString() ?? '';
       _githubController.text = data['githubUrl']?.toString() ?? '';
@@ -1951,7 +2064,6 @@ class _DeveloperProfileEditScreenState
 
   Widget _buildEditHeader() {
     final photo = _photoUrlController.text.trim();
-    final initial = _name.trim().isEmpty ? 'D' : _name.trim()[0].toUpperCase();
 
     return Container(
       width: double.infinity,
@@ -1984,34 +2096,12 @@ class _DeveloperProfileEditScreenState
                 width: 2,
               ),
             ),
-            child: ClipOval(
-              child: photo.isNotEmpty
-                  ? Image.network(
-                      photo,
-                      fit: BoxFit.cover,
-                      width: 64,
-                      height: 64,
-                      errorBuilder: (_, __, ___) => Center(
-                        child: Text(
-                          initial,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                    )
-                  : Center(
-                      child: Text(
-                        initial,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
+            child: SkillBridgeAvatar(
+              profileImageUrl: photo,
+              name: _name,
+              size: 64,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
             ),
           ),
           const SizedBox(width: 14),

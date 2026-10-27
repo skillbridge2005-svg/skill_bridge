@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import 'skillbridge_avatar.dart';
+
 class DeveloperReviewsList extends StatelessWidget {
   final String developerId;
 
@@ -70,6 +72,7 @@ class DeveloperReviewsList extends StatelessWidget {
             else
               ...reviews.map((review) {
                 final data = review.data();
+                final clientId = data['clientId']?.toString() ?? '';
                 final rating = (data['rating'] as num?)?.toInt() ?? 0;
                 final comment = data['comment']?.toString() ?? '';
                 final projectTitle =
@@ -100,12 +103,30 @@ class DeveloperReviewsList extends StatelessWidget {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const CircleAvatar(
-                              backgroundColor: Color(0xFFDBEAFE),
-                              child: Icon(
-                                Icons.person_outline,
-                                color: Color(0xFF2563EB),
-                              ),
+                            StreamBuilder<
+                              DocumentSnapshot<Map<String, dynamic>>
+                            >(
+                              stream: clientId.isEmpty
+                                  ? null
+                                  : FirebaseFirestore.instance
+                                        .collection('users')
+                                        .doc(clientId)
+                                        .snapshots(),
+                              builder: (context, clientSnapshot) {
+                                final client =
+                                    clientSnapshot.data?.data() ?? {};
+
+                                return SkillBridgeAvatar(
+                                  profileImageUrl: client['profileImageUrl']
+                                      ?.toString(),
+                                  name:
+                                      client['name']?.toString() ??
+                                      client['fullName']?.toString(),
+                                  size: 40,
+                                  backgroundColor: const Color(0xFFDBEAFE),
+                                  foregroundColor: const Color(0xFF2563EB),
+                                );
+                              },
                             ),
                             const SizedBox(width: 12),
                             Expanded(

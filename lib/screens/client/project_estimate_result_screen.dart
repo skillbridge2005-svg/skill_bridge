@@ -5,6 +5,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:skill_bridge/services/supabase_storage_service.dart';
 
@@ -59,6 +62,7 @@ class _ProjectEstimateResultScreenState
     extends State<ProjectEstimateResultScreen> {
   bool _isSubmitting = false;
   bool _isRegenerating = false;
+  bool _isGeneratingRequirementsPdf = false;
   bool _acceptedCost = false;
   bool _acceptedTimeline = false;
   bool _acceptedTerms = false;
@@ -976,6 +980,384 @@ class _ProjectEstimateResultScreenState
 
   bool get _needsRegeneration =>
       _costChoice == false || _timelineChoice == false;
+
+  Future<Uint8List> _createRequirementsPdf() async {
+    final pdf = pw.Document();
+    final projectTitle = _sanitizePdfText(
+      widget.title.trim().isEmpty ? 'Untitled Project' : widget.title.trim(),
+    );
+    final projectDescription = _pdfText(widget.description);
+    final projectCategories = _pdfText(widget.categories);
+    final projectRequirements = _pdfText(widget.requirements);
+    final projectTechnologies = _pdfText(widget.technologies);
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(36),
+        maxPages: 100,
+        header: (context) => pw.Container(
+          padding: const pw.EdgeInsets.only(bottom: 12),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: PdfColors.blue700, width: 1.5),
+            ),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'SKILLBRIDGE',
+                style: pw.TextStyle(
+                  fontSize: 15,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.blue700,
+                ),
+              ),
+              pw.Text(
+                'PROJECT REQUIREMENTS',
+                style: const pw.TextStyle(
+                  fontSize: 9,
+                  color: PdfColors.grey700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          margin: const pw.EdgeInsets.only(top: 12),
+          padding: const pw.EdgeInsets.only(top: 8),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              top: pw.BorderSide(color: PdfColors.grey400, width: 0.5),
+            ),
+          ),
+          child: pw.Text(
+            'Page ${context.pageNumber} of ${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+          ),
+        ),
+        build: (context) => [
+          pw.SizedBox(height: 12),
+          pw.Text(
+            projectTitle,
+            style: pw.TextStyle(
+              fontSize: 23,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue900,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'Project Requirements and Estimate',
+            style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
+          ),
+          pw.SizedBox(height: 20),
+          _pdfSection('1. Project Overview'),
+          _pdfLabelValue('Project Name', projectTitle),
+          _pdfLabelValue('Categories', projectCategories),
+          _pdfLabelValue('Description', projectDescription),
+          _pdfSection('2. Project Requirements'),
+          _pdfLabelValue('Submitted Requirements', projectRequirements),
+          ..._pdfDataSection('Confirmed Requirements', _requirements),
+          _pdfSection('3. Technologies'),
+          _pdfLabelValue('Requested Technologies', projectTechnologies),
+          ..._pdfDataSection(
+            'Recommended Technologies',
+            _technologyNames(_currentPlan),
+          ),
+          ..._pdfDataSection('4. Project Modules', _modules),
+          _pdfSection('5. Project Estimate'),
+          ..._pdfDataSection('Estimate Details', _estimate),
+          _pdfSection('6. Recommended Team'),
+          ..._pdfDataSection('Team Information', _team),
+          ..._pdfDataSection('Recommended Team Roles', _teamRoleNames),
+          ..._pdfDataSection('7. Delivery Phases', _phases),
+          ..._pdfDataSection('8. Risks and Considerations', _risks),
+          ..._pdfDataSection('9. Additional Findings', _findings),
+          ..._pdfDataSection('10. Questions and Clarifications', _questions),
+          pw.SizedBox(height: 24),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.blue50,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Text(
+              'This document summarizes the project information and estimate '
+              'available in SkillBridge at the time of generation. Final scope, '
+              'budget, and timeline should be confirmed by the client and '
+              'development team.',
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.blue900),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  String _pdfText(dynamic value) {
+    if (value == null) return '';
+    if (value is String) return _sanitizePdfText(value.trim());
+
+    if (value is Map) {
+      return value.entries
+          .map((entry) {
+            final item = _pdfText(entry.value);
+            if (item.isEmpty) return '';
+            return '${_sanitizePdfText(_pdfPrettyLabel(entry.key.toString()))}: $item';
+          })
+          .where((item) => item.isNotEmpty)
+          .join('\n');
+    }
+
+    if (value is Iterable) {
+      return value.map(_pdfText).where((item) => item.isNotEmpty).join('\n');
+    }
+
+    return _sanitizePdfText(value.toString());
+  }
+
+  String _sanitizePdfText(String text) {
+    return text
+        .replaceAll('\u2014', '-')
+        .replaceAll('\u2013', '-')
+        .replaceAll('\u2018', "'")
+        .replaceAll('\u2019', "'")
+        .replaceAll('\u201C', '"')
+        .replaceAll('\u201D', '"')
+        .replaceAll('\u2026', '...')
+        .replaceAll('\u2022', '-')
+        .replaceAll('\u20B9', 'INR');
+  }
+
+  String _pdfPrettyLabel(String value) {
+    return value
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .trim()
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+  }
+
+  pw.Widget _pdfSection(String title) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(top: 18, bottom: 10),
+      child: pw.Text(
+        title,
+        style: pw.TextStyle(
+          fontSize: 15,
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.blue900,
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _pdfLabelValue(String label, String value) {
+    if (value.trim().isEmpty) return pw.SizedBox();
+
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 10),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.grey800,
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            value,
+            style: const pw.TextStyle(fontSize: 10, lineSpacing: 3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<pw.Widget> _pdfDataSection(String title, dynamic data) {
+    if (data == null) return [];
+
+    final widgets = <pw.Widget>[];
+    if (data is Map) {
+      final entries = data.entries.where(
+        (entry) => _pdfText(entry.value).isNotEmpty,
+      );
+      if (entries.isEmpty) return [];
+
+      widgets.add(_pdfSection(title));
+      for (final entry in entries) {
+        widgets.add(
+          _pdfLabelValue(
+            _pdfPrettyLabel(entry.key.toString()),
+            _pdfText(entry.value),
+          ),
+        );
+      }
+      return widgets;
+    }
+
+    if (data is Iterable) {
+      final items = data
+          .map(_pdfText)
+          .where((item) => item.isNotEmpty)
+          .toList();
+      if (items.isEmpty) return [];
+
+      widgets.add(_pdfSection(title));
+      for (final item in items) {
+        widgets.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(left: 8, bottom: 7),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  '- ',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue700,
+                  ),
+                ),
+                pw.Expanded(
+                  child: pw.Text(
+                    item,
+                    style: const pw.TextStyle(fontSize: 10, lineSpacing: 3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return widgets;
+    }
+
+    final text = _pdfText(data);
+    if (text.isEmpty) return [];
+
+    widgets
+      ..add(_pdfSection(title))
+      ..add(
+        pw.Text(text, style: const pw.TextStyle(fontSize: 10, lineSpacing: 3)),
+      );
+    return widgets;
+  }
+
+  String get _requirementsPdfFileName {
+    final safeTitle = widget.title
+        .replaceAll(RegExp(r'[^\w\s-]'), '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '_');
+    final fileTitle = safeTitle.isEmpty ? 'SkillBridge_Project' : safeTitle;
+    return '${fileTitle}_Requirements.pdf';
+  }
+
+  Future<void> _handleRequirementsPdf({required bool share}) async {
+    if (_isGeneratingRequirementsPdf) return;
+
+    setState(() => _isGeneratingRequirementsPdf = true);
+    try {
+      final bytes = await _createRequirementsPdf();
+      if (!mounted) return;
+
+      if (share) {
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: _requirementsPdfFileName,
+        );
+      } else {
+        await Printing.layoutPdf(
+          name: _requirementsPdfFileName,
+          onLayout: (_) async => bytes,
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Requirements PDF error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Unable to ${share ? 'share' : 'download'} PDF. Please try again.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isGeneratingRequirementsPdf = false);
+      }
+    }
+  }
+
+  Future<void> _showRequirementsPdfOptions() async {
+    if (_isGeneratingRequirementsPdf) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Wrap(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Text(
+                  'Project Requirements PDF',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.download_rounded,
+                  color: Color(0xFF2563EB),
+                ),
+                title: const Text('Download PDF'),
+                subtitle: const Text(
+                  'Open the print dialog to save the document as PDF.',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _handleRequirementsPdf(share: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.share_rounded,
+                  color: Color(0xFF2563EB),
+                ),
+                title: const Text('Share PDF'),
+                subtitle: const Text(
+                  'Share the generated requirements document.',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _handleRequirementsPdf(share: true);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2045,6 +2427,41 @@ class _ProjectEstimateResultScreenState
           ),
 
           const SizedBox(height: 18),
+
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: _isGeneratingRequirementsPdf
+                  ? null
+                  : _showRequirementsPdfOptions,
+              icon: _isGeneratingRequirementsPdf
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded),
+              label: Text(
+                _isGeneratingRequirementsPdf
+                    ? 'Generating PDF...'
+                    : 'Download & Share Requirements',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primary,
+                side: const BorderSide(color: _primary, width: 1.4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
 
           // The main action switches based on the client's cost/timeline choices.
           SizedBox(

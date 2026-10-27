@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/skillbridge_avatar.dart';
+
 class ClientApplicationsScreen extends StatelessWidget {
   final String projectId;
   final String projectTitle;
@@ -605,23 +607,12 @@ class _ApplicationCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 25,
-                  backgroundColor: colors.primaryContainer,
-                  child: Icon(
-                    Icons.person_outline_rounded,
-                    color: colors.onPrimaryContainer,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
                   child: developerId.isEmpty
-                      ? Text(
-                          'Developer',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      ? _developerIdentity(
+                          theme: theme,
+                          colors: colors,
+                          userData: const {},
                         )
                       : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                           stream: FirebaseFirestore.instance
@@ -631,23 +622,10 @@ class _ApplicationCard extends StatelessWidget {
                           builder: (context, snapshot) {
                             final userData = snapshot.data?.data() ?? {};
 
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _developerName(userData),
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  'Developer',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                            return _developerIdentity(
+                              theme: theme,
+                              colors: colors,
+                              userData: userData,
                             );
                           },
                         ),
@@ -763,6 +741,49 @@ class _ApplicationCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _developerIdentity({
+    required ThemeData theme,
+    required ColorScheme colors,
+    required Map<String, dynamic> userData,
+  }) {
+    final name = _developerName(userData);
+    final profileImageUrl =
+        userData['profileImageUrl']?.toString().trim() ?? '';
+
+    return Row(
+      children: [
+        SkillBridgeAvatar(
+          profileImageUrl: profileImageUrl,
+          name: name,
+          size: 50,
+          backgroundColor: colors.primaryContainer,
+          foregroundColor: colors.onPrimaryContainer,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Developer',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
