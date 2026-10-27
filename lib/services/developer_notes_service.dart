@@ -31,6 +31,7 @@ class DeveloperNotesService {
     required String content,
     Map<String, dynamic> details = const {},
     List<String> tags = const [],
+    String? projectId,
   }) async {
     final userId = _userId;
 
@@ -41,6 +42,7 @@ class DeveloperNotesService {
       'title': title.trim(),
       'category': category,
       'content': content.trim(),
+      'projectId': projectId,
       'details': details,
       'tags': tags,
       'isPinned': false,
@@ -91,6 +93,7 @@ class DeveloperNotesService {
     required String content,
     Map<String, dynamic> details = const {},
     List<String> tags = const [],
+    String? projectId,
   }) async {
     final userId = _userId;
 
@@ -101,14 +104,21 @@ class DeveloperNotesService {
       throw StateError('Note not found or access denied.');
     }
 
-    await document.update({
+    final update = <String, dynamic>{
       'title': title.trim(),
       'category': category,
       'content': content.trim(),
       'details': details,
       'tags': tags,
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    final projectAssociation = projectId ?? existing.data()?['projectId'];
+    if (projectAssociation != null) {
+      update['projectId'] = projectAssociation;
+    }
+
+    await document.update(update);
   }
 
   // DELETE NOTE

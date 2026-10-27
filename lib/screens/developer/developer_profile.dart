@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../client/how_to_use_skillbridge_screen.dart';
 import 'developer_reviews_screen.dart';
+import 'developer_repositories_screen.dart';
 
 // ---------------------------------------------------------------- THEME
 const Color _primary = Color(0xFF4F46E5);
@@ -392,6 +393,20 @@ class _ProfileBody extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 12),
+              _ProfileActionButton(
+                icon: Icons.code_rounded,
+                title: 'GitHub Repositories',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const DeveloperRepositoriesScreen(),
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: 12),

@@ -1,8 +1,15 @@
 import 'dart:convert';
 import 'dart:js_interop';
 
+import 'package:flutter/foundation.dart';
+
 @JS('openRazorpayCheckout')
-external void openRazorpayCheckout(String optionsJson, JSFunction onSuccess);
+external void openRazorpayCheckout(
+  JSString optionsJson,
+  JSFunction onSuccess,
+  JSFunction onFailure,
+  JSFunction onDismissed,
+);
 
 Future<void> openRazorpayWeb({
   required Map<String, dynamic> options,
@@ -13,9 +20,30 @@ Future<void> openRazorpayWeb({
   )
   onSuccess,
 }) async {
-  final callback = (JSString paymentId, JSString orderId, JSString signature) {
-    onSuccess(paymentId.toDart, orderId.toDart, signature.toDart);
+  final callback = (JSString responseJson) {
+    final response = jsonDecode(responseJson.toDart) as Map<String, dynamic>;
+    onSuccess(
+      response['razorpay_payment_id'] as String?,
+      response['razorpay_order_id'] as String?,
+      response['razorpay_signature'] as String?,
+    );
   }.toJS;
 
-  openRazorpayCheckout(jsonEncode(options), callback);
+  final failureCallback = (JSString errorJson) {
+    final error = jsonDecode(errorJson.toDart) as Map<String, dynamic>;
+    debugPrint(
+      'Razorpay payment failed: '
+      '${error['description'] ?? error['reason']}',
+    );
+  }.toJS;
+  final dismissedCallback = (() {
+    debugPrint('Razorpay checkout dismissed.');
+  }).toJS;
+
+  openRazorpayCheckout(
+    jsonEncode(options).toJS,
+    callback,
+    failureCallback,
+    dismissedCallback,
+  );
 }

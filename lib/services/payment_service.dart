@@ -32,7 +32,10 @@ class PaymentService {
 
         final callable = functions.httpsCallable('createRazorpayOrder');
 
-        final result = await callable.call({'projectId': projectId});
+        final result = await callable.call({
+          'projectId': projectId,
+          'amount': amount,
+        });
 
         final data = Map<String, dynamic>.from(result.data);
 
@@ -97,7 +100,7 @@ class PaymentService {
 
       _razorpay!.open(options);
     } catch (e) {
-      print('Payment initialization failed: $e');
+      debugPrint('Payment initialization failed: $e');
       rethrow;
     }
   }
@@ -107,11 +110,11 @@ class PaymentService {
     String? orderId,
     String? signature,
   ) async {
-    print('========== PAYMENT SUCCESS ==========');
-    print('Payment ID: $paymentId');
-    print('Order ID: $orderId');
-    print('Signature: $signature');
-    print('=====================================');
+    debugPrint('========== PAYMENT SUCCESS ==========');
+    debugPrint('Payment ID: $paymentId');
+    debugPrint('Order ID: $orderId');
+    debugPrint('Signature: $signature');
+    debugPrint('=====================================');
 
     await _verifyPayment(
       orderId: orderId,
@@ -121,11 +124,11 @@ class PaymentService {
   }
 
   Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    print('========== PAYMENT SUCCESS ==========');
-    print('Payment ID: ${response.paymentId}');
-    print('Order ID: ${response.orderId}');
-    print('Signature: ${response.signature}');
-    print('=====================================');
+    debugPrint('========== PAYMENT SUCCESS ==========');
+    debugPrint('Payment ID: ${response.paymentId}');
+    debugPrint('Order ID: ${response.orderId}');
+    debugPrint('Signature: ${response.signature}');
+    debugPrint('=====================================');
 
     await _verifyPayment(
       orderId: response.orderId,
@@ -153,32 +156,32 @@ class PaymentService {
       final data = Map<String, dynamic>.from(result.data);
 
       if (data['verified'] == true) {
-        print('====================================');
-        print('PAYMENT VERIFIED SUCCESSFULLY');
-        print('Payment ID: ${data['paymentId']}');
-        print('Order ID: ${data['orderId']}');
-        print('Project ID: ${data['projectId']}');
-        print('Amount: ${data['amount']} ${data['currency']}');
-        print('====================================');
+        debugPrint('====================================');
+        debugPrint('PAYMENT VERIFIED SUCCESSFULLY');
+        debugPrint('Payment ID: ${data['paymentId']}');
+        debugPrint('Order ID: ${data['orderId']}');
+        debugPrint('Project ID: ${data['projectId']}');
+        debugPrint('Amount: ${data['amount']} ${data['currency']}');
+        debugPrint('====================================');
       } else {
-        print('Payment verification failed.');
+        debugPrint('Payment verification failed.');
       }
     } catch (e) {
-      print('Payment verification error: $e');
+      debugPrint('Payment verification error: $e');
     }
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    print('========== PAYMENT FAILED ==========');
-    print('Code: ${response.code}');
-    print('Message: ${response.message}');
-    print('====================================');
+    debugPrint('========== PAYMENT FAILED ==========');
+    debugPrint('Code: ${response.code}');
+    debugPrint('Message: ${response.message}');
+    debugPrint('====================================');
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
-    print('========== EXTERNAL WALLET ==========');
-    print('Wallet: ${response.walletName}');
-    print('=====================================');
+    debugPrint('========== EXTERNAL WALLET ==========');
+    debugPrint('Wallet: ${response.walletName}');
+    debugPrint('=====================================');
   }
 
   void dispose() {
