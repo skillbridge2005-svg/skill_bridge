@@ -16,6 +16,28 @@ class NotificationService {
 
   String? get currentDeveloperId => _auth.currentUser?.uid;
 
+  Future<void> Function() get deleteAllNotifications => () async {
+    final developerId = _requireDeveloper();
+    final snapshot = await _notificationsCollection
+        .where('developerId', isEqualTo: developerId)
+        .get();
+
+    for (var start = 0; start < snapshot.docs.length; start += 500) {
+      final end = start + 500 < snapshot.docs.length
+          ? start + 500
+          : snapshot.docs.length;
+      final batch = _firestore.batch();
+
+      for (final document in snapshot.docs.sublist(start, end)) {
+        batch.delete(document.reference);
+      }
+
+      await batch.commit();
+    }
+  };
+
+  Future<void> Function() get clearAllNotifications => deleteAllNotifications;
+
   // ---------------------------------------------------------------------------
   // NOTIFICATION STREAMS
   // ---------------------------------------------------------------------------
@@ -276,28 +298,6 @@ class NotificationService {
   // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
-  Future<void> clearAllNotifications() async {
-    final developerId = _requireDeveloper();
-
-    while (true) {
-      final snapshot = await _notificationsCollection
-          .where('developerId', isEqualTo: developerId)
-          .limit(450)
-          .get();
-
-      if (snapshot.docs.isEmpty) {
-        return;
-      }
-
-      final batch = _firestore.batch();
-
-      for (final document in snapshot.docs) {
-        batch.delete(document.reference);
-      }
-
-      await batch.commit();
-    }
-  }
 
   String _requireDeveloper() {
     final uid = currentDeveloperId;

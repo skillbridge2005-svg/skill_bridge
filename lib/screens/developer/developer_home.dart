@@ -14,6 +14,7 @@ import '../../services/notification_service.dart';
 import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
+import 'team_messages_screen.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -593,10 +594,19 @@ class _DeveloperHomeState extends State<DeveloperHome>
               icon: Icons.chat_bubble_outline_rounded,
               badge: 2,
               selected: _messagesOpen,
-              onTap: () => setState(() {
-                _messagesOpen = !_messagesOpen;
-                _notificationsOpen = false;
-              }),
+              onTap: () {
+                setState(() {
+                  _messagesOpen = false;
+                  _notificationsOpen = false;
+                });
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TeamMessagesScreen(),
+                  ),
+                );
+              },
             ),
             const SizedBox(width: 4),
             PopupMenuButton<String>(
@@ -1521,44 +1531,64 @@ class _DeveloperHomeState extends State<DeveloperHome>
           onAction: notifications.any((notification) => notification.isUnread)
               ? _markAllNotificationsRead
               : null,
-          children: notifications.isEmpty
-              ? const [
-                  Padding(
-                    padding: EdgeInsets.all(22),
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.notifications_none_rounded,
-                          size: 32,
-                          color: _AppColors.muted,
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'No notifications yet',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'New updates will appear here.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: _AppColors.muted,
-                          ),
-                        ),
-                      ],
+          children: [
+            if (notifications.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(22),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.notifications_none_rounded,
+                      size: 32,
+                      color: _AppColors.muted,
                     ),
-                  ),
-                ]
-              : notifications
-                    .take(8)
-                    .map((notification) => _buildNotificationItem(notification))
-                    .toList(),
+                    SizedBox(height: 8),
+                    Text(
+                      'No notifications yet',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'New updates will appear here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: _AppColors.muted),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...notifications.take(8).map(_buildNotificationItem),
+            const Divider(height: 12),
+            Align(
+              alignment: Alignment.center,
+              child: TextButton.icon(
+                onPressed: _openAllNotifications,
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: const Text('View all notifications'),
+                style: TextButton.styleFrom(
+                  foregroundColor: _AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  void _openAllNotifications() {
+    setState(() {
+      _notificationsOpen = false;
+      _messagesOpen = false;
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
     );
   }
 

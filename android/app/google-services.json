@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "980367306545-jsu77cuna7tr0juv38jqff7ufdflor00.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.skill_bridge",
+            "certificate_hash": "187f74535e8ee60a3a318cd51db21e7d1b6ae233"
+          }
+        },
+        {
           "client_id": "980367306545-02ltousaqnvthur87kir8i2hm9l2qpmr.apps.googleusercontent.com",
           "client_type": 3
         }

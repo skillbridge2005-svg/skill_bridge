@@ -71,15 +71,16 @@ Future<void> main() async {
   );
 
   // In debug builds, call the local Functions emulator.
-  // Android emulators reach the host via 10.0.2.2; desktop/web use localhost.
-  if (kDebugMode) {
-    final host = (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
-        ? '10.0.2.2'
-        : '127.0.0.1';
+  // For a physical Android device, use adb reverse tcp:5001 tcp:5001.
+  // if (kDebugMode) {
+  //   final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
-    FirebaseFunctions.instanceFor(region: 'us-central1')
-        .useFunctionsEmulator(host, 5001);
-  }
+  //   debugPrint('FUNCTIONS DEBUG: Before emulator setup');
+
+  //   functions.useFunctionsEmulator('192.168.1.6', 5001);
+
+  //   debugPrint('FUNCTIONS DEBUG: Emulator configured at 127.0.0.1:5001');
+  // }
 
   runApp(
     MultiProvider(

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'email_verification_screen.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -26,6 +27,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _verificationSent = false;
+  bool _emailVerified = false;
 
   // ------------------------------------------------------------
   // COLORS
@@ -53,10 +56,149 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // ------------------------------------------------------------
-  // REGISTER
+  // SEND VERIFICATION EMAIL
+  // ------------------------------------------------------------
+
+  Future<void> _verifyEmail() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final name = _nameController.text.trim();
+      final email = _emailController.text.trim();
+      final password = _passwordController.text;
+
+      User? user = FirebaseAuth.instance.currentUser;
+
+      if (user != null &&
+          user.email?.toLowerCase() == email.toLowerCase() &&
+          !user.emailVerified) {
+        await user.reload();
+        user = FirebaseAuth.instance.currentUser;
+      } else if (user == null ||
+          user.email?.toLowerCase() != email.toLowerCase()) {
+        final credential = await FirebaseAuth.instance
+            .createUserWithEmailAndPassword(email: email, password: password);
+
+        user = credential.user;
+      }
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: 'user-not-created',
+          message: 'Could not create your account.',
+        );
+      }
+
+      await user.updateDisplayName(name);
+
+      if (!user.emailVerified) {
+        await user.sendEmailVerification();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _verificationSent = true;
+      });
+
+      final result = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => EmailVerificationScreen(email: email),
+        ),
+      );
+
+      if (!mounted) return;
+
+      final currentUser = FirebaseAuth.instance.currentUser;
+
+      if (result == true && currentUser != null && currentUser.emailVerified) {
+        setState(() {
+          _emailVerified = true;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Email verified! Select your role and create your account.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      String message;
+
+      switch (e.code) {
+        case 'email-already-in-use':
+          message = 'This email is already registered. Please log in.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
+          break;
+        case 'weak-password':
+          message = 'Password must be at least 6 characters.';
+          break;
+        case 'operation-not-allowed':
+          message = 'Email/Password authentication is not enabled in Firebase.';
+          break;
+        case 'network-request-failed':
+          message = 'Please check your internet connection.';
+          break;
+        case 'too-many-requests':
+          message = 'Too many attempts. Please try again later.';
+          break;
+        default:
+          message = e.message ?? 'Could not send verification email.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // ------------------------------------------------------------
+  // SAVE PROFILE AFTER EMAIL VERIFICATION
   // ------------------------------------------------------------
 
   Future<void> _register() async {
+    if (!_emailVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please verify your email before creating your account.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -66,31 +208,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      final name = _nameController.text.trim();
-      final email = _emailController.text.trim();
-      final password = _passwordController.text.trim();
-
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(email: email, password: password);
-
-      final user = credential.user;
+      final user = FirebaseAuth.instance.currentUser;
 
       if (user == null) {
         throw FirebaseAuthException(
-          code: 'user-not-created',
-          message: 'User account could not be created.',
+          code: 'user-not-found',
+          message: 'Your registration session has expired. Please try again.',
         );
       }
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'uid': user.uid,
-        'name': name,
-        'email': email,
-        'role': _selectedRole,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      await user.reload();
 
-      await user.updateDisplayName(name);
+      final refreshedUser = FirebaseAuth.instance.currentUser;
+
+      if (refreshedUser == null || !refreshedUser.emailVerified) {
+        if (mounted) {
+          setState(() {
+            _emailVerified = false;
+          });
+        }
+
+        throw FirebaseAuthException(
+          code: 'email-not-verified',
+          message: 'Please verify your email before continuing.',
+        );
+      }
+
+      final name = _nameController.text.trim();
+      final email = _emailController.text.trim();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(refreshedUser.uid)
+          .set({
+            'uid': refreshedUser.uid,
+            'name': name,
+            'email': email,
+            'role': _selectedRole,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+      await refreshedUser.updateDisplayName(name);
 
       if (!mounted) return;
 
@@ -98,41 +256,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      String message = 'Registration failed.';
-
-      switch (e.code) {
-        case 'email-already-in-use':
-          message = 'This email is already registered.';
-          break;
-
-        case 'invalid-email':
-          message = 'Please enter a valid email address.';
-          break;
-
-        case 'weak-password':
-          message = 'Password must be at least 6 characters.';
-          break;
-
-        case 'operation-not-allowed':
-          message = 'Email/Password authentication is not enabled in Firebase.';
-          break;
-
-        case 'network-request-failed':
-          message = 'Please check your internet connection.';
-          break;
-
-        default:
-          message = e.message ?? 'Registration failed.';
-      }
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(message),
+          content: Text(e.message ?? 'Registration failed.'),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
         ),
       );
     } on FirebaseException catch (e) {
@@ -140,12 +267,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Firestore error: ${e.code}\n${e.message ?? ''}'),
+          content: Text('Firestore error: ${e.message ?? e.code}'),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
         ),
       );
     } catch (e) {
@@ -155,10 +278,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         SnackBar(
           content: Text('Error: $e'),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
         ),
       );
     } finally {
@@ -238,7 +357,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     return Expanded(
       child: GestureDetector(
-        onTap: _isLoading
+        onTap: (_isLoading || !_emailVerified)
             ? null
             : () {
                 setState(() {
@@ -567,6 +686,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                                 textInputAction: TextInputAction.next,
 
+                                onChanged: (_) {
+                                  if (_emailVerified || _verificationSent) {
+                                    setState(() {
+                                      _emailVerified = false;
+                                      _verificationSent = false;
+                                    });
+                                  }
+                                },
+
                                 decoration: _inputDecoration(
                                   label: 'Email',
                                   hint: 'you@example.com',
@@ -589,6 +717,64 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   return null;
                                 },
                               ),
+
+                              const SizedBox(height: 12),
+
+                              SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: OutlinedButton.icon(
+                                  onPressed: _isLoading || _emailVerified
+                                      ? null
+                                      : _verifyEmail,
+                                  icon: Icon(
+                                    _emailVerified
+                                        ? Icons.verified_rounded
+                                        : Icons.mark_email_read_outlined,
+                                  ),
+                                  label: Text(
+                                    _emailVerified
+                                        ? 'Email Verified'
+                                        : 'Verify Email',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: _emailVerified
+                                        ? Colors.green.shade700
+                                        : primary,
+                                    side: BorderSide(
+                                      color: _emailVerified
+                                          ? Colors.green
+                                          : primary,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              if (_emailVerified)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    'Your email has been verified successfully.',
+                                    style: TextStyle(
+                                      color: Colors.green,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                )
+                              else if (_verificationSent)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    'Verification email sent. Check your inbox to continue.',
+                                    style: TextStyle(color: grey, fontSize: 12),
+                                  ),
+                                ),
 
                               const SizedBox(height: 18),
 
@@ -775,7 +961,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 height: 56,
 
                                 child: FilledButton(
-                                  onPressed: _isLoading ? null : _register,
+                                  onPressed: (_isLoading || !_emailVerified)
+                                      ? null
+                                      : _register,
 
                                   style: FilledButton.styleFrom(
                                     backgroundColor: primary,
@@ -799,23 +987,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                             color: Colors.white,
                                           ),
                                         )
-                                      : const Row(
+                                      : Row(
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
 
                                           children: [
                                             Text(
-                                              'Create Account',
+                                              _emailVerified
+                                                  ? 'Create Account'
+                                                  : 'Verify Email First',
 
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.w800,
                                               ),
                                             ),
 
-                                            SizedBox(width: 10),
+                                            const SizedBox(width: 10),
 
-                                            Icon(
+                                            const Icon(
                                               Icons.arrow_forward_rounded,
                                               size: 20,
                                             ),

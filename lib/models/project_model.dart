@@ -15,6 +15,7 @@ class ProjectModel {
 
   final String clientId;
   final String clientName;
+  final String developerId;
 
   final List<String> skills;
   final List<String> technologies;
@@ -40,6 +41,7 @@ class ProjectModel {
     required this.description,
     required this.clientId,
     required this.clientName,
+    required this.developerId,
     required this.skills,
     required this.technologies,
     required this.budget,
@@ -66,6 +68,7 @@ class ProjectModel {
       description: _stringValue(data['description']),
       clientId: _stringValue(data['clientId']),
       clientName: _stringValue(data['clientName']),
+      developerId: _stringValue(data['developerId']),
       skills: _stringList(data['skills']),
       technologies: _stringList(data['technologies']),
       budget: _doubleValue(data['budget']),
@@ -92,6 +95,7 @@ class ProjectModel {
       description: _stringValue(data['description']),
       clientId: _stringValue(data['clientId']),
       clientName: _stringValue(data['clientName']),
+      developerId: _stringValue(data['developerId']),
       skills: _stringList(data['skills']),
       technologies: _stringList(data['technologies']),
       budget: _doubleValue(data['budget']),
@@ -117,6 +121,7 @@ class ProjectModel {
       'description': description.trim(),
       'clientId': clientId.trim(),
       'clientName': clientName.trim(),
+      'developerId': developerId.trim(),
       'skills': skills,
       'technologies': technologies,
       'budget': budget,
@@ -149,6 +154,7 @@ class ProjectModel {
     String? description,
     String? clientId,
     String? clientName,
+    String? developerId,
     List<String>? skills,
     List<String>? technologies,
     double? budget,
@@ -168,6 +174,7 @@ class ProjectModel {
       description: description ?? this.description,
       clientId: clientId ?? this.clientId,
       clientName: clientName ?? this.clientName,
+      developerId: developerId ?? this.developerId,
       skills: skills ?? List<String>.from(this.skills),
       technologies: technologies ?? List<String>.from(this.technologies),
       budget: budget ?? this.budget,

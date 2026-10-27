@@ -1,3 +1,5 @@
+// TODO Implement this library.
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -17,20 +19,24 @@ class TeamInvitationService {
   CollectionReference<Map<String, dynamic>> get _teams =>
       _firestore.collection('teams');
 
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _firestore.collection('users');
+
+  CollectionReference<Map<String, dynamic>> get _profiles =>
+      _firestore.collection('developerProfiles');
+
   CollectionReference<Map<String, dynamic>> get _notifications =>
       _firestore.collection('notifications');
 
   String get _currentUid {
     final uid = _auth.currentUser?.uid;
+
     if (uid == null || uid.trim().isEmpty) {
       throw Exception('Please sign in to continue.');
     }
+
     return uid;
   }
-
-  // ---------------------------------------------------------------------------
-  // RECEIVED INVITATIONS
-  // ---------------------------------------------------------------------------
 
   Stream<List<TeamInvitationModel>> watchReceivedInvitations() {
     final uid = _currentUid;
@@ -53,10 +59,6 @@ class TeamInvitationService {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // SENT INVITATIONS
-  // ---------------------------------------------------------------------------
-
   Stream<List<TeamInvitationModel>> watchSentInvitations(String teamId) {
     final uid = _currentUid;
 
@@ -70,22 +72,24 @@ class TeamInvitationService {
         );
   }
 
-  // ---------------------------------------------------------------------------
-  // SEND INVITATION + NOTIFY RECIPIENT
-  // ---------------------------------------------------------------------------
-
+  /// Creates an invitation with the selected role and responsibilities.
+  ///
+  /// Role and responsibilities are optional temporarily so existing callers
+  /// continue compiling until the team invitation dialog is updated.
   Future<String> sendInvitation({
     required String teamId,
     required String developerId,
+    String role = '',
+    String responsibilities = '',
   }) async {
     final uid = _currentUid;
 
-    if (teamId.trim().isEmpty) {
-      throw Exception('Team ID cannot be empty.');
+    if (teamId.trim().isEmpty || developerId.trim().isEmpty) {
+      throw Exception('Team and developer are required.');
     }
 
-    if (developerId.trim().isEmpty || developerId == uid) {
-      throw Exception('Select another valid developer.');
+    if (developerId == uid) {
+      throw Exception('You cannot invite yourself.');
     }
 
     final teamRef = _teams.doc(teamId);
@@ -105,12 +109,33 @@ class TeamInvitationService {
       throw Exception('Only active teams can invite developers.');
     }
 
-    final members = List<String>.from(team['memberIds'] ?? []);
+    final memberIds = List<String>.from(team['memberIds'] ?? []);
 
-    if (members.contains(developerId)) {
+    if (memberIds.contains(developerId)) {
       throw Exception('This developer is already a team member.');
     }
 
+    // Check that the recipient is a developer and is open to team invitations.
+    final userSnapshot = await _users.doc(developerId).get();
+
+    if (!userSnapshot.exists) {
+      throw Exception('Developer account not found.');
+    }
+
+    final userData = userSnapshot.data()!;
+
+    if ((userData['role'] ?? '').toString().toLowerCase() != 'developer') {
+      throw Exception('You can only invite developer accounts.');
+    }
+
+    final profileSnapshot = await _profiles.doc(developerId).get();
+    final profile = profileSnapshot.data() ?? {};
+
+    if (profile['openToTeams'] == false) {
+      throw Exception('This developer is not accepting team invitations.');
+    }
+
+    // Prevent another pending invitation to the same developer for this team.
     final existing = await _invitations
         .where('teamId', isEqualTo: teamId)
         .where('recipientId', isEqualTo: developerId)
@@ -127,16 +152,23 @@ class TeamInvitationService {
 
     final teamName = (team['name'] ?? 'a team').toString();
     final projectTitle = (team['projectTitle'] ?? '').toString();
+    final teamDescription = (team['description'] ?? '').toString();
+    final projectId = team['projectId']?.toString();
 
-    // Commit the invitation and its notification together.
+    final cleanRole = role.trim();
+    final cleanResponsibilities = responsibilities.trim();
+
     final batch = _firestore.batch();
 
     batch.set(invitationRef, {
       'teamId': teamId,
       'teamName': teamName,
       'projectTitle': projectTitle,
+      'teamDescription': teamDescription,
       'senderId': uid,
       'recipientId': developerId,
+      'role': cleanRole,
+      'responsibilities': cleanResponsibilities,
       'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
       'respondedAt': null,
@@ -150,7 +182,7 @@ class TeamInvitationService {
           : 'You have been invited to join "$teamName" for "$projectTitle".',
       'type': 'team_invitation',
       'isRead': false,
-      'projectId': team['projectId']?.toString(),
+      'projectId': projectId,
       'applicationId': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -160,12 +192,13 @@ class TeamInvitationService {
     return invitationRef.id;
   }
 
-  // ---------------------------------------------------------------------------
-  // ACCEPT INVITATION + NOTIFY TEAM OWNER
-  // ---------------------------------------------------------------------------
-
+  /// Accepts an invitation and adds the developer to the team.
+  ///
+  /// The role is stored against the developer UID in the team's memberRoles
+  /// map. The developer is added only when the invitation is accepted.
   Future<void> acceptInvitation(String invitationId) async {
     final uid = _currentUid;
+
     final invitationRef = _invitations.doc(invitationId);
     final notificationRef = _notifications.doc();
 
@@ -186,12 +219,14 @@ class TeamInvitationService {
         throw Exception('This invitation has already been processed.');
       }
 
-      final teamId = invitation['teamId'] as String?;
-      if (teamId == null || teamId.isEmpty) {
+      final teamId = invitation['teamId']?.toString() ?? '';
+
+      if (teamId.isEmpty) {
         throw Exception('Invalid team invitation.');
       }
 
       final senderId = invitation['senderId']?.toString() ?? '';
+
       if (senderId.isEmpty) {
         throw Exception('The invitation has no valid team owner.');
       }
@@ -209,15 +244,49 @@ class TeamInvitationService {
         throw Exception('This team is no longer accepting members.');
       }
 
+      // Prevent a stale or altered invitation from adding someone to a
+      // team whose owner no longer matches the invitation sender.
+      if (team['ownerId'] != senderId) {
+        throw Exception('The team owner no longer matches this invitation.');
+      }
+
       final memberIds = List<String>.from(team['memberIds'] ?? []);
+      final memberRoles = Map<String, dynamic>.from(team['memberRoles'] ?? {});
+      final memberResponsibilities = Map<String, dynamic>.from(
+        team['memberResponsibilities'] ?? {},
+      );
+
+      final role = (invitation['role'] ?? '').toString().trim();
+      final responsibilities = (invitation['responsibilities'] ?? '')
+          .toString()
+          .trim();
+
       final teamName = (invitation['teamName'] ?? team['name'] ?? 'the team')
           .toString();
 
+      // Add the developer and their role only if they are not already
+      // a member. Keep existing member roles unchanged.
       if (!memberIds.contains(uid)) {
+        memberIds.add(uid);
+
+        if (role.isNotEmpty) {
+          memberRoles[uid] = role;
+        }
+
+        if (responsibilities.isNotEmpty) {
+          memberResponsibilities[uid] = responsibilities;
+        }
+
         transaction.update(teamRef, {
-          'memberIds': FieldValue.arrayUnion([uid]),
+          'memberIds': memberIds,
+          'memberRoles': memberRoles,
+          'memberResponsibilities': memberResponsibilities,
           'updatedAt': FieldValue.serverTimestamp(),
         });
+      } else {
+        // If already a member, do not overwrite an existing role.
+        // This avoids silently changing a member's role on a duplicate
+        // or stale invitation.
       }
 
       transaction.update(invitationRef, {
@@ -228,8 +297,9 @@ class TeamInvitationService {
       transaction.set(notificationRef, {
         'developerId': senderId,
         'title': 'Team invitation accepted',
-        'body':
-            'The developer you invited accepted the invitation to "$teamName".',
+        'body': role.isEmpty
+            ? 'The developer you invited accepted the invitation to "$teamName".'
+            : 'The developer you invited accepted the "$role" role on "$teamName".',
         'type': 'team_invitation',
         'isRead': false,
         'projectId': team['projectId']?.toString(),
@@ -239,23 +309,21 @@ class TeamInvitationService {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // REJECT INVITATION + NOTIFY TEAM OWNER
-  // ---------------------------------------------------------------------------
-
+  /// Declines an invitation without adding the developer to the team.
   Future<void> rejectInvitation(String invitationId) async {
     final uid = _currentUid;
+
     final invitationRef = _invitations.doc(invitationId);
     final notificationRef = _notifications.doc();
 
     await _firestore.runTransaction((transaction) async {
-      final snapshot = await transaction.get(invitationRef);
+      final invitationSnapshot = await transaction.get(invitationRef);
 
-      if (!snapshot.exists) {
+      if (!invitationSnapshot.exists) {
         throw Exception('Invitation not found.');
       }
 
-      final invitation = snapshot.data()!;
+      final invitation = invitationSnapshot.data()!;
 
       if (invitation['recipientId'] != uid) {
         throw Exception('This invitation belongs to another developer.');
@@ -266,11 +334,23 @@ class TeamInvitationService {
       }
 
       final senderId = invitation['senderId']?.toString() ?? '';
+
       if (senderId.isEmpty) {
         throw Exception('The invitation has no valid team owner.');
       }
 
       final teamName = (invitation['teamName'] ?? 'the team').toString();
+
+      final teamId = invitation['teamId']?.toString() ?? '';
+      String? projectId;
+
+      if (teamId.isNotEmpty) {
+        final teamSnapshot = await transaction.get(_teams.doc(teamId));
+
+        if (teamSnapshot.exists) {
+          projectId = teamSnapshot.data()?['projectId']?.toString();
+        }
+      }
 
       transaction.update(invitationRef, {
         'status': 'rejected',
@@ -284,7 +364,7 @@ class TeamInvitationService {
             'The developer you invited declined the invitation to "$teamName".',
         'type': 'team_invitation',
         'isRead': false,
-        'projectId': null,
+        'projectId': projectId,
         'applicationId': null,
         'createdAt': FieldValue.serverTimestamp(),
       });

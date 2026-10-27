@@ -2727,8 +2727,11 @@ class _ProjectEstimateResultScreenState
     setState(() => _isRegenerating = true);
 
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable(
+      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+      final callable = functions.httpsCallable(
         'generateAIProjectPlan',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 320)),
       );
 
       final result = await callable.call({
@@ -2841,6 +2844,25 @@ class _ProjectEstimateResultScreenState
       );
 
       if (status == 'accepted') {
+        // Step 1: Configure the authenticated role for this user.
+        final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+        await functions.httpsCallable('ensureSupabaseRole').call();
+
+        // Step 2: Refresh the Firebase ID token.
+        await user.getIdToken(true);
+
+        // Step 3: Verify the refreshed token contains the role.
+        final tokenResult = await user.getIdTokenResult();
+        final role = tokenResult.claims?['role'];
+
+        debugPrint('SUPABASE JWT ROLE AFTER REFRESH: $role');
+
+        if (role != 'authenticated') {
+          throw StateError('Firebase token is missing role=authenticated.');
+        }
+
+        // Step 4: Upload generated and reference images.
         final storage = SupabaseStorageService.instance;
 
         final safePlanId = _currentPlanId!.replaceAll(

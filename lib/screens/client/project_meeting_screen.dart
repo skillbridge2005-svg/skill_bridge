@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/notification_service.dart';
 
@@ -28,6 +29,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
 
   final Set<String> _selectedMembers = {};
   final NotificationService _notificationService = NotificationService();
+  late Future<List<Map<String, dynamic>>> _participantsFuture;
 
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
@@ -61,6 +63,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
   @override
   void initState() {
     super.initState();
+    _participantsFuture = _loadProjectParticipants();
     // Keeps the live preview card in sync with the title field.
     _titleController.addListener(() {
       if (mounted) setState(() {});
@@ -116,6 +119,93 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
     );
   }
 
+  Future<List<Map<String, dynamic>>> _loadProjectParticipants() async {
+    final firestore = FirebaseFirestore.instance;
+
+    final projectSnapshot = await firestore
+        .collection('projects')
+        .doc(widget.projectId)
+        .get();
+
+    if (!projectSnapshot.exists) {
+      throw StateError('Project not found.');
+    }
+
+    final projectData = projectSnapshot.data();
+
+    if (projectData == null) {
+      throw StateError('Project data is unavailable.');
+    }
+
+    final participantIds = <String>{};
+    final clientId = projectData['clientId']?.toString().trim() ?? '';
+    final assignedDeveloperId =
+        projectData['developerId']?.toString().trim() ?? '';
+
+    if (clientId.isNotEmpty) {
+      participantIds.add(clientId);
+    }
+
+    if (assignedDeveloperId.isNotEmpty) {
+      participantIds.add(assignedDeveloperId);
+    }
+
+    final teamsSnapshot = await firestore
+        .collection('teams')
+        .where('projectId', isEqualTo: widget.projectId)
+        .get();
+
+    for (final team in teamsSnapshot.docs) {
+      final teamData = team.data();
+
+      if (teamData['status']?.toString().trim().toLowerCase() != 'active') {
+        continue;
+      }
+
+      final memberIds = teamData['memberIds'];
+
+      if (memberIds is List) {
+        for (final memberId in memberIds) {
+          final id = memberId.toString().trim();
+
+          if (id.isNotEmpty) {
+            participantIds.add(id);
+          }
+        }
+      }
+    }
+
+    final participants = await Future.wait(
+      participantIds.map((participantId) async {
+        final userSnapshot = await firestore
+            .collection('users')
+            .doc(participantId)
+            .get();
+        final userData = userSnapshot.data() ?? <String, dynamic>{};
+        final role = participantId == clientId ? 'Client' : 'Developer';
+        final storedName = (userData['name'] ?? userData['displayName'] ?? '')
+            .toString()
+            .trim();
+
+        return <String, dynamic>{
+          'id': participantId,
+          'name': storedName.isEmpty ? 'Project Participant' : storedName,
+          'email': (userData['email'] ?? '').toString(),
+          'role': role,
+        };
+      }),
+    );
+
+    participants.sort((a, b) {
+      if (a['role'] == 'Client') return -1;
+      if (b['role'] == 'Client') return 1;
+
+      return (a['name'] as String).compareTo(b['name'] as String);
+    });
+
+    return participants;
+  }
+
   Future<void> _scheduleMeeting() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -147,30 +237,21 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
 
     try {
       final firestore = FirebaseFirestore.instance;
-
-      final teamSnapshot = await firestore
-          .collection('projects')
-          .doc(widget.projectId)
-          .collection('team')
-          .get();
-
-      final selectedParticipants = teamSnapshot.docs
-          .where((doc) => _selectedMembers.contains(doc.id))
-          .map((doc) {
-            final data = doc.data();
-
-            return {
-              'teamMemberDocId': doc.id,
-              'developerId': data['developerId']?.toString() ?? doc.id,
-              'name': data['name'] ?? 'Team Member',
-              'email': data['email'] ?? '',
-              'role': data['role'] ?? 'Developer',
+      final allParticipants = await _loadProjectParticipants();
+      final selectedParticipants = allParticipants
+          .where((participant) => _selectedMembers.contains(participant['id']))
+          .map((participant) {
+            return <String, dynamic>{
+              'participantId': participant['id'],
+              'name': participant['name'],
+              'email': participant['email'],
+              'role': participant['role'],
             };
           })
           .toList();
 
       if (selectedParticipants.isEmpty) {
-        _showMessage('Selected team members could not be found.');
+        _showMessage('Please select at least one participant.');
         return;
       }
 
@@ -185,8 +266,8 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
         'organizerId': user.uid,
         'organizerEmail': user.email ?? '',
         'participants': selectedParticipants,
-        'participantTeamMemberIds': selectedParticipants
-            .map((p) => p['teamMemberDocId'])
+        'participantIds': selectedParticipants
+            .map((participant) => participant['participantId'])
             .toList(),
         'status': 'scheduled',
         'createdAt': FieldValue.serverTimestamp(),
@@ -196,14 +277,33 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
       var failedInvitations = 0;
       for (final participant in selectedParticipants) {
         try {
-          await _notificationService.createNotification(
-            developerId: participant['developerId']?.toString() ?? '',
-            title: 'New Project Meeting',
-            body: 'You have been invited to a project meeting.',
-            type: 'meeting_invitation',
-            projectId: widget.projectId,
-            meetingId: meetingRef.id,
-          );
+          final participantId = participant['participantId']?.toString() ?? '';
+          final isClient = participant['role'] == 'Client';
+
+          if (isClient) {
+            await firestore
+                .collection('users')
+                .doc(participantId)
+                .collection('notifications')
+                .add({
+                  'title': 'New Project Meeting',
+                  'message': 'You have been invited to a project meeting.',
+                  'type': 'meeting_invitation',
+                  'projectId': widget.projectId,
+                  'meetingId': meetingRef.id,
+                  'isRead': false,
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+          } else {
+            await _notificationService.createNotification(
+              developerId: participantId,
+              title: 'New Project Meeting',
+              body: 'You have been invited to a project meeting.',
+              type: 'meeting_invitation',
+              projectId: widget.projectId,
+              meetingId: meetingRef.id,
+            );
+          }
         } catch (e) {
           failedInvitations++;
           debugPrint('Failed to notify a meeting participant: $e');
@@ -257,17 +357,6 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
     final m = minutes % 60;
     if (m == 0) return h == 1 ? '1 hr' : '$h hrs';
     return '$h hr $m min';
-  }
-
-  String _initials(String name) {
-    final parts = name
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (parts.isEmpty) return '?';
-    if (parts.length == 1) return parts.first[0].toUpperCase();
-    return (parts.first[0] + parts.last[0]).toUpperCase();
   }
 
   // --------------------------------------------------------------- BUILD
@@ -325,7 +414,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: _primaryColor.withOpacity(0.30),
+            color: _primaryColor.withValues(alpha: 0.30),
             blurRadius: 24,
             offset: const Offset(0, 12),
           ),
@@ -336,17 +425,17 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
           Positioned(
             right: -30,
             top: -30,
-            child: _bubble(120, Colors.white.withOpacity(0.08)),
+            child: _bubble(120, Colors.white.withValues(alpha: 0.08)),
           ),
           Positioned(
             right: 50,
             bottom: -26,
-            child: _bubble(64, _pink.withOpacity(0.30)),
+            child: _bubble(64, _pink.withValues(alpha: 0.30)),
           ),
           Positioned(
             left: -36,
             bottom: -50,
-            child: _bubble(100, Colors.white.withOpacity(0.06)),
+            child: _bubble(100, Colors.white.withValues(alpha: 0.06)),
           ),
           Padding(
             padding: const EdgeInsets.all(22),
@@ -356,7 +445,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.16),
+                    color: Colors.white.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: Colors.white24),
                   ),
@@ -383,7 +472,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
+                    color: Colors.white.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
@@ -731,7 +820,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: selected ? _primaryColor.withOpacity(0.07) : Colors.white,
+          color: selected ? _primaryColor.withValues(alpha: 0.07) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: selected ? _primaryColor : const Color(0xFFE2E8F0),
@@ -789,7 +878,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
             ? null
             : [
                 BoxShadow(
-                  color: _primaryColor.withOpacity(0.35),
+                  color: _primaryColor.withValues(alpha: 0.35),
                   blurRadius: 16,
                   offset: const Offset(0, 8),
                 ),
@@ -875,7 +964,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: _primaryColor.withOpacity(0.10),
+                color: _primaryColor.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -891,15 +980,14 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
   }
 
   Widget _buildTeamSelector() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('projects')
-          .doc(widget.projectId)
-          .collection('team')
-          .snapshots(),
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _participantsFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Text('Unable to load team members.');
+          return Text(
+            'Unable to load project participants: ${snapshot.error}',
+            style: const TextStyle(color: Colors.red),
+          );
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -909,145 +997,115 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
           );
         }
 
-        final members = snapshot.data?.docs ?? [];
+        final participants = snapshot.data ?? <Map<String, dynamic>>[];
 
-        if (members.isEmpty) {
-          return Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF7ED),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.group_off_rounded, color: Color(0xFFEA580C)),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'No team members have been assigned to this project yet.',
-                  ),
-                ),
-              ],
-            ),
+        if (participants.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No project participants were found.'),
           );
         }
 
-        final allSelected = members.every(
-          (m) => _selectedMembers.contains(m.id),
+        final allSelected = participants.every(
+          (participant) => _selectedMembers.contains(participant['id']),
         );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    if (allSelected) {
-                      _selectedMembers.clear();
-                    } else {
-                      _selectedMembers.addAll(members.map((m) => m.id));
-                    }
-                  });
-                },
-                icon: Icon(
-                  allSelected ? Icons.deselect : Icons.select_all,
-                  size: 18,
-                ),
-                label: Text(allSelected ? 'Clear all' : 'Select all'),
-              ),
-            ),
-            ...members.map((member) {
-              final data = member.data();
-              final name = (data['name'] ?? 'Team Member').toString();
-              final email = (data['email'] ?? '').toString();
-              final role = (data['role'] ?? 'Developer').toString();
-              final selected = _selectedMembers.contains(member.id);
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (selected) {
-                      _selectedMembers.remove(member.id);
-                    } else {
-                      _selectedMembers.add(member.id);
-                    }
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOut,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? _primaryColor.withOpacity(0.07)
-                        : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: selected ? _primaryColor : const Color(0xFFE2E8F0),
-                      width: selected ? 1.5 : 1,
-                    ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Select Meeting Participants',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                   ),
-                  child: Row(
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      if (allSelected) {
+                        _selectedMembers.clear();
+                      } else {
+                        _selectedMembers.addAll(
+                          participants.map(
+                            (participant) => participant['id'] as String,
+                          ),
+                        );
+                      }
+                    });
+                  },
+                  icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+                  label: Text(allSelected ? 'Clear all' : 'Select all'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...participants.map((participant) {
+              final id = participant['id'] as String;
+              final name = participant['name'] as String;
+              final email = participant['email'] as String;
+              final role = participant['role'] as String;
+              final selected = _selectedMembers.contains(id);
+              final isClient = role == 'Client';
+
+              return Card(
+                elevation: 0,
+                margin: const EdgeInsets.only(bottom: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(
+                    color: selected ? _primaryColor : const Color(0xFFE2E8F0),
+                  ),
+                ),
+                child: CheckboxListTile(
+                  value: selected,
+                  activeColor: _primaryColor,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (value) {
+                    setState(() {
+                      if (value == true) {
+                        _selectedMembers.add(id);
+                      } else {
+                        _selectedMembers.remove(id);
+                      }
+                    });
+                  },
+                  title: Row(
                     children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: selected
-                            ? _primaryColor
-                            : const Color(0xFFE2E8F0),
+                      Expanded(
                         child: Text(
-                          _initials(name),
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isClient
+                              ? const Color(0xFFDCFCE7)
+                              : const Color(0xFFDBEAFE),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          role,
                           style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: selected ? Colors.white : _muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: isClient
+                                ? const Color(0xFF166534)
+                                : const Color(0xFF1D4ED8),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: _ink,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              email.isNotEmpty ? '$role • $email' : role,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: _muted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: Icon(
-                          selected
-                              ? Icons.check_circle_rounded
-                              : Icons.radio_button_unchecked_rounded,
-                          key: ValueKey(selected),
-                          color: selected
-                              ? _primaryColor
-                              : const Color(0xFFCBD5E1),
-                        ),
-                      ),
                     ],
+                  ),
+                  subtitle: Text(
+                    email.isEmpty ? id : email,
+                    style: const TextStyle(fontSize: 12, color: _muted),
                   ),
                 ),
               );
@@ -1126,7 +1184,7 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
                     Icon(
                       Icons.event_busy_rounded,
                       size: 44,
-                      color: _primaryColor.withOpacity(0.35),
+                      color: _primaryColor.withValues(alpha: 0.35),
                     ),
                     const SizedBox(height: 10),
                     const Text(
@@ -1164,6 +1222,10 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
     final agenda = (meeting['agenda'] ?? '').toString();
     final link = (meeting['meetingLink'] ?? '').toString();
     final participants = (meeting['participants'] as List?) ?? const [];
+    final rawResponses = meeting['responses'];
+    final Map<String, dynamic> responses = rawResponses is Map
+        ? Map<String, dynamic>.from(rawResponses)
+        : <String, dynamic>{};
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1310,6 +1372,212 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
                             _showMessage('Meeting link copied.');
                           },
                         ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (link.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final uri = Uri.tryParse(link.trim());
+
+                        if (uri == null ||
+                            !uri.hasScheme ||
+                            (uri.scheme != 'https' && uri.scheme != 'http')) {
+                          _showMessage('Please check the meeting link.');
+                          return;
+                        }
+
+                        try {
+                          final opened = await launchUrl(
+                            uri,
+                            mode: LaunchMode.externalApplication,
+                          );
+
+                          if (!opened && mounted) {
+                            _showMessage('Unable to open the meeting link.');
+                          }
+                        } catch (e) {
+                          debugPrint('Unable to open meeting link: $e');
+                          if (mounted) {
+                            _showMessage('Unable to open the meeting link.');
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.open_in_browser_rounded),
+                      label: const Text('Open Meeting Link'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (responses.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.forum_outlined,
+                              color: Color(0xFF2563EB),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Meeting Responses',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDBEAFE),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '${responses.length} response(s)',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1D4ED8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ...responses.entries.map((entry) {
+                          final response = entry.value;
+
+                          if (response is! Map) {
+                            return const SizedBox.shrink();
+                          }
+
+                          final attendance =
+                              (response['attendance'] ?? 'unknown').toString();
+                          final message = (response['message'] ?? '')
+                              .toString()
+                              .trim();
+                          final email = (response['email'] ?? '')
+                              .toString()
+                              .trim();
+                          final isUnableToJoin = attendance == 'unable_to_join';
+                          final label = isUnableToJoin
+                              ? 'Cannot attend'
+                              : attendance == 'attending'
+                              ? 'Will attend'
+                              : attendance;
+                          final statusColor = isUnableToJoin
+                              ? const Color(0xFFB42318)
+                              : const Color(0xFF027A48);
+                          final statusBackground = isUnableToJoin
+                              ? const Color(0xFFFEF3F2)
+                              : const Color(0xFFECFDF3);
+
+                          return Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFFE5E7EB),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 17,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                    Text(
+                                      email.isEmpty
+                                          ? 'Meeting participant'
+                                          : email,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF344054),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: statusBackground,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Text(
+                                        label,
+                                        style: TextStyle(
+                                          color: statusColor,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (message.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  const Text(
+                                    'Response:',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF475467),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    message,
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      height: 1.5,
+                                      color: Color(0xFF475467),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }),
                       ],
                     ),
                   ),
@@ -1463,3 +1731,5 @@ class _ProjectMeetingScreenState extends State<ProjectMeetingScreen> {
     }
   }
 }
+
+

@@ -20,6 +20,7 @@ class NotificationModel {
   final String body;
   final String type;
   final bool isRead;
+
   final String? projectId;
   final String? applicationId;
   final String? meetingId;
@@ -101,35 +102,23 @@ class NotificationModel {
   bool get isUnread => !isRead;
 
   static String _stringValue(dynamic value) {
-    if (value == null) {
-      return '';
-    }
-
+    if (value == null) return '';
     return value.toString().trim();
   }
 
   static String? _nullableStringValue(dynamic value) {
-    if (value == null) {
-      return null;
-    }
+    if (value == null) return null;
 
     final result = value.toString().trim();
 
-    if (result.isEmpty) {
-      return null;
-    }
+    if (result.isEmpty) return null;
 
     return result;
   }
 
   static bool _boolValue(dynamic value) {
-    if (value is bool) {
-      return value;
-    }
-
-    if (value is num) {
-      return value != 0;
-    }
+    if (value is bool) return value;
+    if (value is num) return value != 0;
 
     if (value is String) {
       return value.toLowerCase() == 'true';
@@ -139,13 +128,8 @@ class NotificationModel {
   }
 
   static DateTime? _dateTimeValue(dynamic value) {
-    if (value is Timestamp) {
-      return value.toDate();
-    }
-
-    if (value is DateTime) {
-      return value;
-    }
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
 
     if (value is String) {
       return DateTime.tryParse(value);

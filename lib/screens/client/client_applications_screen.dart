@@ -56,54 +56,140 @@ class ClientApplicationsScreen extends StatelessWidget {
       return;
     }
 
+    // Only these actions are supported.
+    const allowedStatuses = {'shortlisted', 'rejected', 'accepted'};
+
+    if (!allowedStatuses.contains(newStatus)) {
+      _showMessage(context, 'Invalid application status.');
+      return;
+    }
+
     try {
-      // Verify that the current client owns this project.
-      final projectDoc = await _firestore
-          .collection('projects')
-          .doc(projectId)
-          .get();
-
-      if (!projectDoc.exists || projectDoc.data()?['clientId'] != user.uid) {
-        if (context.mounted) {
-          _showMessage(context, 'You cannot update this application.');
-        }
-        return;
-      }
-
-      // Verify that the application belongs to this project and client.
-      final applicationDoc = await _firestore
+      final projectRef = _firestore.collection('projects').doc(projectId);
+      final applicationRef = _firestore
           .collection('applications')
-          .doc(applicationId)
-          .get();
+          .doc(applicationId);
 
-      final application = applicationDoc.data();
+      await _firestore.runTransaction((transaction) async {
+        final projectSnapshot = await transaction.get(projectRef);
+        final applicationSnapshot = await transaction.get(applicationRef);
 
-      if (!applicationDoc.exists ||
-          application == null ||
-          application['projectId'] != projectId ||
-          application['clientId'] != user.uid) {
-        if (context.mounted) {
-          _showMessage(context, 'Application not found or access denied.');
+        if (!projectSnapshot.exists) {
+          throw Exception('PROJECT_NOT_FOUND');
         }
-        return;
-      }
 
-      await applicationDoc.reference.update({
-        'status': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
+        if (!applicationSnapshot.exists) {
+          throw Exception('APPLICATION_NOT_FOUND');
+        }
+
+        final projectData = projectSnapshot.data();
+        final applicationData = applicationSnapshot.data();
+
+        if (projectData == null || applicationData == null) {
+          throw Exception('INVALID_DOCUMENT');
+        }
+
+        if (projectData['clientId'] != user.uid) {
+          throw Exception('ACCESS_DENIED');
+        }
+
+        if (applicationData['projectId'] != projectId ||
+            applicationData['clientId'] != user.uid) {
+          throw Exception('APPLICATION_ACCESS_DENIED');
+        }
+
+        final currentApplicationStatus =
+            (applicationData['status'] ?? 'pending')
+                .toString()
+                .trim()
+                .toLowerCase();
+
+        if (currentApplicationStatus != 'pending' &&
+            currentApplicationStatus != 'shortlisted') {
+          throw Exception('APPLICATION_ALREADY_PROCESSED');
+        }
+
+        final now = FieldValue.serverTimestamp();
+
+        if (newStatus == 'accepted') {
+          final existingDeveloperId = (projectData['developerId'] ?? '')
+              .toString()
+              .trim();
+          final projectStatus = (projectData['status'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+
+          if (existingDeveloperId.isNotEmpty || projectStatus == 'active') {
+            throw Exception('PROJECT_ALREADY_ASSIGNED');
+          }
+
+          final applicantDeveloperId = (applicationData['developerId'] ?? '')
+              .toString()
+              .trim();
+
+          if (applicantDeveloperId.isEmpty) {
+            throw Exception('INVALID_DEVELOPER');
+          }
+
+          transaction.update(applicationRef, {
+            'status': 'accepted',
+            'updatedAt': now,
+          });
+
+          transaction.update(projectRef, {
+            'developerId': applicantDeveloperId,
+            'status': 'active',
+            'updatedAt': now,
+          });
+        } else {
+          transaction.update(applicationRef, {
+            'status': newStatus,
+            'updatedAt': now,
+          });
+        }
       });
 
       if (context.mounted) {
         _showMessage(
           context,
-          'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
+          newStatus == 'accepted'
+              ? 'Developer accepted and project assigned successfully.'
+              : 'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
         );
       }
     } catch (e) {
-      if (context.mounted) {
+      if (!context.mounted) return;
+
+      final error = e.toString();
+
+      if (error.contains('PROJECT_ALREADY_ASSIGNED')) {
         _showMessage(
           context,
-          'Could not update application. Please try again.',
+          'A developer has already been assigned to this project.',
+        );
+      } else if (error.contains('ACCESS_DENIED') ||
+          error.contains('APPLICATION_ACCESS_DENIED')) {
+        _showMessage(
+          context,
+          'You are not authorized to update this application.',
+        );
+      } else if (error.contains('PROJECT_NOT_FOUND')) {
+        _showMessage(context, 'Project not found.');
+      } else if (error.contains('APPLICATION_NOT_FOUND')) {
+        _showMessage(context, 'Application not found.');
+      } else if (error.contains('APPLICATION_ALREADY_PROCESSED')) {
+        _showMessage(context, 'This application has already been processed.');
+      } else if (error.contains('INVALID_DEVELOPER')) {
+        _showMessage(
+          context,
+          'The application does not contain a valid developer ID.',
+        );
+      } else {
+        debugPrint('Application status update failed: $e');
+        _showMessage(
+          context,
+          'Could not update application. Please check your Firestore rules and try again.',
         );
       }
     }

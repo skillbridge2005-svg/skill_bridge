@@ -6,6 +6,7 @@ import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
 import 'project_meeting_screen.dart';
 import 'client_applications_screen.dart';
+import 'developer_review_widget.dart';
 
 final GlobalKey _projectEstimateSectionKey = GlobalKey();
 
@@ -931,6 +932,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
               final budget = firstValidValue([
                 data['budget'],
+                data['amount'],
                 estimate['totalCost'],
                 estimate['totalBudget'],
                 estimate['budget'],
@@ -940,13 +942,47 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
               final timeline = firstValidValue([
                 data['timeline'],
+                data['estimatedDuration'],
                 estimate['timeline'],
                 estimate['duration'],
                 estimate['estimatedDuration'],
                 plan['timeline'],
                 plan['duration'],
               ]);
+              final budgetType = data['budgetType']?.toString() ?? '';
+              final currency = data['currency']?.toString() ?? 'INR';
+              final deadline = data['deadline'];
+              final deadlineText = deadline is Timestamp
+                  ? '${deadline.toDate().day.toString().padLeft(2, '0')}/'
+                    '${deadline.toDate().month.toString().padLeft(2, '0')}/'
+                    '${deadline.toDate().year}'
+                  : '';
+              final experienceLevel = data['experienceLevel']?.toString() ?? '';
+              final workMode = data['workMode']?.toString() ?? '';
+              final priority = data['priority']?.toString() ?? '';
+              final additionalInfo = data['additionalInfo']?.toString() ?? '';
               final status = data['status']?.toString() ?? 'requirement';
+              final milestones = data['milestones'] is Map
+                  ? Map<String, dynamic>.from(data['milestones'] as Map)
+                  : <String, dynamic>{};
+              const milestoneKeys = [
+                'requirements', 'architecture', 'design',
+                'development', 'testing', 'deployment',
+              ];
+              final completedMilestones = milestoneKeys
+                  .where((key) => milestones[key] == true).length;
+              final calculatedProgress =
+                  (completedMilestones / milestoneKeys.length * 100).round();
+              final acceptedScope = data['acceptedScope'] is List
+                  ? (data['acceptedScope'] as List)
+                      .where((item) => item != null)
+                      .map((item) => item.toString())
+                      .where((item) => item.trim().isNotEmpty)
+                      .toList()
+                  : <String>[];
+              final acceptedCost = data['acceptedCost'] == true;
+              final acceptedTimeline = data['acceptedTimeline'] == true;
+              final acceptedTerms = data['acceptedTerms'] == true;
 
               final statusColor = _statusColor(status);
               final designImages = data['designImageUrls'] is List
@@ -1230,7 +1266,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                   title: l10n.budget,
                                   value: budget.isEmpty
                                       ? _notSpecifiedText(context)
-                                      : budget,
+                                      : '$currency $budget',
                                 );
 
                                 final timelineCard = _InfoCard(
@@ -1266,12 +1302,78 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                             _DetailsCard(
                               title: l10n.progress,
                               icon: Icons.timeline_rounded,
-                              child: _ProgressTimeline(
-                                currentStatus: status,
-                                isStepActive: _isStepActive,
+                              child: _MilestoneProgressTracker(
+                                milestones: data['milestones'],
+                                updatedAt: data['updatedAt'],
                               ),
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 20),
+                            DeveloperReviewWidget(
+                              projectId: widget.projectId,
+                              projectTitle: title,
+                              developerId: (data['developerId'] ??
+                                      data['assignedDeveloperId'] ?? '')
+                                  .toString(),
+                              projectStatus: status,
+                              progress: calculatedProgress,
+                            ),
+                            if (budgetType.isNotEmpty || deadlineText.isNotEmpty ||
+                                experienceLevel.isNotEmpty || workMode.isNotEmpty ||
+                                priority.isNotEmpty || additionalInfo.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              _DetailsCard(
+                                title: 'Additional Project Details',
+                                icon: Icons.tune_rounded,
+                                child: Column(
+                                  children: [
+                                    if (budgetType.isNotEmpty)
+                                      _DetailRow(label: 'Payment Type', value: budgetType),
+                                    if (deadlineText.isNotEmpty)
+                                      _DetailRow(label: 'Deadline', value: deadlineText),
+                                    if (experienceLevel.isNotEmpty)
+                                      _DetailRow(label: 'Experience Level', value: experienceLevel),
+                                    if (workMode.isNotEmpty)
+                                      _DetailRow(label: 'Work Arrangement', value: workMode),
+                                    if (priority.isNotEmpty)
+                                      _DetailRow(label: 'Priority', value: priority),
+                                    if (additionalInfo.isNotEmpty)
+                                      _DetailRow(label: 'Additional Instructions', value: additionalInfo),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (acceptedCost || acceptedTimeline || acceptedTerms ||
+                                acceptedScope.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              _DetailsCard(
+                                title: 'Final Accepted Plan & Estimate',
+                                icon: Icons.task_alt_rounded,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (acceptedScope.isNotEmpty) ...[
+                                      const Text('Accepted Scope', style: TextStyle(fontWeight: FontWeight.w700)),
+                                      const SizedBox(height: 8),
+                                      for (final item in acceptedScope)
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 6),
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF16A34A)),
+                                              const SizedBox(width: 8),
+                                              Expanded(child: Text(item)),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                    if (acceptedCost) const _AcceptedBadge(label: 'Budget Accepted'),
+                                    if (acceptedTimeline) const _AcceptedBadge(label: 'Timeline Accepted'),
+                                    if (acceptedTerms) const _AcceptedBadge(label: 'Terms Accepted'),
+                                  ],
+                                ),
+                              ),
+                            ],
 
                             if (_showCompleteEstimate &&
                                 (plan.isNotEmpty || estimate.isNotEmpty)) ...[
@@ -1860,6 +1962,432 @@ class _ProgressStep extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ADDITIONAL DETAIL ROW
+// ============================================================================
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF667085),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF344054),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// ACCEPTED BADGE
+// ============================================================================
+
+class _AcceptedBadge extends StatelessWidget {
+  final String label;
+
+  const _AcceptedBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF166534),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// LIVE MILESTONE PROGRESS — CLIENT READ-ONLY VIEW
+// ============================================================================
+
+class _MilestoneProgressTracker extends StatelessWidget {
+  final dynamic milestones;
+  final dynamic updatedAt;
+
+  const _MilestoneProgressTracker({
+    required this.milestones,
+    required this.updatedAt,
+  });
+
+  static const Color _primary = Color(0xFF4F46E5);
+  static const Color _green = Color(0xFF059669);
+  static const Color _muted = Color(0xFF667085);
+  static const Color _border = Color(0xFFE5E7EB);
+
+  static const List<Map<String, String>> _steps = [
+    {
+      'key': 'requirements',
+      'title': 'Requirements',
+      'description': 'Finalize project requirements and specifications.',
+    },
+    {
+      'key': 'architecture',
+      'title': 'Architecture',
+      'description': 'Define the system architecture and database design.',
+    },
+    {
+      'key': 'design',
+      'title': 'UI/UX Design',
+      'description': 'Complete the user interface and experience design.',
+    },
+    {
+      'key': 'development',
+      'title': 'Development',
+      'description': 'Implement the planned project functionality.',
+    },
+    {
+      'key': 'testing',
+      'title': 'Testing',
+      'description': 'Test functionality and resolve identified issues.',
+    },
+    {
+      'key': 'deployment',
+      'title': 'Deployment',
+      'description': 'Deploy the completed project.',
+    },
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = milestones is Map
+        ? Map<String, dynamic>.from(milestones as Map)
+        : <String, dynamic>{};
+    final completedCount = _steps
+        .where((step) => completed[step['key']] == true)
+        .length;
+    final total = _steps.length;
+    final progress = completedCount / total;
+    final currentIndex = _steps.indexWhere(
+      (step) => completed[step['key']] != true,
+    );
+    final allCompleted = currentIndex == -1;
+
+    DateTime? lastUpdated;
+    if (updatedAt is Timestamp) {
+      lastUpdated = updatedAt.toDate();
+    } else if (updatedAt is DateTime) {
+      lastUpdated = updatedAt;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Expanded(
+              child: Text(
+                'Overall Completion',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              '${(progress * 100).round()}%',
+              style: const TextStyle(
+                color: _primary,
+                fontSize: 23,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 10,
+            backgroundColor: const Color(0xFFE5E7EB),
+            color: allCompleted ? _green : _primary,
+          ),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            const Icon(Icons.check_circle_outline, size: 15, color: _muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$completedCount of $total milestones completed',
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+            ),
+            if (lastUpdated != null)
+              Text(
+                'Updated '
+                '${lastUpdated.day.toString().padLeft(2, '0')}/'
+                '${lastUpdated.month.toString().padLeft(2, '0')}/'
+                '${lastUpdated.year}',
+                style: const TextStyle(color: _muted, fontSize: 10),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        for (int i = 0; i < _steps.length; i++)
+          _buildStep(_steps[i], i, completed, currentIndex),
+        if (allCompleted)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.verified_rounded, color: _green, size: 25),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'All milestones completed! '
+                    'The project has reached 100% progress.',
+                    style: TextStyle(
+                      color: Color(0xFF065F46),
+                      fontWeight: FontWeight.w700,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _border),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Progress updates automatically when the '
+                    'developer completes a milestone.',
+                    style: TextStyle(color: _muted, fontSize: 12, height: 1.45),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStep(
+    Map<String, String> step,
+    int index,
+    Map<String, dynamic> completed,
+    int currentIndex,
+  ) {
+    final key = step['key']!;
+    final isCompleted = completed[key] == true;
+    final isCurrent = index == currentIndex;
+    final isUpcoming = !isCompleted && !isCurrent;
+    final color = isCompleted
+        ? _green
+        : isCurrent
+        ? _primary
+        : const Color(0xFF98A2B3);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 38,
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? const Color(0xFFD1FAE5)
+                        : isCurrent
+                        ? const Color(0xFFEEF2FF)
+                        : const Color(0xFFF3F4F6),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 1.4),
+                  ),
+                  child: Icon(
+                    isCompleted
+                        ? Icons.check_rounded
+                        : isCurrent
+                        ? Icons.play_arrow_rounded
+                        : Icons.lock_outline_rounded,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+                if (index != _steps.length - 1)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      color: isCompleted ? _green : const Color(0xFFE5E7EB),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 15),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isCurrent ? const Color(0xFFF5F3FF) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCurrent ? const Color(0xFFC7D2FE) : _border,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          step['title']!,
+                          style: TextStyle(
+                            color: isUpcoming
+                                ? _muted
+                                : const Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      _statusPill(
+                        isCompleted
+                            ? 'COMPLETED'
+                            : isCurrent
+                            ? 'CURRENT'
+                            : 'UPCOMING',
+                        color,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    step['description']!,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                  if (isCompleted) ...[
+                    const SizedBox(height: 8),
+                    const Row(
+                      children: [
+                        Icon(Icons.verified_rounded, color: _green, size: 15),
+                        SizedBox(width: 5),
+                        Text(
+                          'Completed successfully',
+                          style: TextStyle(
+                            color: _green,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
 
 class _ProjectLoader extends StatelessWidget {
   const _ProjectLoader();
