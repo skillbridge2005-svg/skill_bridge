@@ -1,5 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
@@ -7,6 +10,7 @@ import 'client_team_screen.dart';
 import 'client_applications_screen.dart';
 import 'developer_review_widget.dart';
 import 'project_meeting_screen.dart';
+import 'widgets/project_payment_card.dart';
 
 class ProjectDetailsScreen extends StatelessWidget {
   final String projectId;
@@ -138,6 +142,436 @@ class ProjectDetailsScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _downloadPaymentReceipt({
+    required BuildContext context,
+    required String projectTitle,
+    required double projectTotal,
+    required String currency,
+  }) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating payment statement...')),
+      );
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('payments')
+          .where('projectId', isEqualTo: projectId)
+          .get();
+
+      final transactions = snapshot.docs.map((doc) {
+        final data = doc.data();
+        final status = (data['status'] ?? data['paymentStatus'] ?? 'pending')
+            .toString()
+            .toLowerCase()
+            .trim();
+
+        final rawAmount =
+            data['amount'] ??
+            data['paidAmount'] ??
+            data['paid_amount'] ??
+            (data['amountInPaise'] is num
+                ? (data['amountInPaise'] as num) / 100
+                : 0);
+        final amount = rawAmount is num
+            ? rawAmount.toDouble()
+            : double.tryParse(
+                    rawAmount.toString().replaceAll(',', '').trim(),
+                  ) ??
+                  0.0;
+
+        final dateValue =
+            data['paidAt'] ?? data['createdAt'] ?? data['updatedAt'];
+        final DateTime? date = switch (dateValue) {
+          Timestamp value => value.toDate(),
+          DateTime value => value,
+          String value => DateTime.tryParse(value),
+          _ => null,
+        };
+
+        return <String, Object?>{
+          'id':
+              (data['razorpayPaymentId'] ??
+                      data['paymentId'] ??
+                      data['transactionId'] ??
+                      doc.id)
+                  .toString(),
+          'amount': amount,
+          'status': status,
+          'date': date,
+        };
+      }).toList();
+
+      transactions.sort((a, b) {
+        final dateA = a['date'] as DateTime?;
+        final dateB = b['date'] as DateTime?;
+
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+
+        return dateB.compareTo(dateA);
+      });
+
+      bool isSuccessful(String status) {
+        return [
+          'paid',
+          'success',
+          'successful',
+          'completed',
+          'captured',
+          'verified',
+        ].contains(status);
+      }
+
+      final successfulTransactions = transactions.where((transaction) {
+        return isSuccessful(transaction['status'] as String);
+      }).toList();
+
+      final totalPaid = successfulTransactions.fold<double>(
+        0,
+        (sum, transaction) => sum + (transaction['amount'] as double),
+      );
+      final remainingAmount = (projectTotal - totalPaid)
+          .clamp(0.0, double.infinity)
+          .toDouble();
+      final paymentPercentage = projectTotal > 0
+          ? (totalPaid / projectTotal).clamp(0.0, 1.0).toDouble()
+          : 0.0;
+
+      final pdf = pw.Document();
+
+      final blue = PdfColor.fromHex('#2563EB');
+      final dark = PdfColor.fromHex('#0F172A');
+      final grey = PdfColor.fromHex('#64748B');
+      final lightBlue = PdfColor.fromHex('#EFF6FF');
+      final green = PdfColor.fromHex('#15803D');
+
+      String money(double amount) => '$currency ${amount.toStringAsFixed(2)}';
+
+      String formatDate(DateTime? date) {
+        if (date == null) return 'N/A';
+
+        final day = date.day.toString().padLeft(2, '0');
+        final month = date.month.toString().padLeft(2, '0');
+        return '$day/$month/${date.year}';
+      }
+
+      pw.Widget summaryCard(
+        String label,
+        String value,
+        PdfColor background,
+        PdfColor valueColor,
+      ) {
+        return pw.Container(
+          padding: const pw.EdgeInsets.all(14),
+          decoration: pw.BoxDecoration(
+            color: background,
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(label, style: pw.TextStyle(color: grey, fontSize: 10)),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                value,
+                style: pw.TextStyle(
+                  color: valueColor,
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          footer: (pageContext) => pw.Container(
+            margin: const pw.EdgeInsets.only(top: 16),
+            padding: const pw.EdgeInsets.only(top: 10),
+            decoration: pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'SkillBridge | Payment Statement',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+                pw.Text(
+                  'Page ${pageContext.pageNumber} of ${pageContext.pagesCount}',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+              ],
+            ),
+          ),
+          build: (pageContext) => [
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(24),
+              decoration: pw.BoxDecoration(
+                color: dark,
+                borderRadius: pw.BorderRadius.circular(16),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'SkillBridge',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 25,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'PAYMENT STATEMENT',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 13,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Text(
+                    'Complete payment overview and transaction history',
+                    style: pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'PROJECT DETAILS',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(12),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    projectTitle,
+                    style: pw.TextStyle(
+                      color: dark,
+                      fontSize: 17,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Project ID: $projectId',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    'Generated on: ${formatDate(DateTime.now())}',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'PAYMENT SUMMARY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Project Total',
+                    money(projectTotal),
+                    lightBlue,
+                    blue,
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Total Paid',
+                    money(totalPaid),
+                    PdfColor.fromHex('#DCFCE7'),
+                    green,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Remaining',
+                    money(remainingAmount),
+                    PdfColor.fromHex('#FEF3C7'),
+                    PdfColor.fromHex('#B45309'),
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Successful Payments',
+                    '${successfulTransactions.length}',
+                    PdfColor.fromHex('#F1F5F9'),
+                    dark,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pw.Text(
+              'PAYMENT PROGRESS',
+              style: pw.TextStyle(
+                color: dark,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.ClipRRect(
+              horizontalRadius: 6,
+              verticalRadius: 6,
+              child: pw.Container(
+                height: 12,
+                width: double.infinity,
+                color: PdfColors.grey200,
+                child: pw.Align(
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Container(
+                    width: 531 * paymentPercentage,
+                    height: 12,
+                    color: green,
+                  ),
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${(paymentPercentage * 100).toStringAsFixed(1)}% paid',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 10,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'TRANSACTION HISTORY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            if (transactions.isEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(10),
+                ),
+                child: pw.Text(
+                  'No transactions have been recorded for this project.',
+                  style: pw.TextStyle(color: grey, fontSize: 10),
+                ),
+              )
+            else
+              pw.TableHelper.fromTextArray(
+                headers: ['Date', 'Transaction ID', 'Status', 'Amount'],
+                data: transactions.map((transaction) {
+                  final status = transaction['status'] as String;
+                  final transactionId = transaction['id'] as String;
+
+                  return [
+                    formatDate(transaction['date'] as DateTime?),
+                    transactionId.length > 18
+                        ? '${transactionId.substring(0, 18)}...'
+                        : transactionId,
+                    status.toUpperCase(),
+                    money(transaction['amount'] as double),
+                  ];
+                }).toList(),
+                headerDecoration: pw.BoxDecoration(
+                  color: dark,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                headerStyle: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: pw.TextStyle(color: dark, fontSize: 8),
+                cellPadding: const pw.EdgeInsets.all(8),
+                border: pw.TableBorder(
+                  horizontalInside: pw.BorderSide(
+                    color: PdfColors.grey300,
+                    width: 0.5,
+                  ),
+                ),
+                oddRowDecoration: pw.BoxDecoration(color: PdfColors.grey100),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.1),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(1.3),
+                  3: const pw.FlexColumnWidth(1.5),
+                },
+              ),
+            pw.SizedBox(height: 24),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(14),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(10),
+              ),
+              child: pw.Text(
+                'Thank you for using SkillBridge. '
+                'This statement summarizes the project payment records '
+                'available in the system at the time of generation.',
+                style: pw.TextStyle(color: dark, fontSize: 9),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: 'SkillBridge_Payment_Statement_$projectId.pdf',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to generate payment statement: $e')),
+      );
+    }
   }
 
   // ------------------------------------------------------------
@@ -316,6 +750,19 @@ class ProjectDetailsScreen extends StatelessWidget {
     }
 
     return '';
+  }
+
+  double _parseProjectAmount(dynamic value) {
+    if (value is num) return value.toDouble();
+
+    if (value is String) {
+      return double.tryParse(
+            value.replaceAll(',', '').replaceAll('₹', '').trim(),
+          ) ??
+          0.0;
+    }
+
+    return 0.0;
   }
 
   Map<String, dynamic> _mapValue(dynamic value) {
@@ -855,6 +1302,62 @@ class ProjectDetailsScreen extends StatelessWidget {
                                   ],
                                 );
                               },
+                            ),
+
+                            ProjectPaymentCard(
+                              projectId: projectId,
+                              projectTotal: _parseProjectAmount(
+                                _firstValidValue([
+                                  data['budget'],
+                                  data['amount'],
+                                  data['projectAmount'],
+                                  data['estimate']?['totalCost'],
+                                  data['estimate']?['totalBudget'],
+                                  data['estimate']?['budget'],
+                                  data['estimate']?['estimatedCost'],
+                                  data['estimate']?['amount'],
+                                ]),
+                              ),
+                              currency: data['currency']?.toString() ?? 'INR',
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _downloadPaymentReceipt(
+                                  context: context,
+                                  projectTitle: title,
+                                  projectTotal: _parseProjectAmount(
+                                    _firstValidValue([
+                                      data['budget'],
+                                      data['amount'],
+                                      data['projectAmount'],
+                                      data['estimate']?['totalCost'],
+                                      data['estimate']?['totalBudget'],
+                                      data['estimate']?['budget'],
+                                      data['estimate']?['estimatedCost'],
+                                      data['estimate']?['amount'],
+                                    ]),
+                                  ),
+                                  currency:
+                                      data['currency']?.toString() ?? 'INR',
+                                ),
+                                icon: const Icon(Icons.picture_as_pdf_rounded),
+                                label: const Text('Share Payment Statement'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  elevation: 2,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                              ),
                             ),
 
                             const SizedBox(height: 18),

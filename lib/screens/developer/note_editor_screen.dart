@@ -6,8 +6,14 @@ import '../../services/developer_notes_service.dart';
 class NoteEditorScreen extends StatefulWidget {
   final DeveloperNote? note;
   final String? initialCategory;
+  final String? projectId;
 
-  const NoteEditorScreen({super.key, this.note, this.initialCategory});
+  const NoteEditorScreen({
+    super.key,
+    this.note,
+    this.initialCategory,
+    this.projectId,
+  });
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -155,6 +161,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           content: _contentController.text.trim(),
           details: details,
           tags: tags,
+          projectId: widget.projectId,
         );
       } else {
         await _notesService.updateNote(
@@ -164,6 +171,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           content: _contentController.text.trim(),
           details: details,
           tags: tags,
+          projectId: widget.projectId ?? widget.note!.projectId,
         );
       }
 

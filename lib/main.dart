@@ -1,4 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +11,7 @@ import 'firebase_options.dart';
 import 'screens/splash_screen.dart';
 import 'localization/app_localizations.dart';
 import 'localization/language_provider.dart';
+import 'services/fcm_service.dart';
 import 'theme/theme_provider.dart';
 
 Future<void> main() async {
@@ -16,16 +19,34 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // In debug builds, call the local Functions emulator.
-  // Android emulators reach the host via 10.0.2.2; desktop/web use localhost.
-  if (kDebugMode) {
-    final host = (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+  // Use live Firebase services by default. Opt into local emulators explicitly
+  // when needed for isolated development testing.
+  const useFunctionsEmulator = bool.fromEnvironment(
+    'USE_FUNCTIONS_EMULATOR',
+    defaultValue: false,
+  );
+  const configuredEmulatorHost = String.fromEnvironment(
+    'FUNCTIONS_EMULATOR_HOST',
+  );
+
+  if (kDebugMode && useFunctionsEmulator) {
+    final defaultHost =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? '10.0.2.2'
         : '127.0.0.1';
+    final host = configuredEmulatorHost.isNotEmpty
+        ? configuredEmulatorHost
+        : defaultHost;
 
+    FirebaseAuth.instance.useAuthEmulator(host, 9199);
+    FirebaseFirestore.instance.useFirestoreEmulator(host, 8180);
     FirebaseFunctions.instanceFor(region: 'us-central1')
-        .useFunctionsEmulator(host, 5001);
+        .useFunctionsEmulator(host, 5101);
+
+    debugPrint('Using local Firebase emulators at $host');
   }
+
+  await FcmService.instance.initialize();
 
   runApp(
     MultiProvider(

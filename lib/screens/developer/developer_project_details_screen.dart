@@ -1,9 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
+import '../../models/developer_note.dart';
 import '../client/client_messages_screen.dart';
 import '../client/project_meeting_screen.dart';
+import 'developer_repositories_screen.dart';
+import 'note_editor_screen.dart';
 import 'teams.dart';
 
 class DeveloperProjectDetailsScreen extends StatelessWidget {
@@ -50,13 +56,15 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     },
   ];
 
+  // ============================================================
+  // PROJECT AUTHORIZATION
+  // ============================================================
+
   Future<bool> _isAuthorizedProjectMember(String currentUserId) async {
-    // Ensure the supplied ID belongs to the currently signed-in user.
     if (FirebaseAuth.instance.currentUser?.uid != currentUserId) {
       return false;
     }
 
-    // Load the project.
     final projectSnapshot = await FirebaseFirestore.instance
         .collection('projects')
         .doc(projectId)
@@ -72,12 +80,12 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       return false;
     }
 
-    // The directly assigned developer has access.
+    // Directly assigned developer.
     if (project['developerId']?.toString() == currentUserId) {
       return true;
     }
 
-    // Otherwise, check active teams associated with this project.
+    // Check active teams associated with this project.
     final teamSnapshot = await FirebaseFirestore.instance
         .collection('teams')
         .where('projectId', isEqualTo: projectId)
@@ -90,6 +98,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       return team['status']?.toString().trim().toLowerCase() == 'active';
     });
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -164,12 +176,15 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                 project['title'],
                 fallback: 'Untitled Project',
               );
+
               final status = _string(project['status'], fallback: 'active');
 
               return ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
+                  // Project Header
                   _projectHeader(title, project, status),
+
                   const SizedBox(height: 24),
 
                   // 1. Project Team
@@ -262,11 +277,119 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                             );
                           },
                         ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => NoteEditorScreen(
+                                    initialCategory: DeveloperNote.dailyWork,
+                                    projectId: projectId,
+                                  ),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.note_add_outlined),
+                            label: const Text('Create Project Note'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 0,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    const DeveloperRepositoriesScreen(),
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFE2E8F0),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.04),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0F172A),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: const Icon(
+                                    Icons.code_rounded,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                const Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'GitHub Repositories',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                      SizedBox(height: 6),
+                                      Text(
+                                        'Manage your repositories and showcase your projects.',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF64748B),
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  color: Color(0xFF64748B),
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
 
-                  // 4. Description
+                  // 4. Project Description
                   _section(
                     title: 'Project Description',
                     subtitle: 'Understand the project objectives.',
@@ -303,7 +426,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // 6. Budget
+                  // 6. Project Budget
                   _section(
                     title: 'Project Budget',
                     subtitle: 'Review the agreed project amount.',
@@ -323,7 +446,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // 7. Timeline
+                  // 7. Project Timeline
                   _section(
                     title: 'Project Timeline',
                     subtitle: 'Review the expected schedule.',
@@ -353,58 +476,18 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // 8. Project Progress
+                  // 8. Project Payments
+                  // Moved above Project Progress.
+                  // Separate Payment Status card removed.
+                  _projectPaymentsSection(project),
+
+                  // 9. Project Progress
                   _section(
                     title: 'Project Progress',
                     subtitle:
                         'Complete each milestone to advance your project.',
                     icon: Icons.trending_up_outlined,
                     child: _projectProgressSection(context, project),
-                  ),
-
-                  // 9. Payment Status
-                  _section(
-                    title: 'Payment Status',
-                    subtitle: 'Review available payment information.',
-                    icon: Icons.payments_outlined,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _statusBadge(
-                          _string(
-                            project['paymentStatus'],
-                            fallback: 'Not available',
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _infoRow(
-                          'Project Amount',
-                          _money(
-                            project['budget'] ??
-                                project['amount'] ??
-                                project['projectAmount'],
-                          ),
-                        ),
-                        const Divider(height: 28),
-                        _infoRow('Paid Amount', _money(project['paidAmount'])),
-                        const Divider(height: 28),
-                        _infoRow(
-                          'Pending Amount',
-                          _money(project['pendingAmount']),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Payment information is displayed from available project '
-                          'fields. Your existing payment records may require a '
-                          'separate integration to show complete payment history.',
-                          style: TextStyle(
-                            color: muted,
-                            fontSize: 12,
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
 
                   const SizedBox(height: 24),
@@ -417,11 +500,736 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // PROJECT PAYMENTS
+  // ============================================================
+
+  Widget _projectPaymentsSection(Map<String, dynamic> project) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('payments')
+          .where('projectId', isEqualTo: projectId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _section(
+            title: 'Project Payments',
+            subtitle: 'Payment summary and transaction history.',
+            icon: Icons.account_balance_wallet_outlined,
+            child: Text(
+              'Unable to load payment records: ${snapshot.error}',
+              style: const TextStyle(color: muted, height: 1.5),
+            ),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return _section(
+            title: 'Project Payments',
+            subtitle: 'Payment summary and transaction history.',
+            icon: Icons.account_balance_wallet_outlined,
+            child: const Center(
+              child: Padding(
+                padding: EdgeInsets.all(12),
+                child: CircularProgressIndicator(color: primary),
+              ),
+            ),
+          );
+        }
+
+        final payments =
+            snapshot.data!.docs.map((doc) {
+              return <String, dynamic>{'id': doc.id, ...doc.data()};
+            }).toList()..sort((a, b) {
+              final dateA = _paymentDate(a);
+              final dateB = _paymentDate(b);
+
+              if (dateA == null && dateB == null) {
+                return 0;
+              }
+
+              if (dateA == null) return 1;
+              if (dateB == null) return -1;
+
+              return dateB.compareTo(dateA);
+            });
+
+        final budget = _projectBudget(project);
+
+        final totalPaid = payments
+            .where(_isSuccessfulPayment)
+            .fold<double>(
+              0,
+              (total, payment) => total + _paymentAmount(payment),
+            );
+
+        final remaining = (budget - totalPaid).clamp(0.0, double.infinity);
+
+        final progress = budget > 0
+            ? (totalPaid / budget).clamp(0.0, 1.0).toDouble()
+            : 0.0;
+
+        return _section(
+          title: 'Project Payments',
+          subtitle: 'Payment summary and transaction history.',
+          icon: Icons.account_balance_wallet_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Budget and total paid.
+              Row(
+                children: [
+                  Expanded(
+                    child: _paymentSummary(
+                      'Project Budget',
+                      _money(budget),
+                      primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _paymentSummary(
+                      'Total Paid',
+                      _money(totalPaid),
+                      const Color(0xFF059669),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              // Remaining amount.
+              _paymentSummary(
+                'Remaining',
+                _money(remaining),
+                const Color(0xFFB45309),
+              ),
+
+              // Payment progress.
+              if (budget > 0) ...[
+                const SizedBox(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Payment Progress',
+                      style: TextStyle(
+                        color: dark,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '${(progress * 100).round()}%',
+                      style: const TextStyle(
+                        color: primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 8,
+                    backgroundColor: const Color(0xFFEEF2F6),
+                    color: primary,
+                  ),
+                ),
+              ],
+
+              const Divider(height: 28),
+
+              // Transaction history.
+              Text(
+                'Transaction History (${payments.length})',
+                style: const TextStyle(
+                  color: dark,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              if (payments.isEmpty)
+                const Text(
+                  'No payment transactions have been recorded for this project yet.',
+                  style: TextStyle(color: muted, height: 1.5),
+                )
+              else
+                for (final payment in payments.take(5))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.receipt_long_outlined,
+                          size: 20,
+                          color: primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _string(
+                                  payment['paymentId'] ??
+                                      payment['razorpayPaymentId'] ??
+                                      payment['id'],
+                                  fallback: 'Project payment',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: dark,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${_formatPaymentDate(_paymentDate(payment))} · '
+                                '${_string(payment['status'], fallback: 'Pending')}',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _money(_paymentAmount(payment)),
+                          style: const TextStyle(
+                            color: dark,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+              const SizedBox(height: 14),
+
+              // Share payment statement.
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _shareProjectPaymentStatement(
+                    context: context,
+                    project: project,
+                    payments: payments,
+                    projectBudget: budget,
+                    totalPaid: totalPaid,
+                    remaining: remaining,
+                  ),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Share Payment Statement'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _paymentSummary(String label, String value, Color color) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: muted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // SHARE PROJECT PAYMENT STATEMENT
+  // ============================================================
+
+  Future<void> _shareProjectPaymentStatement({
+    required BuildContext context,
+    required Map<String, dynamic> project,
+    required List<Map<String, dynamic>> payments,
+    required double projectBudget,
+    required double totalPaid,
+    required double remaining,
+  }) async {
+    try {
+      final pdf = pw.Document();
+      final title = _string(project['title'], fallback: 'Project');
+      final currency = _string(project['currency'], fallback: 'INR');
+      final progress = projectBudget > 0
+          ? (totalPaid / projectBudget).clamp(0.0, 1.0).toDouble()
+          : 0.0;
+
+      String money(double amount) => '$currency ${amount.toStringAsFixed(2)}';
+
+      String formatDate(DateTime? date) {
+        if (date == null) return 'N/A';
+        final day = date.day.toString().padLeft(2, '0');
+        final month = date.month.toString().padLeft(2, '0');
+        return '$day/$month/${date.year}';
+      }
+
+      pw.Widget summaryCard(
+        String label,
+        String value,
+        PdfColor background,
+        PdfColor valueColor,
+      ) {
+        return pw.Container(
+          padding: const pw.EdgeInsets.all(14),
+          decoration: pw.BoxDecoration(
+            color: background,
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                label,
+                style: pw.TextStyle(
+                  color: PdfColor.fromHex('#64748B'),
+                  fontSize: 10,
+                ),
+              ),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                value,
+                style: pw.TextStyle(
+                  color: valueColor,
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      final blue = PdfColor.fromHex('#2563EB');
+      final darkPdf = PdfColor.fromHex('#0F172A');
+      final grey = PdfColor.fromHex('#64748B');
+      final lightBlue = PdfColor.fromHex('#EFF6FF');
+      final green = PdfColor.fromHex('#15803D');
+      final successfulPayments = payments.where(_isSuccessfulPayment).toList();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          footer: (pageContext) => pw.Container(
+            margin: const pw.EdgeInsets.only(top: 16),
+            padding: const pw.EdgeInsets.only(top: 10),
+            decoration: pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'SkillBridge | Payment Statement',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+                pw.Text(
+                  'Page ${pageContext.pageNumber} of ${pageContext.pagesCount}',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+              ],
+            ),
+          ),
+          build: (pageContext) => [
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(24),
+              decoration: pw.BoxDecoration(
+                color: darkPdf,
+                borderRadius: pw.BorderRadius.circular(16),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'SkillBridge',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 25,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'PAYMENT STATEMENT',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 13,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Text(
+                    'Complete payment overview and transaction history',
+                    style: pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'PROJECT DETAILS',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(12),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    title,
+                    style: pw.TextStyle(
+                      color: darkPdf,
+                      fontSize: 17,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Project ID: $projectId',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    'Generated on: ${formatDate(DateTime.now())}',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'PAYMENT SUMMARY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Project Total',
+                    money(projectBudget),
+                    lightBlue,
+                    blue,
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Total Paid',
+                    money(totalPaid),
+                    PdfColor.fromHex('#DCFCE7'),
+                    green,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Remaining',
+                    money(remaining),
+                    PdfColor.fromHex('#FEF3C7'),
+                    PdfColor.fromHex('#B45309'),
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Successful Payments',
+                    '${successfulPayments.length}',
+                    PdfColor.fromHex('#F1F5F9'),
+                    darkPdf,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pw.Text(
+              'PAYMENT PROGRESS',
+              style: pw.TextStyle(
+                color: darkPdf,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.ClipRRect(
+              horizontalRadius: 6,
+              verticalRadius: 6,
+              child: pw.Container(
+                height: 12,
+                width: double.infinity,
+                color: PdfColors.grey200,
+                child: pw.Align(
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Container(
+                    width: 531 * progress,
+                    height: 12,
+                    color: green,
+                  ),
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${(progress * 100).toStringAsFixed(1)}% paid',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 10,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'TRANSACTION HISTORY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            if (payments.isEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(10),
+                ),
+                child: pw.Text(
+                  'No transactions have been recorded for this project.',
+                  style: pw.TextStyle(color: grey, fontSize: 10),
+                ),
+              )
+            else
+              pw.TableHelper.fromTextArray(
+                headers: ['Date', 'Transaction ID', 'Status', 'Amount'],
+                data: payments.map((payment) {
+                  final status = _string(
+                    payment['status'] ?? payment['paymentStatus'],
+                    fallback: 'Pending',
+                  );
+                  final transactionId = _string(
+                    payment['razorpayPaymentId'] ??
+                        payment['paymentId'] ??
+                        payment['transactionId'] ??
+                        payment['id'],
+                    fallback: 'N/A',
+                  );
+
+                  return [
+                    formatDate(_paymentDate(payment)),
+                    transactionId.length > 18
+                        ? '${transactionId.substring(0, 18)}...'
+                        : transactionId,
+                    status.toUpperCase(),
+                    money(_paymentAmount(payment)),
+                  ];
+                }).toList(),
+                headerDecoration: pw.BoxDecoration(
+                  color: darkPdf,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                headerStyle: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: pw.TextStyle(color: darkPdf, fontSize: 8),
+                cellPadding: const pw.EdgeInsets.all(8),
+                border: pw.TableBorder(
+                  horizontalInside: pw.BorderSide(
+                    color: PdfColors.grey300,
+                    width: 0.5,
+                  ),
+                ),
+                oddRowDecoration: pw.BoxDecoration(color: PdfColors.grey100),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.1),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(1.3),
+                  3: const pw.FlexColumnWidth(1.5),
+                },
+              ),
+            pw.SizedBox(height: 24),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(14),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(10),
+              ),
+              child: pw.Text(
+                'Thank you for using SkillBridge. '
+                'This statement summarizes the project payment records '
+                'available in the system at the time of generation.',
+                style: pw.TextStyle(color: darkPdf, fontSize: 9),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: 'SkillBridge_Payment_Statement_$projectId.pdf',
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to create payment statement: $error')),
+      );
+    }
+  }
+
+  // ============================================================
+  // PAYMENT HELPERS
+  // ============================================================
+
+  static double _projectBudget(Map<String, dynamic> project) {
+    final value =
+        project['budget'] ??
+        project['amount'] ??
+        project['projectAmount'] ??
+        project['totalBudget'] ??
+        project['estimate']?['totalCost'];
+
+    return _numericValue(value);
+  }
+
+  static double _paymentAmount(Map<String, dynamic> payment) {
+    final value =
+        payment['amount'] ??
+        payment['paidAmount'] ??
+        payment['paid_amount'] ??
+        payment['totalAmount'];
+
+    if (value != null) {
+      return _numericValue(value);
+    }
+
+    final amountInPaise = payment['amountInPaise'];
+
+    return amountInPaise is num ? amountInPaise / 100 : 0;
+  }
+
+  static double _numericValue(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return double.tryParse(
+          value?.toString().replaceAll(',', '').trim() ?? '',
+        ) ??
+        0;
+  }
+
+  static bool _isSuccessfulPayment(Map<String, dynamic> payment) {
+    final status = (payment['status'] ?? payment['paymentStatus'] ?? '')
+        .toString()
+        .toLowerCase()
+        .trim();
+
+    return const [
+      'paid',
+      'success',
+      'successful',
+      'completed',
+      'captured',
+      'verified',
+    ].contains(status);
+  }
+
+  static DateTime? _paymentDate(Map<String, dynamic> payment) {
+    final value =
+        payment['paidAt'] ?? payment['createdAt'] ?? payment['updatedAt'];
+
+    return switch (value) {
+      Timestamp date => date.toDate(),
+      DateTime date => date,
+      String date => DateTime.tryParse(date),
+      _ => null,
+    };
+  }
+
+  static String _formatPaymentDate(DateTime? date) {
+    if (date == null) {
+      return 'Date unavailable';
+    }
+
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
+
+  // ============================================================
+  // PROJECT PROGRESS
+  // ============================================================
+
   Widget _projectProgressSection(
     BuildContext context,
     Map<String, dynamic> project,
   ) {
     final rawMilestones = project['milestones'];
+
     final completedMilestones = rawMilestones is Map
         ? Map<String, dynamic>.from(rawMilestones)
         : <String, dynamic>{};
@@ -429,11 +1237,14 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     final completedCount = milestones.where((milestone) {
       return completedMilestones[milestone['key']] == true;
     }).length;
+
     final totalMilestones = milestones.length;
     final progress = completedCount / totalMilestones;
+
     final currentIndex = milestones.indexWhere((milestone) {
       return completedMilestones[milestone['key']] != true;
     });
+
     final allCompleted = currentIndex == -1;
 
     return Column(
@@ -476,6 +1287,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           style: const TextStyle(color: muted, fontSize: 12),
         ),
         const SizedBox(height: 26),
+
         for (int i = 0; i < milestones.length; i++)
           _buildMilestoneTile(
             context: context,
@@ -485,6 +1297,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
             currentIndex: currentIndex,
             project: project,
           ),
+
         if (allCompleted)
           Container(
             width: double.infinity,
@@ -530,10 +1343,13 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     required Map<String, dynamic> project,
   }) {
     final key = milestone['key']!;
+
     final isCompleted = completedMilestones[key] == true;
+
     final isCurrent = index == currentIndex;
     final isLocked = !isCompleted && !isCurrent;
     final isLast = index == milestones.length - 1;
+
     final milestoneColor = isCompleted
         ? const Color(0xFF059669)
         : isCurrent
@@ -702,6 +1518,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // COMPLETE MILESTONE
+  // ============================================================
+
   Future<void> _completeMilestone({
     required BuildContext context,
     required String milestoneKey,
@@ -718,7 +1538,6 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     }
 
     try {
-      // Step 1: Check project membership before starting the transaction.
       final isAuthorized = await _isAuthorizedProjectMember(currentUserId);
 
       if (!context.mounted) return;
@@ -732,7 +1551,6 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
         return;
       }
 
-      // Step 2: Find the requested milestone.
       final milestoneIndex = milestones.indexWhere(
         (milestone) => milestone['key'] == milestoneKey,
       );
@@ -745,7 +1563,6 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           .collection('projects')
           .doc(projectId);
 
-      // Step 3: Update the milestone transactionally.
       final didComplete = await FirebaseFirestore.instance.runTransaction<bool>(
         (transaction) async {
           final snapshot = await transaction.get(projectRef);
@@ -765,6 +1582,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           }
 
           final rawMilestones = data['milestones'];
+
           final latestMilestones = rawMilestones is Map
               ? Map<String, dynamic>.from(rawMilestones)
               : <String, dynamic>{};
@@ -777,6 +1595,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
             'testing',
             'deployment',
           ];
+
           final currentIndex = milestoneOrder.indexOf(milestoneKey);
 
           if (currentIndex == -1) {
@@ -789,9 +1608,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
 
           for (int i = 0; i < currentIndex; i++) {
             if (latestMilestones[milestoneOrder[i]] != true) {
-              throw StateError(
-                'Complete ${milestones[i]['title']} first.',
-              );
+              throw StateError('Complete ${milestones[i]['title']} first.');
             }
           }
 
@@ -800,9 +1617,12 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           final completedCount = milestoneOrder
               .where((key) => latestMilestones[key] == true)
               .length;
-          final progress =
-              (completedCount / milestoneOrder.length * 100).round();
+
+          final progress = (completedCount / milestoneOrder.length * 100)
+              .round();
+
           final isCompleted = progress == 100;
+
           final updates = <String, dynamic>{
             'milestones': latestMilestones,
             'progress': progress,
@@ -815,6 +1635,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           }
 
           transaction.update(projectRef, updates);
+
           return true;
         },
       );
@@ -831,6 +1652,7 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       if (!context.mounted) return;
 
       debugPrint('Project milestone update failed: $e');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -842,6 +1664,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       );
     }
   }
+
+  // ============================================================
+  // PROJECT HEADER
+  // ============================================================
 
   Widget _projectHeader(
     String title,
@@ -919,6 +1745,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // REUSABLE SECTION
+  // ============================================================
+
   Widget _section({
     required String title,
     required String subtitle,
@@ -988,6 +1818,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // PROJECT BUDGET CARD
+  // ============================================================
+
   Widget _budgetCard(Map<String, dynamic> project) {
     final amount =
         project['budget'] ?? project['amount'] ?? project['projectAmount'];
@@ -1020,10 +1854,16 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // LIST FIELD
+  // ============================================================
+
   Widget _listField(String title, dynamic value) {
     final values = _toStringList(value);
 
-    if (values.isEmpty) return const SizedBox.shrink();
+    if (values.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
@@ -1042,29 +1882,31 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: values
-                .map(
-                  (item) => Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Text(
-                      item,
-                      style: const TextStyle(color: dark, fontSize: 12),
-                    ),
-                  ),
-                )
-                .toList(),
+            children: values.map((item) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F4F6),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  item,
+                  style: const TextStyle(color: dark, fontSize: 12),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),
     );
   }
+
+  // ============================================================
+  // INFORMATION ROW
+  // ============================================================
 
   Widget _infoRow(String label, String value) {
     return Row(
@@ -1092,6 +1934,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // ACTION BUTTON
+  // ============================================================
+
   Widget _actionButton({
     required IconData icon,
     required String label,
@@ -1114,6 +1960,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       ),
     );
   }
+
+  // ============================================================
+  // HEADER CHIP
+  // ============================================================
 
   Widget _headerChip(IconData icon, String label) {
     return Container(
@@ -1139,6 +1989,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       ),
     );
   }
+
+  // ============================================================
+  // STATUS BADGE
+  // ============================================================
 
   Widget _statusBadge(String status, {bool light = false}) {
     final normalized = status.toLowerCase();
@@ -1180,6 +2034,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
   Widget _message(IconData icon, String message) {
     return Center(
       child: Padding(
@@ -1200,15 +2058,24 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // GENERAL HELPERS
+  // ============================================================
+
   static String _string(dynamic value, {String fallback = 'Not specified'}) {
-    if (value == null) return fallback;
+    if (value == null) {
+      return fallback;
+    }
 
     final result = value.toString().trim();
+
     return result.isEmpty ? fallback : result;
   }
 
   static List<String> _toStringList(dynamic value) {
-    if (value == null) return [];
+    if (value == null) {
+      return [];
+    }
 
     if (value is List) {
       return value
@@ -1229,7 +2096,9 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
   }
 
   static String _money(dynamic value) {
-    if (value == null) return 'Not specified';
+    if (value == null) {
+      return 'Not specified';
+    }
 
     if (value is num) {
       return '₹${value.toStringAsFixed(2)}';
@@ -1245,7 +2114,9 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
   }
 
   static String _formatDate(dynamic value) {
-    if (value == null) return 'Not specified';
+    if (value == null) {
+      return 'Not specified';
+    }
 
     DateTime? date;
 
@@ -1257,7 +2128,9 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
       date = DateTime.tryParse(value);
     }
 
-    if (date == null) return 'Not specified';
+    if (date == null) {
+      return 'Not specified';
+    }
 
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
@@ -1266,7 +2139,9 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
   }
 
   static String _readable(String value) {
-    if (value.isEmpty) return 'Not specified';
+    if (value.isEmpty) {
+      return 'Not specified';
+    }
 
     return value
         .replaceAll('_', ' ')

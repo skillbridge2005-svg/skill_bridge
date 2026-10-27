@@ -41,6 +41,10 @@ dependencies:
   path: ^1.9.1
   file_picker: ^13.2.0
   cached_network_image: ^4.0.5
+  pdf: ^3.13.1
+  printing: ^5.15.1
+  firebase_messaging: ^16.7.1
+  flutter_local_notifications: ^22.3.3
 
 dev_dependencies:
   flutter_test:

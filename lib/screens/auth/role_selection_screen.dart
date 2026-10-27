@@ -20,11 +20,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   String _selectedRole = 'developer';
 
   void _continue() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => LoginScreen(role: _selectedRole),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => LoginScreen(role: _selectedRole)));
   }
 
   @override
@@ -51,7 +49,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Build. Connect. Grow.',
+                    'Connect-Build-Grow',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 25,
@@ -91,8 +89,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   _RoleCard(
                     role: 'developer',
                     title: 'Developer',
-                    description:
-                        'Find projects, showcase your skills, work with teams and earn.',
+                    description: 'Find projects, showcase your skills, work with teams and earn.',
                     icon: Icons.code_rounded,
                     iconBackground: const Color(0xFFEFF6FF),
                     iconColor: RoleSelectionScreen.primary,
@@ -107,8 +104,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   _RoleCard(
                     role: 'client',
                     title: 'Client',
-                    description:
-                        'Post your project, find skilled developers and manage your project.',
+                    description: 'Post your project, find skilled developers and manage your project.',
                     icon: Icons.business_center_rounded,
                     iconBackground: const Color(0xFFF0FDF4),
                     iconColor: const Color(0xFF16A34A),
@@ -144,10 +140,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                             ),
                           ),
                           SizedBox(width: 8),
-                          Icon(
-                            Icons.arrow_forward_rounded,
-                            size: 20,
-                          ),
+                          Icon(Icons.arrow_forward_rounded, size: 20),
                         ],
                       ),
                     ),
@@ -198,7 +191,9 @@ class _RoleCard extends StatelessWidget {
               : const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: selected ? RoleSelectionScreen.primary : RoleSelectionScreen.border,
+            color: selected
+                ? RoleSelectionScreen.primary
+                : RoleSelectionScreen.border,
             width: selected ? 1.8 : 1,
           ),
         ),
