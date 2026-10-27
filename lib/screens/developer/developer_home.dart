@@ -15,6 +15,10 @@ import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
 import 'team_messages_screen.dart';
+import '../../models/project_model.dart';
+import '../../services/project_service.dart';
+import '../../services/application_service.dart';
+import '../../services/team_invitation_service.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -47,7 +51,9 @@ class _DeveloperHomeState extends State<DeveloperHome>
   bool _notificationsOpen = false;
   bool _messagesOpen = false;
   final NotificationService _notificationService = NotificationService();
-
+  final ProjectService _projectService = ProjectService();
+  final ApplicationService _applicationService = ApplicationService();
+  final TeamInvitationService _teamInvitationService = TeamInvitationService();
   late final AnimationController _pageController;
   late final AnimationController _ambientController;
 
@@ -57,9 +63,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
     _NavItem(Icons.assignment_rounded, 'My Applications'),
     _NavItem(Icons.work_history_rounded, 'Active Projects'),
     _NavItem(Icons.groups_2_rounded, 'Teams'),
-    _NavItem(Icons.auto_awesome_rounded, 'AI Career Assistant'),
     _NavItem(Icons.person_rounded, 'My Profile'),
-    _NavItem(Icons.folder_copy_rounded, 'Portfolio'),
   ];
 
   void _openTeamInvitations() {
@@ -152,6 +156,146 @@ class _DeveloperHomeState extends State<DeveloperHome>
         content: Text('$feature is ready for the next module.'),
       ),
     );
+  }
+
+  Future<void> _inviteDeveloper(String developerId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) return;
+
+    try {
+      final teamsSnapshot = await FirebaseFirestore.instance
+          .collection('teams')
+          .where('ownerId', isEqualTo: uid)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      if (!mounted) return;
+
+      if (teamsSnapshot.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Create an active team before inviting developers.'),
+          ),
+        );
+        return;
+      }
+
+      final selectedTeam =
+          await showDialog<QueryDocumentSnapshot<Map<String, dynamic>>>(
+            context: context,
+            builder: (dialogContext) {
+              return AlertDialog(
+                title: const Text('Choose a team'),
+                content: SizedBox(
+                  width: 420,
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: teamsSnapshot.docs.map((teamDoc) {
+                      final teamData = teamDoc.data();
+
+                      return ListTile(
+                        leading: const Icon(Icons.groups_outlined),
+                        title: Text(
+                          (teamData['name'] ?? 'Unnamed team').toString(),
+                        ),
+                        subtitle: Text(
+                          (teamData['projectTitle'] ?? 'No project linked')
+                              .toString(),
+                        ),
+                        onTap: () => Navigator.pop(dialogContext, teamDoc),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              );
+            },
+          );
+
+      if (!mounted || selectedTeam == null) return;
+
+      final result = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (dialogContext) {
+          final roleController = TextEditingController();
+          final responsibilitiesController = TextEditingController();
+
+          return AlertDialog(
+            title: const Text('Invitation details'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: roleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Team role',
+                        hintText: 'e.g. Flutter Developer',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: responsibilitiesController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Responsibilities',
+                        hintText: 'Describe the work this developer will do',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, {
+                  'role': roleController.text.trim(),
+                  'responsibilities': responsibilitiesController.text.trim(),
+                }),
+                child: const Text('Continue'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (!mounted || result == null) return;
+
+      await _teamInvitationService.sendInvitation(
+        teamId: selectedTeam.id,
+        developerId: developerId,
+        role: result['role'] ?? '',
+        responsibilities: result['responsibilities'] ?? '',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Team invitation sent successfully.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not send invitation: ${error.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -455,7 +599,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
           children: [
             Row(
               children: [
-                const _Avatar(size: 38),
+                _Avatar(size: 38, initials: name),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -626,11 +770,11 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 }
               },
               itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'profile',
+                PopupMenuItem<String>(
+                  value: 'account',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const _Avatar(size: 36),
+                    leading: _Avatar(size: 36, initials: name),
                     title: Text(
                       name,
                       style: const TextStyle(fontWeight: FontWeight.w800),
@@ -639,19 +783,68 @@ class _DeveloperHomeState extends State<DeveloperHome>
                   ),
                 ),
                 const PopupMenuDivider(),
-                const PopupMenuItem(
+
+                // My Profile
+                const PopupMenuItem<String>(
                   value: 'profile',
-                  child: Text('My Profile'),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 21,
+                      ),
+                      SizedBox(width: 12),
+                      Text('My Profile'),
+                    ],
+                  ),
                 ),
-                const PopupMenuItem(value: 'settings', child: Text('Settings')),
-                const PopupMenuItem(value: 'logout', child: Text('Logout')),
+
+                // Settings
+                const PopupMenuItem<String>(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.settings_outlined,
+                        color: Color(0xFF2563EB),
+                        size: 21,
+                      ),
+                      SizedBox(width: 12),
+                      Text('Settings'),
+                    ],
+                  ),
+                ),
+
+                // Logout
+                const PopupMenuItem<String>(
+                  value: 'logout',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.logout_rounded,
+                        color: Color(0xFFDC2626),
+                        size: 21,
+                      ),
+                      SizedBox(width: 12),
+                      Text(
+                        'Logout',
+                        style: TextStyle(
+                          color: Color(0xFFDC2626),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
+
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(
                   children: [
-                    _Avatar(size: 38),
-                    Icon(Icons.keyboard_arrow_down_rounded),
+                    _Avatar(size: 38, initials: name),
+                    const Icon(Icons.keyboard_arrow_down_rounded),
                   ],
                 ),
               ),
@@ -885,96 +1078,124 @@ class _DeveloperHomeState extends State<DeveloperHome>
   }
 
   Widget _buildStatsGrid(bool mobile) {
-    final cards = [
-      _StatData(
-        'Applications',
-        '12',
-        '+3 this week',
-        Icons.assignment_turned_in_rounded,
-        const Color(0xFFEFF6FF),
-      ),
-      _StatData(
-        'Shortlisted',
-        '4',
-        '2 awaiting interview',
-        Icons.stars_rounded,
-        const Color(0xFFFFF7ED),
-      ),
-      _StatData(
-        'Active Projects',
-        '2',
-        '1 due this week',
-        Icons.rocket_launch_rounded,
-        const Color(0xFFF0FDFA),
-      ),
-      _StatData(
-        'Profile Views',
-        '48',
-        '+18% this month',
-        Icons.visibility_rounded,
-        const Color(0xFFF5F3FF),
-      ),
-    ];
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = mobile
-            ? 2
-            : constraints.maxWidth < 1000
-            ? 2
-            : 4;
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: cards.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            mainAxisExtent: mobile ? 128 : 138,
-          ),
-          itemBuilder: (_, index) => _AnimatedCard(
-            delay: 100 + index * 55,
-            child: _StatCard(data: cards[index]),
-          ),
+    if (uid == null) {
+      return const Center(child: Text('Please log in to view statistics.'));
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('applications')
+          .where('developerId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, applicationSnapshot) {
+        final applications = applicationSnapshot.data?.docs ?? [];
+
+        final applicationCount = applications.length;
+
+        final shortlistedCount = applications.where((doc) {
+          final status = (doc.data()['status'] ?? 'pending')
+              .toString()
+              .trim()
+              .toLowerCase();
+          return status == 'shortlisted';
+        }).length;
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('projects')
+              .where('developerId', isEqualTo: uid)
+              .snapshots(),
+          builder: (context, projectSnapshot) {
+            final projects = projectSnapshot.data?.docs ?? [];
+
+            final activeProjectCount = projects.where((doc) {
+              final status = (doc.data()['status'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              return status == 'active';
+            }).length;
+
+            final cards = [
+              _StatData(
+                'Applications',
+                applicationSnapshot.hasError
+                    ? '—'
+                    : applicationSnapshot.connectionState ==
+                          ConnectionState.waiting
+                    ? '...'
+                    : '$applicationCount',
+                'All submitted applications',
+                Icons.assignment_turned_in_rounded,
+                const Color(0xFFEFF6FF),
+              ),
+              _StatData(
+                'Shortlisted',
+                applicationSnapshot.hasError
+                    ? '—'
+                    : applicationSnapshot.connectionState ==
+                          ConnectionState.waiting
+                    ? '...'
+                    : '$shortlistedCount',
+                'Applications shortlisted',
+                Icons.stars_rounded,
+                const Color(0xFFFFF7ED),
+              ),
+              _StatData(
+                'Active Projects',
+                projectSnapshot.hasError
+                    ? '—'
+                    : projectSnapshot.connectionState == ConnectionState.waiting
+                    ? '...'
+                    : '$activeProjectCount',
+                'Currently assigned projects',
+                Icons.rocket_launch_rounded,
+                const Color(0xFFF0FDFA),
+              ),
+              _StatData(
+                'Profile Views',
+                '—',
+                'Tracking not enabled',
+                Icons.visibility_rounded,
+                const Color(0xFFF5F3FF),
+              ),
+            ];
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = mobile
+                    ? 2
+                    : constraints.maxWidth < 1000
+                    ? 2
+                    : 4;
+
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: cards.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: mobile ? 128 : 138,
+                  ),
+                  itemBuilder: (_, index) => _AnimatedCard(
+                    delay: 100 + index * 55,
+                    child: _StatCard(data: cards[index]),
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );
   }
 
   Widget _buildRecommendedSection(bool mobile, bool tablet) {
-    final projects = [
-      _ProjectData(
-        title: 'Fintech Mobile Experience',
-        client: 'NovaPay',
-        description: 'Build a secure Flutter experience for personal finance and payments.',
-        match: 94,
-        skills: ['Flutter', 'Firebase', 'REST API'],
-        budget: '₹45k–₹70k',
-        mode: 'Remote',
-        icon: Icons.account_balance_wallet_rounded,
-      ),
-      _ProjectData(
-        title: 'AI Resume Platform',
-        client: 'CareerLoop',
-        description: 'Create an AI-assisted resume and job matching product for students.',
-        match: 89,
-        skills: ['Java', 'Python', 'AI'],
-        budget: '₹35k–₹55k',
-        mode: 'Hybrid',
-        icon: Icons.psychology_alt_rounded,
-      ),
-      _ProjectData(
-        title: 'Campus Collaboration App',
-        client: 'EduNext',
-        description: 'Develop a collaborative app connecting students, mentors and teams.',
-        match: 84,
-        skills: ['Flutter', 'Firestore', 'UI/UX'],
-        budget: '₹25k–₹40k',
-        mode: 'Remote',
-        icon: Icons.school_rounded,
-      ),
-    ];
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -988,83 +1209,508 @@ class _DeveloperHomeState extends State<DeveloperHome>
         ),
         const SizedBox(height: 13),
         SizedBox(
-          height: mobile ? 292 : 282,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: projects.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
-            itemBuilder: (_, index) => SizedBox(
-              width: mobile
-                  ? 315
-                  : tablet
-                  ? 350
-                  : 390,
-              child: _AnimatedCard(
-                delay: 180 + index * 80,
-                child: _ProjectCard(
-                  project: projects[index],
-                  onApply: () => _showApplyDialog(projects[index]),
-                  onView: () => _showProjectDialog(projects[index]),
+          height: mobile
+              ? 310
+              : tablet
+              ? 310
+              : 300,
+          child: uid == null
+              ? const Center(child: Text('Please log in to view projects.'))
+              : StreamBuilder<List<ProjectModel>>(
+                  stream: _projectService.watchOpenProjects(),
+                  builder: (context, projectSnapshot) {
+                    if (projectSnapshot.connectionState ==
+                            ConnectionState.waiting &&
+                        !projectSnapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    if (projectSnapshot.hasError) {
+                      return const Center(
+                        child: Text('Unable to load recommended projects.'),
+                      );
+                    }
+
+                    return FutureBuilder<
+                      List<DocumentSnapshot<Map<String, dynamic>>>
+                    >(
+                      future: Future.wait([
+                        FirebaseFirestore.instance
+                            .collection('developerProfiles')
+                            .doc(uid)
+                            .get(),
+                        FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(uid)
+                            .get(),
+                      ]),
+                      builder: (context, profileSnapshot) {
+                        if (profileSnapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+
+                        if (profileSnapshot.hasError ||
+                            !profileSnapshot.hasData) {
+                          return const Center(
+                            child: Text('Unable to load your recommendations.'),
+                          );
+                        }
+
+                        final profile =
+                            profileSnapshot.data![0].data() ??
+                            <String, dynamic>{};
+                        final user =
+                            profileSnapshot.data![1].data() ??
+                            <String, dynamic>{};
+
+                        List<String> readList(dynamic value) {
+                          if (value is Iterable) {
+                            return value
+                                .map((item) => item.toString().trim())
+                                .where((item) => item.isNotEmpty)
+                                .toSet()
+                                .toList();
+                          }
+
+                          if (value is String && value.trim().isNotEmpty) {
+                            return value
+                                .split(',')
+                                .map((item) => item.trim())
+                                .where((item) => item.isNotEmpty)
+                                .toList();
+                          }
+
+                          return [];
+                        }
+
+                        String? readString(
+                          dynamic profileValue,
+                          dynamic userValue,
+                        ) {
+                          final value = profileValue ?? userValue;
+                          if (value == null ||
+                              value.toString().trim().isEmpty) {
+                            return null;
+                          }
+                          return value.toString().trim();
+                        }
+
+                        final skills = readList(profile['skills']);
+                        final technologies = readList(profile['technologies']);
+
+                        final projectType = readString(
+                          profile['projectType'],
+                          user['projectType'],
+                        );
+                        final workMode = readString(
+                          profile['workMode'],
+                          user['workMode'],
+                        );
+                        final duration = readString(
+                          profile['projectDuration'] ?? profile['duration'],
+                          user['projectDuration'] ?? user['duration'],
+                        );
+
+                        final recommendations = _projectService
+                            .getRecommendedProjects(
+                              projectSnapshot.data ?? [],
+                              developerSkills: skills,
+                              developerTechnologies: technologies,
+                              developerProjectType: projectType,
+                              developerWorkMode: workMode,
+                              developerDuration: duration,
+                              minimumScore: 0,
+                              limit: 10,
+                            );
+
+                        if (recommendations.isEmpty) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(20),
+                              child: Text(
+                                'No open projects are available yet. '
+                                'Check Discover Projects for new opportunities.',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          );
+                        }
+
+                        final projects = recommendations.map((recommendation) {
+                          final project = recommendation.project;
+
+                          final minBudget = project.effectiveBudgetMin;
+                          final maxBudget = project.effectiveBudgetMax;
+
+                          String formatBudget(double amount) {
+                            return '₹${amount.toStringAsFixed(0)}';
+                          }
+
+                          final budget = minBudget <= 0 && maxBudget <= 0
+                              ? 'Budget not specified'
+                              : minBudget > 0 &&
+                                    maxBudget > 0 &&
+                                    minBudget != maxBudget
+                              ? '${formatBudget(minBudget)}–${formatBudget(maxBudget)}'
+                              : formatBudget(
+                                  maxBudget > 0 ? maxBudget : minBudget,
+                                );
+
+                          final allSkills = <String>{
+                            ...project.skills,
+                            ...project.technologies,
+                          }.toList();
+
+                          return _ProjectData(
+                            id: project.id,
+                            clientId: project.clientId,
+                            duration: project.duration.isNotEmpty
+                                ? project.duration
+                                : 'To be discussed',
+                            title: project.title,
+                            client: project.clientName.isNotEmpty
+                                ? project.clientName
+                                : 'Client',
+                            description: project.description,
+                            match: recommendation.matchPercentage,
+                            skills: allSkills,
+                            budget: budget,
+                            mode: project.workMode.isNotEmpty
+                                ? project.workMode
+                                : 'Not specified',
+                            icon: Icons.work_outline_rounded,
+                          );
+                        }).toList();
+
+                        return ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: projects.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 14),
+                          itemBuilder: (_, index) => SizedBox(
+                            width: mobile
+                                ? 315
+                                : tablet
+                                ? 350
+                                : 390,
+                            child: _AnimatedCard(
+                              delay: 180 + index * 80,
+                              child: _ProjectCard(
+                                project: projects[index],
+                                onApply: () =>
+                                    _showApplyDialog(projects[index]),
+                                onView: () =>
+                                    _showProjectDialog(projects[index]),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
-              ),
-            ),
-          ),
         ),
       ],
     );
   }
 
   Widget _buildApplicationPipeline() {
-    return _DashboardCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeading(
-            eyebrow: 'APPLICATIONS',
-            title: 'Your application pipeline',
-            subtitle: 'Track every opportunity from application to interview.',
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 112,
-            child: Row(
-              children: [
-                _PipelineStep('Applied', '12', _AppColors.primary),
-                _PipelineConnector(),
-                _PipelineStep('Review', '5', const Color(0xFF7C3AED)),
-                _PipelineConnector(),
-                _PipelineStep('Shortlisted', '4', const Color(0xFFF59E0B)),
-                _PipelineConnector(),
-                _PipelineStep('Interview', '2', const Color(0xFF0F766E)),
-              ],
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return const _DashboardCard(
+        child: Text('Please log in to view your applications.'),
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('applications')
+          .where('developerId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const _DashboardCard(
+            child: Text('Unable to load your applications.'),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const _DashboardCard(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(),
+              ),
             ),
+          );
+        }
+
+        final applications =
+            snapshot.data?.docs.toList() ??
+            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+        String getStatus(Map<String, dynamic> data) {
+          return (data['status'] ?? 'pending')
+              .toString()
+              .trim()
+              .toLowerCase()
+              .replaceAll('_', ' ')
+              .replaceAll('-', ' ');
+        }
+
+        bool matchesStatus(Map<String, dynamic> data, List<String> values) {
+          final status = getStatus(data);
+          return values.contains(status);
+        }
+
+        final appliedCount = applications.length;
+        final reviewCount = applications.where((doc) {
+          return matchesStatus(doc.data(), [
+            'review',
+            'under review',
+            'in review',
+            'reviewing',
+          ]);
+        }).length;
+
+        final shortlistedCount = applications.where((doc) {
+          return matchesStatus(doc.data(), [
+            'shortlisted',
+            'shortlisted for interview',
+          ]);
+        }).length;
+
+        final interviewCount = applications.where((doc) {
+          return matchesStatus(doc.data(), [
+            'interview',
+            'interview scheduled',
+            'interviewing',
+            'interview invited',
+          ]);
+        }).length;
+
+        DateTime dateFrom(dynamic value) {
+          if (value is Timestamp) return value.toDate();
+          if (value is DateTime) return value;
+          return DateTime.fromMillisecondsSinceEpoch(0);
+        }
+
+        applications.sort((a, b) {
+          final aData = a.data();
+          final bData = b.data();
+
+          final aDate = dateFrom(aData['updatedAt'] ?? aData['createdAt']);
+          final bDate = dateFrom(bData['updatedAt'] ?? bData['createdAt']);
+
+          return bDate.compareTo(aDate);
+        });
+
+        String relativeTime(Map<String, dynamic> data) {
+          final date = dateFrom(data['updatedAt'] ?? data['createdAt']);
+
+          if (date.millisecondsSinceEpoch == 0) {
+            return 'Date unavailable';
+          }
+
+          final difference = DateTime.now().difference(date);
+
+          if (difference.isNegative || difference.inMinutes < 1) {
+            return 'Updated just now';
+          }
+          if (difference.inMinutes < 60) {
+            return 'Updated ${difference.inMinutes}m ago';
+          }
+          if (difference.inHours < 24) {
+            return 'Updated ${difference.inHours}h ago';
+          }
+          if (difference.inDays == 1) {
+            return 'Updated yesterday';
+          }
+          if (difference.inDays < 30) {
+            return 'Updated ${difference.inDays}d ago';
+          }
+
+          return 'Updated ${date.day}/${date.month}/${date.year}';
+        }
+
+        String displayStatus(Map<String, dynamic> data) {
+          final status = getStatus(data);
+
+          if (status.isEmpty || status == 'pending') return 'Applied';
+          if (status == 'applied') return 'Applied';
+          if (status == 'review' ||
+              status == 'reviewing' ||
+              status == 'in review') {
+            return 'Under review';
+          }
+          if (status == 'shortlisted for interview') {
+            return 'Shortlisted';
+          }
+          if (status == 'interview scheduled' ||
+              status == 'interview invited') {
+            return 'Interview';
+          }
+
+          return status
+              .split(' ')
+              .map(
+                (word) => word.isEmpty
+                    ? word
+                    : '${word[0].toUpperCase()}${word.substring(1)}',
+              )
+              .join(' ');
+        }
+
+        Color statusColor(Map<String, dynamic> data) {
+          final status = getStatus(data);
+
+          if (status.contains('shortlist')) {
+            return const Color(0xFFF59E0B);
+          }
+          if (status.contains('interview')) {
+            return const Color(0xFF0F766E);
+          }
+          if (status.contains('review')) {
+            return const Color(0xFF7C3AED);
+          }
+          if (status == 'rejected' || status == 'withdrawn') {
+            return const Color(0xFFDC2626);
+          }
+
+          return _AppColors.primary;
+        }
+
+        return _DashboardCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeading(
+                eyebrow: 'APPLICATIONS',
+                title: 'Your application pipeline',
+                subtitle:
+                    'Track every opportunity from application to interview.',
+              ),
+              const SizedBox(height: 18),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 360;
+
+                  return SizedBox(
+                    height: compact ? 100 : 112,
+                    child: Row(
+                      children: [
+                        _PipelineStep(
+                          'Applied',
+                          '$appliedCount',
+                          _AppColors.primary,
+                        ),
+                        _PipelineConnector(),
+                        _PipelineStep(
+                          'Review',
+                          '$reviewCount',
+                          const Color(0xFF7C3AED),
+                        ),
+                        _PipelineConnector(),
+                        _PipelineStep(
+                          'Shortlisted',
+                          '$shortlistedCount',
+                          const Color(0xFFF59E0B),
+                        ),
+                        _PipelineConnector(),
+                        _PipelineStep(
+                          'Interview',
+                          '$interviewCount',
+                          const Color(0xFF0F766E),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1),
+              const SizedBox(height: 15),
+              if (applications.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 22),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.assignment_outlined,
+                          size: 34,
+                          color: _AppColors.muted,
+                        ),
+                        SizedBox(height: 9),
+                        Text(
+                          'No applications yet',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: _AppColors.ink,
+                          ),
+                        ),
+                        SizedBox(height: 5),
+                        Text(
+                          'Explore recommended projects and apply to get started.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _AppColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ...applications.take(3).map((application) {
+                  final data = application.data();
+                  final projectId = (data['projectId'] ?? '').toString();
+
+                  return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    future: projectId.isEmpty
+                        ? null
+                        : FirebaseFirestore.instance
+                              .collection('projects')
+                              .doc(projectId)
+                              .get(),
+                    builder: (context, projectSnapshot) {
+                      final projectData =
+                          projectSnapshot.data?.data() ?? <String, dynamic>{};
+
+                      final title =
+                          (projectData['title'] ??
+                                  projectData['projectTitle'] ??
+                                  data['projectTitle'] ??
+                                  'Project application')
+                              .toString();
+
+                      final company =
+                          (projectData['clientName'] ??
+                                  data['clientName'] ??
+                                  data['clientId'] ??
+                                  'Client')
+                              .toString();
+
+                      return _ApplicationRow(
+                        title: title,
+                        company: company,
+                        status: displayStatus(data),
+                        color: statusColor(data),
+                        time: relativeTime(data),
+                      );
+                    },
+                  );
+                }),
+            ],
           ),
-          const Divider(height: 1),
-          const SizedBox(height: 15),
-          _ApplicationRow(
-            title: 'Fintech Mobile Experience',
-            company: 'NovaPay',
-            status: 'Shortlisted',
-            color: const Color(0xFFF59E0B),
-            time: 'Updated 2h ago',
-          ),
-          _ApplicationRow(
-            title: 'AI Resume Platform',
-            company: 'CareerLoop',
-            status: 'Under review',
-            color: const Color(0xFF7C3AED),
-            time: 'Updated yesterday',
-          ),
-          _ApplicationRow(
-            title: 'Campus Collaboration App',
-            company: 'EduNext',
-            status: 'Applied',
-            color: _AppColors.primary,
-            time: 'Updated 2d ago',
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1142,14 +1788,6 @@ class _DeveloperHomeState extends State<DeveloperHome>
                   onTap: () => _selectNav(6),
                 ),
               ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: _AiAction(
-                  label: 'Ask AI',
-                  icon: Icons.chat_rounded,
-                  onTap: () => _selectNav(5),
-                ),
-              ),
             ],
           ),
         ],
@@ -1158,6 +1796,14 @@ class _DeveloperHomeState extends State<DeveloperHome>
   }
 
   Widget _buildActiveProjects(bool mobile) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return _DashboardCard(
+        child: const Text('Please log in to view your active projects.'),
+      );
+    }
+
     return _DashboardCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1170,22 +1816,164 @@ class _DeveloperHomeState extends State<DeveloperHome>
             onAction: () => _selectNav(3),
           ),
           const SizedBox(height: 17),
-          _ActiveProjectRow(
-            title: 'E-Commerce Mobile Application',
-            client: 'Client: MarketHub',
-            progress: .68,
-            next: 'UI review • Today',
-            color: _AppColors.primary,
-            icon: Icons.shopping_bag_rounded,
-          ),
-          const SizedBox(height: 12),
-          _ActiveProjectRow(
-            title: 'College Event Management',
-            client: 'Team: CampusLabs',
-            progress: .42,
-            next: 'API integration • 2 days',
-            color: const Color(0xFF7C3AED),
-            icon: Icons.event_available_rounded,
+
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('projects')
+                .where('assignedDeveloperId', isEqualTo: uid)
+                .snapshots(),
+            builder: (context, assignedSnapshot) {
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('projects')
+                    .where('developerId', isEqualTo: uid)
+                    .snapshots(),
+                builder: (context, developerSnapshot) {
+                  if (assignedSnapshot.hasError || developerSnapshot.hasError) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: Text(
+                        'Unable to load active projects. Check Firestore permissions.',
+                        style: TextStyle(color: _AppColors.muted),
+                      ),
+                    );
+                  }
+
+                  if (assignedSnapshot.connectionState ==
+                          ConnectionState.waiting ||
+                      developerSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  final documents =
+                      <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+
+                  for (final doc in assignedSnapshot.data?.docs ?? []) {
+                    documents[doc.id] = doc;
+                  }
+
+                  for (final doc in developerSnapshot.data?.docs ?? []) {
+                    documents[doc.id] = doc;
+                  }
+
+                  final activeProjects = documents.values.where((doc) {
+                    final data = doc.data();
+                    final status = (data['status'] ?? '')
+                        .toString()
+                        .trim()
+                        .toLowerCase();
+
+                    return ![
+                      'completed',
+                      'cancelled',
+                      'canceled',
+                      'closed',
+                      'rejected',
+                    ].contains(status);
+                  }).toList();
+
+                  activeProjects.sort((a, b) {
+                    final aDate = a.data()['updatedAt'];
+                    final bDate = b.data()['updatedAt'];
+
+                    DateTime dateOf(dynamic value) {
+                      if (value is Timestamp) return value.toDate();
+                      if (value is DateTime) return value;
+                      return DateTime.fromMillisecondsSinceEpoch(0);
+                    }
+
+                    return dateOf(bDate).compareTo(dateOf(aDate));
+                  });
+
+                  if (activeProjects.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.work_outline_rounded,
+                              size: 34,
+                              color: _AppColors.muted,
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              'No active projects yet',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: _AppColors.ink,
+                              ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              'Projects assigned to you will appear here.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _AppColors.muted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return Column(
+                    children: activeProjects.take(5).map((doc) {
+                      final data = doc.data();
+
+                      final title =
+                          (data['title'] ??
+                                  data['projectTitle'] ??
+                                  'Untitled project')
+                              .toString();
+
+                      final client =
+                          (data['clientName'] ?? data['clientId'] ?? 'Client')
+                              .toString();
+
+                      final status = (data['status'] ?? 'In progress')
+                          .toString()
+                          .trim();
+
+                      // Supports progress stored as either 0–1 or 0–100.
+                      final rawProgress = data['progress'];
+                      double progress = 0;
+
+                      if (rawProgress is num) {
+                        progress = rawProgress.toDouble();
+                        if (progress > 1) progress /= 100;
+                      }
+
+                      progress = progress.clamp(0.0, 1.0);
+
+                      // If no progress field exists, derive it from milestones
+                      // only when the milestone structure is understood.
+                      final next = status.isEmpty
+                          ? 'Status not set'
+                          : status[0].toUpperCase() + status.substring(1);
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _ActiveProjectRow(
+                          title: title,
+                          client: 'Client: $client',
+                          progress: progress,
+                          next: next,
+                          color: _AppColors.primary,
+                          icon: Icons.work_outline_rounded,
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              );
+            },
           ),
         ],
       ),
@@ -1193,6 +1981,44 @@ class _DeveloperHomeState extends State<DeveloperHome>
   }
 
   Widget _buildTeamSpotlight() {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (currentUid == null) {
+      return _DashboardCard(
+        child: const Text('Please log in to find teammates.'),
+      );
+    }
+
+    List<String> readSkills(dynamic value) {
+      if (value is Iterable) {
+        return value
+            .map((item) => item.toString().trim().toLowerCase())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList();
+      }
+
+      if (value is String && value.trim().isNotEmpty) {
+        return value
+            .split(',')
+            .map((item) => item.trim().toLowerCase())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList();
+      }
+
+      return [];
+    }
+
+    String initials(String name) {
+      final parts = name.trim().split(RegExp(r'\s+'));
+      if (parts.isEmpty || parts.first.isEmpty) return 'D';
+      if (parts.length == 1) {
+        return parts.first.substring(0, 1).toUpperCase();
+      }
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+
     return _DashboardCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1200,74 +2026,211 @@ class _DeveloperHomeState extends State<DeveloperHome>
           _SectionHeading(
             eyebrow: 'TEAM MATCHING',
             title: 'Find your next teammate',
-            subtitle:
-                'SkillBridge can help you fill gaps in your project team.',
+            subtitle: 'Discover developers with skills that complement yours.',
             action: 'Find teammates',
             onAction: () => _selectNav(4),
           ),
           const SizedBox(height: 17),
-          Row(
-            children: [
-              const _Avatar(size: 48, initials: 'RK'),
-              const SizedBox(width: 11),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Riya Kulkarni',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'UI/UX Designer • 93% compatibility',
-                      style: TextStyle(fontSize: 12, color: _AppColors.muted),
-                    ),
-                  ],
-                ),
-              ),
-              OutlinedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const Teams()),
+
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('developerProfiles')
+                .doc(currentUid)
+                .snapshots(),
+            builder: (context, ownProfileSnapshot) {
+              if (ownProfileSnapshot.hasError) {
+                return const Text(
+                  'Unable to load your skills.',
+                  style: TextStyle(color: _AppColors.muted),
+                );
+              }
+
+              if (ownProfileSnapshot.connectionState ==
+                      ConnectionState.waiting &&
+                  !ownProfileSnapshot.hasData) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              final ownProfile =
+                  ownProfileSnapshot.data?.data() ?? <String, dynamic>{};
+
+              final mySkills = <String>{
+                ...readSkills(ownProfile['skills']),
+                ...readSkills(ownProfile['technologies']),
+              };
+
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('developerProfiles')
+                    .limit(30)
+                    .snapshots(),
+                builder: (context, profilesSnapshot) {
+                  if (profilesSnapshot.hasError) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'Unable to load developer profiles. Check Firestore permissions.',
+                        style: TextStyle(color: _AppColors.muted),
+                      ),
+                    );
+                  }
+
+                  if (profilesSnapshot.connectionState ==
+                          ConnectionState.waiting &&
+                      !profilesSnapshot.hasData) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+
+                  final candidates = (profilesSnapshot.data?.docs ?? [])
+                      .where((doc) => doc.id != currentUid)
+                      .where((doc) {
+                        final data = doc.data();
+                        return data['isDeveloper'] != false &&
+                            data['role']?.toString().toLowerCase() != 'client';
+                      })
+                      .toList();
+
+                  if (candidates.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 22),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.groups_outlined,
+                              size: 34,
+                              color: _AppColors.muted,
+                            ),
+                            SizedBox(height: 9),
+                            Text(
+                              'No other developer profiles found',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: _AppColors.ink,
+                              ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              'Other developers will appear here when they create profiles.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _AppColors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  int compatibility(Map<String, dynamic> data) {
+                    final candidateSkills = <String>{
+                      ...readSkills(data['skills']),
+                      ...readSkills(data['technologies']),
+                    };
+
+                    if (mySkills.isEmpty || candidateSkills.isEmpty) {
+                      return 0;
+                    }
+
+                    final common = mySkills
+                        .intersection(candidateSkills)
+                        .length;
+                    final total = mySkills.union(candidateSkills).length;
+
+                    if (total == 0) return 0;
+                    return ((common / total) * 100).round();
+                  }
+
+                  candidates.sort((a, b) {
+                    return compatibility(b.data())
+                        .compareTo(compatibility(a.data()));
+                  });
+
+                  return Column(
+                    children: candidates.take(3).map((doc) {
+                      final data = doc.data();
+
+                      final name =
+                          (data['name'] ??
+                                  data['displayName'] ??
+                                  data['fullName'] ??
+                                  'Developer')
+                              .toString();
+
+                      final role =
+                          (data['professionalTitle'] ??
+                                  data['jobTitle'] ??
+                                  data['role'] ??
+                                  'Developer')
+                              .toString();
+
+                      final skills = <String>{
+                        ...readSkills(data['skills']),
+                        ...readSkills(data['technologies']),
+                      }.toList();
+
+                      final match = compatibility(data);
+
+                      final subtitle = skills.isNotEmpty
+                          ? '${skills.take(2).join(' • ')} • $match% match'
+                          : '$role • Skills not added';
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 13),
+                        child: Row(
+                          children: [
+                            _Avatar(size: 48, initials: initials(name)),
+                            const SizedBox(width: 11),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: _AppColors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton(
+                              onPressed: () => _inviteDeveloper(doc.id),
+                              child: const Text('Invite'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   );
                 },
-                child: const Text('Invite'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 13),
-          Row(
-            children: [
-              const _Avatar(size: 48, initials: 'AS'),
-              const SizedBox(width: 11),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Aditya Shah',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'Backend Developer • 88% compatibility',
-                      style: TextStyle(fontSize: 12, color: _AppColors.muted),
-                    ),
-                  ],
-                ),
-              ),
-              OutlinedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const Teams()),
-                  );
-                },
-                child: const Text('Invite'),
-              ),
-            ],
+              );
+            },
           ),
         ],
       ),
@@ -1275,6 +2238,25 @@ class _DeveloperHomeState extends State<DeveloperHome>
   }
 
   Widget _buildUpcoming() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return _DashboardCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            _SectionHeading(
+              eyebrow: 'UP NEXT',
+              title: 'Upcoming deadlines',
+              subtitle: 'Stay ahead of your active project commitments.',
+            ),
+            SizedBox(height: 15),
+            Text('Please log in to view your deadlines.'),
+          ],
+        ),
+      );
+    }
+
     return _DashboardCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1285,21 +2267,150 @@ class _DeveloperHomeState extends State<DeveloperHome>
             subtitle: 'Stay ahead of your active project commitments.',
           ),
           const SizedBox(height: 15),
-          _DeadlineRow(
-            date: 'TODAY',
-            title: 'Submit UI prototype',
-            project: 'E-Commerce Mobile App',
-            urgent: true,
-          ),
-          _DeadlineRow(
-            date: '03 OCT',
-            title: 'API integration',
-            project: 'College Event Management',
-          ),
-          _DeadlineRow(
-            date: '07 OCT',
-            title: 'Client review',
-            project: 'E-Commerce Mobile App',
+
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('projects')
+                .where('assignedDeveloperId', isEqualTo: uid)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('Unable to load deadlines.'),
+                );
+              }
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              final now = DateTime.now();
+              final today = DateTime(now.year, now.month, now.day);
+              final tomorrow = today.add(const Duration(days: 1));
+
+              final projects = snapshot.data?.docs ?? [];
+
+              final deadlineProjects = projects.where((doc) {
+                final data = doc.data();
+                final status = (data['status'] ?? '').toString().toLowerCase();
+
+                final deadlineValue = data['deadline'];
+
+                if (deadlineValue == null) return false;
+
+                if (status == 'completed' ||
+                    status == 'cancelled' ||
+                    status == 'closed' ||
+                    status == 'rejected') {
+                  return false;
+                }
+
+                return deadlineValue is Timestamp || deadlineValue is DateTime;
+              }).toList();
+
+              deadlineProjects.sort((a, b) {
+                DateTime getDeadline(
+                  QueryDocumentSnapshot<Map<String, dynamic>> doc,
+                ) {
+                  final value = doc.data()['deadline'];
+                  if (value is Timestamp) return value.toDate();
+                  return value as DateTime;
+                }
+
+                return getDeadline(a).compareTo(getDeadline(b));
+              });
+
+              final upcoming = deadlineProjects
+                  .where((doc) {
+                    final value = doc.data()['deadline'];
+                    final deadline = value is Timestamp
+                        ? value.toDate()
+                        : value as DateTime;
+
+                    return !deadline.isBefore(today);
+                  })
+                  .take(5)
+                  .toList();
+
+              if (upcoming.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No upcoming deadlines. Your projects are on track!',
+                  ),
+                );
+              }
+
+              return Column(
+                children: upcoming.map((doc) {
+                  final data = doc.data();
+                  final deadlineValue = data['deadline'];
+
+                  final deadline = deadlineValue is Timestamp
+                      ? deadlineValue.toDate()
+                      : deadlineValue as DateTime;
+
+                  final deadlineDay = DateTime(
+                    deadline.year,
+                    deadline.month,
+                    deadline.day,
+                  );
+
+                  final String dateLabel;
+
+                  if (deadlineDay == today) {
+                    dateLabel = 'TODAY';
+                  } else if (deadlineDay == tomorrow) {
+                    dateLabel = 'TOMORROW';
+                  } else {
+                    const months = [
+                      'JAN',
+                      'FEB',
+                      'MAR',
+                      'APR',
+                      'MAY',
+                      'JUN',
+                      'JUL',
+                      'AUG',
+                      'SEP',
+                      'OCT',
+                      'NOV',
+                      'DEC',
+                    ];
+
+                    dateLabel =
+                        '${deadline.day.toString().padLeft(2, '0')} '
+                        '${months[deadline.month - 1]}';
+                  }
+
+                  final title =
+                      (data['deadlineTitle'] ??
+                              data['nextMilestone'] ??
+                              data['nextAction'] ??
+                              data['title'] ??
+                              data['projectTitle'] ??
+                              'Project deadline')
+                          .toString();
+
+                  final project =
+                      (data['title'] ??
+                              data['projectTitle'] ??
+                              'Untitled project')
+                          .toString();
+
+                  return _DeadlineRow(
+                    date: dateLabel,
+                    title: title,
+                    project: project,
+                    urgent: deadlineDay == today,
+                  );
+                }).toList(),
+              );
+            },
           ),
         ],
       ),
@@ -1365,10 +2476,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
         : NavigationBar(
             selectedIndex: math.min(_selectedNav, 4),
             onDestinationSelected: (index) {
-              if (index < 5) {
-                _selectNav(index);
+              if (index == 4) {
+                _selectNav(4); // Open Teams screen
               } else {
-                _showMobileMenu();
+                _selectNav(index);
               }
             },
             height: 72,
@@ -1395,8 +2506,9 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 label: 'Work',
               ),
               NavigationDestination(
-                icon: Icon(Icons.more_horiz_rounded),
-                label: 'More',
+                icon: Icon(Icons.groups_outlined),
+                selectedIcon: Icon(Icons.groups_rounded),
+                label: 'Teams',
               ),
             ],
           );
@@ -1405,62 +2517,81 @@ class _DeveloperHomeState extends State<DeveloperHome>
   void _showMobileMenu() {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'SkillBridge',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-                ),
-              ),
-              const SizedBox(height: 12),
-              for (final entry in <MapEntry<int, _NavItem>>[
-                MapEntry(4, _navItems[4]),
-                const MapEntry(
-                  -1,
-                  _NavItem(
-                    Icons.mark_email_unread_outlined,
-                    'Team Invitations',
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'SkillBridge',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                   ),
                 ),
-                MapEntry(5, _navItems[5]),
-                MapEntry(6, _navItems[6]),
-                MapEntry(7, _navItems[7]),
-              ])
+                const SizedBox(height: 12),
+
+                // Teams
                 ListTile(
-                  leading: Icon(entry.value.icon),
-                  title: Text(entry.value.label),
+                  leading: const Icon(Icons.groups_rounded),
+                  title: const Text('Teams'),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
                   onTap: () {
-                    Navigator.pop(context);
-                    if (entry.key == -1) {
-                      _openTeamInvitations();
-                    } else {
-                      _selectNav(entry.key);
-                    }
+                    Navigator.pop(sheetContext);
+                    _selectNav(4);
                   },
                 ),
-              ListTile(
-                leading: const Icon(Icons.logout_rounded),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout();
-                },
-              ),
-            ],
+
+                // Team Invitations
+                ListTile(
+                  leading: const Icon(Icons.mark_email_unread_outlined),
+                  title: const Text('Team Invitations'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _openTeamInvitations();
+                  },
+                ),
+
+                // My Profile
+                ListTile(
+                  leading: const Icon(Icons.person_rounded),
+                  title: const Text('My Profile'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _selectNav(6);
+                  },
+                ),
+
+                // Logout
+                ListTile(
+                  leading: const Icon(Icons.logout_rounded),
+                  title: const Text('Logout'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _logout();
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1758,114 +2889,291 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
-  void _showApplyDialog(_ProjectData project) {
-    showDialog<void>(
+  Future<void> _showApplyDialog(_ProjectData project) async {
+    final formKey = GlobalKey<FormState>();
+    final messageController = TextEditingController();
+    final budgetController = TextEditingController();
+    final durationController = TextEditingController(text: project.duration);
+
+    bool isSubmitting = false;
+
+    await showDialog<void>(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: Padding(
-            padding: const EdgeInsets.all(26),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.auto_awesome_rounded,
-                      color: _AppColors.primary,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> submitApplication() async {
+              if (isSubmitting) return;
+
+              if (!formKey.currentState!.validate()) return;
+
+              final user = FirebaseAuth.instance.currentUser;
+
+              if (user == null) {
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please log in to apply for projects.'),
+                  ),
+                );
+                return;
+              }
+
+              final proposedBudget = double.tryParse(
+                budgetController.text.trim().replaceAll(',', ''),
+              );
+
+              if (proposedBudget == null || proposedBudget <= 0) {
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Enter a valid proposed budget.'),
+                  ),
+                );
+                return;
+              }
+
+              setDialogState(() => isSubmitting = true);
+
+              try {
+                await _applicationService.createApplication(
+                  projectId: project.id,
+                  clientId: project.clientId,
+                  coverLetter: messageController.text.trim(),
+                  proposedBudget: proposedBudget,
+                  estimatedDuration: durationController.text.trim(),
+                );
+
+                if (!mounted) return;
+
+                Navigator.of(dialogContext).pop();
+
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Application submitted successfully!'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              } catch (error) {
+                setDialogState(() => isSubmitting = false);
+
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Could not submit application: ${error.toString()}',
                     ),
-                    const SizedBox(width: 9),
-                    const Text(
-                      'AI Application Assistant',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w900,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            }
+
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.all(26),
+                    child: Form(
+                      key: formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.auto_awesome_rounded,
+                                color: _AppColors.primary,
+                              ),
+                              const SizedBox(width: 9),
+                              const Expanded(
+                                child: Text(
+                                  'AI Application Assistant',
+                                  style: TextStyle(
+                                    fontSize: 19,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            'Applying to ${project.title}',
+                            style: const TextStyle(color: _AppColors.muted),
+                          ),
+                          const SizedBox(height: 20),
+                          Container(
+                            padding: const EdgeInsets.all(15),
+                            decoration: BoxDecoration(
+                              color: _AppColors.surfaceSoft,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              children: [
+                                _MatchBadge(score: project.match),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'Strong match based on your current profile. '
+                                    'Review your proposal before submitting.',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      height: 1.45,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Application message',
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: messageController,
+                            maxLines: 5,
+                            enabled: !isSubmitting,
+                            decoration: InputDecoration(
+                              hintText:
+                                  'Introduce yourself and explain why '
+                                  'you are suitable for this project...',
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(15),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.border,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(15),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.border,
+                                ),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Please enter an application message.';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Your proposed budget (₹)',
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: budgetController,
+                            enabled: !isSubmitting,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Enter your proposed amount',
+                              prefixText: '₹ ',
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(15),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.border,
+                                ),
+                              ),
+                            ),
+                            validator: (value) {
+                              final amount = double.tryParse(
+                                (value ?? '').trim().replaceAll(',', ''),
+                              );
+
+                              if (amount == null || amount <= 0) {
+                                return 'Enter a valid budget greater than zero.';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Estimated duration',
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: durationController,
+                            enabled: !isSubmitting,
+                            decoration: InputDecoration(
+                              hintText: 'e.g. 3 weeks',
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(15),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.border,
+                                ),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Enter your estimated duration.';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              TextButton(
+                                onPressed: isSubmitting
+                                    ? null
+                                    : () => Navigator.pop(dialogContext),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton.icon(
+                                onPressed: isSubmitting
+                                    ? null
+                                    : submitApplication,
+                                icon: isSubmitting
+                                    ? const SizedBox(
+                                        width: 17,
+                                        height: 17,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.send_rounded, size: 17),
+                                label: Text(
+                                  isSubmitting
+                                      ? 'Submitting...'
+                                      : 'Submit application',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  'Applying to ${project.title}',
-                  style: const TextStyle(color: _AppColors.muted),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(
-                    color: _AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      _MatchBadge(score: project.match),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Strong match based on your current profile. AI can generate a personalized proposal for you to review before submitting.',
-                          style: TextStyle(fontSize: 12.5, height: 1.45),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Application message',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  maxLines: 5,
-                  decoration: InputDecoration(
-                    hintText:
-                        'Write a short introduction or generate one with AI...',
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: _AppColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: _AppColors.border),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: () =>
-                          _showFeatureSnack('AI proposal generation'),
-                      icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-                      label: const Text('Generate with AI'),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 7),
-                    FilledButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _showFeatureSnack('Application submitted');
-                      },
-                      icon: const Icon(Icons.send_rounded, size: 17),
-                      label: const Text('Submit application'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
+
+    messageController.dispose();
+    budgetController.dispose();
+    durationController.dispose();
   }
 }
 
@@ -1900,6 +3208,9 @@ class _StatData {
 }
 
 class _ProjectData {
+  final String id;
+  final String clientId;
+  final String duration;
   final String title;
   final String client;
   final String description;
@@ -1908,7 +3219,11 @@ class _ProjectData {
   final String budget;
   final String mode;
   final IconData icon;
+
   const _ProjectData({
+    required this.id,
+    required this.clientId,
+    required this.duration,
     required this.title,
     required this.client,
     required this.description,
@@ -1918,14 +3233,6 @@ class _ProjectData {
     required this.mode,
     required this.icon,
   });
-}
-
-class _QuickAction {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-  const _QuickAction(this.icon, this.title, this.subtitle, this.onTap);
 }
 
 class _BrandMark extends StatelessWidget {
@@ -1959,10 +3266,30 @@ class _BrandMark extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final double size;
   final String? initials;
+
   const _Avatar({required this.size, this.initials});
+
+  String _getInitials(String? name) {
+    final value = name?.trim() ?? '';
+
+    if (value.isEmpty) return '';
+
+    final parts = value
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+
+    return parts.first[0].toUpperCase();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final avatarText = _getInitials(initials);
+
     return Container(
       width: size,
       height: size,
@@ -1974,14 +3301,20 @@ class _Avatar extends StatelessWidget {
         border: Border.all(color: Colors.white, width: 2),
       ),
       alignment: Alignment.center,
-      child: Text(
-        initials ?? 'A',
-        style: TextStyle(
-          fontWeight: FontWeight.w900,
-          color: const Color(0xFF3730A3),
-          fontSize: size * .34,
-        ),
-      ),
+      child: avatarText.isEmpty
+          ? Icon(
+              Icons.person_rounded,
+              color: const Color(0xFF3730A3),
+              size: size * 0.58,
+            )
+          : Text(
+              avatarText,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: const Color(0xFF3730A3),
+                fontSize: size * (avatarText.length > 1 ? 0.29 : 0.34),
+              ),
+            ),
     );
   }
 }
@@ -2431,6 +3764,8 @@ class _ProjectCardState extends State<_ProjectCard> {
                     children: [
                       Text(
                         widget.project.client,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 10.5,
                           color: _AppColors.muted,
@@ -2468,6 +3803,7 @@ class _ProjectCardState extends State<_ProjectCard> {
               widget.project.description,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+              softWrap: true,
               style: const TextStyle(
                 color: _AppColors.muted,
                 fontSize: 11.5,
@@ -2475,12 +3811,24 @@ class _ProjectCardState extends State<_ProjectCard> {
               ),
             ),
             const SizedBox(height: 12),
+            // Keep recommendation cards compact even when Firestore contains
+            // long or unexpectedly formatted skill/technology values.
             Wrap(
               spacing: 5,
               runSpacing: 5,
-              children: widget.project.skills
-                  .map((skill) => _SkillChip(skill))
-                  .toList(),
+              children: [
+                ...widget.project.skills
+                    .where((skill) => skill.trim().isNotEmpty)
+                    .take(4)
+                    .map((skill) => _SkillChip(skill.trim())),
+                if (widget.project.skills
+                        .where((skill) => skill.trim().isNotEmpty)
+                        .length >
+                    4)
+                  _SkillChip(
+                    '+${widget.project.skills.where((skill) => skill.trim().isNotEmpty).length - 4} more',
+                  ),
+              ],
             ),
             const Spacer(),
             Row(
@@ -2615,12 +3963,18 @@ class _SkillChip extends StatelessWidget {
             ),
             const SizedBox(width: 4),
           ],
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              color: _AppColors.muted,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 145),
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: const TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w700,
+                color: _AppColors.muted,
+              ),
             ),
           ),
         ],
@@ -3320,4 +4674,13 @@ class _AmbientPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _AmbientPainter oldDelegate) =>
       oldDelegate.t != t;
+}
+
+class _QuickAction {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _QuickAction(this.icon, this.title, this.subtitle, this.onTap);
 }

@@ -137,9 +137,19 @@ class ClientApplicationsScreen extends StatelessWidget {
             'updatedAt': now,
           });
 
+          final agreedDuration = (applicationData['estimatedDuration'] ?? '')
+              .toString()
+              .trim();
+
+          if (agreedDuration.isEmpty) {
+            throw Exception('MISSING_PROJECT_DURATION');
+          }
+
           transaction.update(projectRef, {
             'developerId': applicantDeveloperId,
             'status': 'active',
+            'startedAt': now,
+            'duration': agreedDuration,
             'updatedAt': now,
           });
         } else {
