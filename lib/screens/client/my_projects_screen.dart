@@ -195,70 +195,8 @@ class _ProjectsHeader extends StatelessWidget {
 class _ProjectCard extends StatelessWidget {
   final Map<String, dynamic> project;
   final String projectId;
+
   const _ProjectCard({required this.project, required this.projectId});
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'requirement':
-        return const Color(0xFF4F46E5);
-      case 'team_formation':
-        return const Color(0xFF7C3AED);
-      case 'development':
-        return const Color(0xFFD97706);
-      case 'testing':
-        return const Color(0xFF0891B2);
-      case 'client_review':
-        return const Color(0xFFDB2777);
-      case 'completed':
-        return const Color(0xFF16A34A);
-      case 'cancelled':
-        return const Color(0xFFDC2626);
-      default:
-        return const Color(0xFF64748B);
-    }
-  }
-
-  IconData _statusIcon(String status) {
-    switch (status) {
-      case 'requirement':
-        return Icons.description_outlined;
-      case 'team_formation':
-        return Icons.groups_outlined;
-      case 'development':
-        return Icons.code_rounded;
-      case 'testing':
-        return Icons.bug_report_outlined;
-      case 'client_review':
-        return Icons.rate_review_outlined;
-      case 'completed':
-        return Icons.check_circle_outline_rounded;
-      case 'cancelled':
-        return Icons.cancel_outlined;
-      default:
-        return Icons.info_outline_rounded;
-    }
-  }
-
-  String _formatStatus(BuildContext context, String status) {
-    final l10n = AppLocalizations.of(context);
-    switch (status) {
-      case 'requirement':
-        return l10n.requirement;
-      case 'team_formation':
-        return l10n.teamFormation;
-      case 'development':
-        return l10n.development;
-      case 'testing':
-        return l10n.testing;
-      case 'client_review':
-        return l10n.clientReview;
-      case 'completed':
-        return l10n.completed;
-      case 'cancelled':
-        return l10n.cancelled;
-      default:
-        return status;
-    }
-  }
 
   Future<void> _deleteProject(BuildContext context, String title) async {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -356,24 +294,48 @@ class _ProjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final title = project['title']?.toString() ?? l10n.project;
-    final category = project['category']?.toString() ?? '';
-    final description = project['description']?.toString() ?? '';
-    final budget = project['budget']?.toString() ?? '';
-    final timeline = project['timeline']?.toString() ?? '';
-    final status = project['status']?.toString() ?? 'requirement';
-    final statusColor = _statusColor(status);
+    final rawTitle = project['title']?.toString().trim() ?? '';
+    final title = rawTitle.isEmpty ? l10n.project : rawTitle;
+    final milestones = project['milestones'] is Map
+        ? Map<String, dynamic>.from(project['milestones'] as Map)
+        : <String, dynamic>{};
+    const milestoneKeys = <String>[
+      'requirements',
+      'architecture',
+      'design',
+      'development',
+      'testing',
+      'deployment',
+    ];
+
+    final completedMilestones = milestoneKeys
+        .where((key) => milestones[key] == true)
+        .length;
+    final progress = (completedMilestones / milestoneKeys.length * 100).round();
+    final isCompleted = progress == 100;
+    final progressColor = isCompleted
+        ? const Color(0xFF16A34A)
+        : const Color(0xFF4F46E5);
+    final storedStatus = project['status']?.toString() ?? 'requirement';
+    // Keep the original rule: a fully completed project is not deletable
+    // from this list even if its stored status still says team_formation.
+    final effectiveStatus = progress == 100 ? 'completed' : storedStatus;
+    final canDelete = effectiveStatus == 'team_formation';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
+            MaterialPageRoute<void>(
               builder: (_) => ProjectDetailsScreen(projectId: projectId),
             ),
           );
         },
+        // Preserve the existing delete capability without adding extra
+        // visible controls to this simplified project list card.
+        onLongPress: canDelete ? () => _deleteProject(context, title) : null,
         borderRadius: BorderRadius.circular(22),
         child: Container(
           width: double.infinity,
@@ -381,12 +343,16 @@ class _ProjectCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
+            border: Border.all(
+              color: isCompleted
+                  ? const Color(0xFFBBF7D0)
+                  : const Color(0xFFE5E7EB),
+            ),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x060F172A),
-                blurRadius: 17,
-                offset: Offset(0, 6),
+                color: Color(0x080F172A),
+                blurRadius: 20,
+                offset: Offset(0, 7),
               ),
             ],
           ),
@@ -394,233 +360,105 @@ class _ProjectCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     width: 46,
                     height: 46,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(14),
+                      gradient: LinearGradient(
+                        colors: isCompleted
+                            ? const [Color(0xFFDCFCE7), Color(0xFFF0FDF4)]
+                            : const [Color(0xFFE0E7FF), Color(0xFFF5F3FF)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    child: const Icon(
-                      Icons.folder_rounded,
-                      color: Color(0xFF4F46E5),
-                      size: 22,
+                    child: Icon(
+                      isCompleted
+                          ? Icons.task_alt_rounded
+                          : Icons.folder_copy_rounded,
+                      color: progressColor,
+                      size: 23,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 13),
                   Expanded(
                     child: Text(
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 17,
-                        height: 1.25,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        height: 1.3,
+                        fontWeight: FontWeight.w800,
                         color: Color(0xFF111827),
                         letterSpacing: -0.2,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.09),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _statusIcon(status),
-                            size: 13,
-                            color: statusColor,
-                          ),
-                          const SizedBox(width: 5),
-                          Flexible(
-                            child: Text(
-                              _formatStatus(context, status),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w800,
-                                color: statusColor,
-                              ),
-                            ),
-                          ),
-                        ],
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: progressColor.withValues(alpha: 0.09),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$progress%',
+                      style: TextStyle(
+                        color: progressColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
-                  if (status == 'team_formation') ...[
-                    const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: 'Delete project',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 36,
-                        height: 36,
-                      ),
-                      style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFFFEF2F2),
-                        foregroundColor: const Color(0xFFDC2626),
-                      ),
-                      icon: const Icon(Icons.delete_outline_rounded, size: 19),
-                      onPressed: () => _deleteProject(context, title),
-                    ),
-                  ],
                 ],
               ),
-              if (category.isNotEmpty) ...[
-                const SizedBox(height: 13),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.category_outlined,
-                        size: 14,
-                        color: Color(0xFF4F46E5),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        category,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF475467),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Text(
-                  description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    height: 1.5,
-                    color: Color(0xFF667085),
-                  ),
-                ),
-              ],
-              if (budget.isNotEmpty || timeline.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 11,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: Wrap(
-                    spacing: 18,
-                    runSpacing: 10,
-                    children: [
-                      if (budget.isNotEmpty)
-                        _InfoItem(
-                          icon: Icons.currency_rupee_rounded,
-                          label: budget,
-                        ),
-                      if (timeline.isNotEmpty)
-                        _InfoItem(
-                          icon: Icons.schedule_outlined,
-                          label: timeline,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              const Divider(height: 1, color: Color(0xFFE5E7EB)),
-              const SizedBox(height: 13),
+              const SizedBox(height: 19),
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text(
-                    l10n.projectDetails,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF4F46E5),
+                  const Expanded(
+                    child: Text(
+                      'PROJECT PROGRESS',
+                      style: TextStyle(
+                        color: Color(0xFF667085),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 7),
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_forward_rounded,
-                      size: 15,
-                      color: Color(0xFF4F46E5),
+                  Text(
+                    isCompleted
+                        ? 'Completed'
+                        : '$completedMilestones/${milestoneKeys.length} milestones',
+                    style: TextStyle(
+                      color: progressColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 9),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(30),
+                child: LinearProgressIndicator(
+                  value: progress / 100,
+                  minHeight: 8,
+                  backgroundColor: const Color(0xFFEEF2F7),
+                  color: progressColor,
+                ),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _InfoItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _InfoItem({required this.icon, required this.label});
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 15, color: const Color(0xFF4F46E5)),
-        ),
-        const SizedBox(width: 7),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11.5,
-            color: Color(0xFF475467),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
     );
   }
 }

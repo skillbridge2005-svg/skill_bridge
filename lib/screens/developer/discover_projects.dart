@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'project_details.dart';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'apply_project.dart';
 
 import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
@@ -39,13 +39,17 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
   StreamSubscription<Set<String>>? _savedProjectsSubscription;
   StreamSubscription<List<ProjectModel>>? _projectsSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _applicationStatusSubscription;
 
   bool _projectsLoading = true;
+  int? _profileCompletion;
   List<ProjectModel> _allProjects = [];
   List<ProjectModel> _filteredProjects = [];
   List<ProjectRecommendation> _recommendations = [];
 
   Set<String> _savedProjectIds = {};
+  Map<String, String> _applicationStatusByProjectId = {};
 
   List<String> _developerSkills = [];
   List<String> _developerTechnologies = [];
@@ -116,6 +120,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
     _loadDeveloperProfile();
     _listenToSavedProjects();
+    _listenToApplicationStatuses();
+
     void _listenToProjects() {
       _projectsSubscription = _openProjectsStream.listen(
         (projects) {
@@ -141,6 +147,71 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _listenToProjects();
   }
 
+  void _listenToApplicationStatuses() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      setState(() {
+        _applicationStatusByProjectId = {};
+      });
+      return;
+    }
+
+    _applicationStatusSubscription?.cancel();
+
+    _applicationStatusSubscription = FirebaseFirestore.instance
+        .collection('applications')
+        .where('developerId', isEqualTo: uid)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted) return;
+
+            // Sort newest application updates first.
+            final docs = [...snapshot.docs];
+
+            DateTime timestampOf(
+              QueryDocumentSnapshot<Map<String, dynamic>> doc,
+            ) {
+              final data = doc.data();
+              final value = data['updatedAt'] ?? data['createdAt'];
+
+              if (value is Timestamp) return value.toDate();
+              if (value is DateTime) return value;
+
+              return DateTime.fromMillisecondsSinceEpoch(0);
+            }
+
+            docs.sort((a, b) => timestampOf(b).compareTo(timestampOf(a)));
+
+            final statusByProjectId = <String, String>{};
+
+            for (final doc in docs) {
+              final data = doc.data();
+              final projectId = data['projectId']?.toString();
+
+              if (projectId == null ||
+                  projectId.isEmpty ||
+                  statusByProjectId.containsKey(projectId)) {
+                continue;
+              }
+
+              statusByProjectId[projectId] = (data['status'] ?? 'pending')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+            }
+
+            setState(() {
+              _applicationStatusByProjectId = statusByProjectId;
+            });
+          },
+          onError: (Object error) {
+            debugPrint('Unable to listen to application statuses: $error');
+          },
+        );
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -149,6 +220,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _contentController.dispose();
     _savedProjectsSubscription?.cancel();
     _projectsSubscription?.cancel();
+    _applicationStatusSubscription?.cancel();
     super.dispose();
   }
 
@@ -180,6 +252,12 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       final profileData = profileSnapshot.data() ?? <String, dynamic>{};
 
       final userData = userSnapshot.data() ?? <String, dynamic>{};
+      final completionValue =
+          profileData['profileCompletion'] ?? userData['profileCompletion'];
+
+      final int? profileCompletion = completionValue is num
+          ? completionValue.toInt()
+          : null;
 
       _developerSkills = _readStringList(profileData['skills']);
 
@@ -196,6 +274,11 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       _developerDuration =
           _readString(profileData['projectDuration']) ??
           _readString(profileData['duration']);
+      if (!mounted) return;
+
+      setState(() {
+        _profileCompletion = profileCompletion;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -245,63 +328,49 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     });
   }
 
- void _applyFilters() {
-  final query = _searchController.text.trim().toLowerCase();
+  void _applyFilters() {
+    final query = _searchController.text.trim().toLowerCase();
 
-  final filtered = _projectService.filterProjects(
-    _allProjects,
-    technology: _selectedTechnology == 'All'
-        ? null
-        : _selectedTechnology,
-    skill: _selectedSkill == 'All'
-        ? null
-        : _selectedSkill,
-    workMode: _selectedWorkMode == 'All'
-        ? null
-        : _selectedWorkMode,
-    projectType: _selectedProjectType == 'All'
-        ? null
-        : _selectedProjectType,
-    duration: _selectedDuration == 'All'
-        ? null
-        : _selectedDuration,
-    minimumBudget: _minimumBudget,
-    maximumBudget: _maximumBudget,
-  );
+    final filtered = _projectService.filterProjects(
+      _allProjects,
+      technology: _selectedTechnology == 'All' ? null : _selectedTechnology,
+      skill: _selectedSkill == 'All' ? null : _selectedSkill,
+      workMode: _selectedWorkMode == 'All' ? null : _selectedWorkMode,
+      projectType: _selectedProjectType == 'All' ? null : _selectedProjectType,
+      duration: _selectedDuration == 'All' ? null : _selectedDuration,
+      minimumBudget: _minimumBudget,
+      maximumBudget: _maximumBudget,
+    );
 
-  final searched = query.isEmpty
-      ? filtered
-      : filtered.where((project) {
-          final searchableText = [
-            project.title,
-            project.description,
-            project.clientName,
-            project.projectType,
-            project.workMode,
-            project.duration,
-            ...project.skills,
-            ...project.technologies,
-          ].join(' ').toLowerCase();
+    final searched = query.isEmpty
+        ? filtered
+        : filtered.where((project) {
+            final searchableText = [
+              project.title,
+              project.description,
+              project.clientName,
+              project.projectType,
+              project.workMode,
+              project.duration,
+              ...project.skills,
+              ...project.technologies,
+            ].join(' ').toLowerCase();
 
-          return searchableText.contains(query);
-        }).toList();
+            return searchableText.contains(query);
+          }).toList();
 
-  final sorted = _projectService.sortProjects(
-    searched,
-    sortBy: _sortBy,
-  );
+    final sorted = _projectService.sortProjects(searched, sortBy: _sortBy);
 
-  _filteredProjects = sorted;
+    _filteredProjects = sorted;
 
-  if (_visibleProjectCount > sorted.length) {
-    _visibleProjectCount = sorted.length;
+    if (_visibleProjectCount > sorted.length) {
+      _visibleProjectCount = sorted.length;
+    }
+
+    if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
+      _visibleProjectCount = sorted.length < 8 ? sorted.length : 8;
+    }
   }
-
-  if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
-    _visibleProjectCount =
-        sorted.length < 8 ? sorted.length : 8;
-  }
-}
 
   void _calculateRecommendations() {
     _recommendations = _projectService.getRecommendedProjects(
@@ -483,7 +552,62 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   // UI
   // ===========================================================================
 
-  @override
+  Widget _buildProfileCompletionBanner(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        _horizontalPadding(context),
+        12,
+        _horizontalPadding(context),
+        4,
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.person_outline_rounded,
+              color: Color(0xFFD97706),
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Complete your developer profile',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF92400E),
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Please complete and save your developer '
+                    'profile to 100% before applying for projects.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: Color(0xFF92400E),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -534,7 +658,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               child: _buildSearchSection(context, theme),
             ),
           ),
-
+          if (_profileCompletion == null || _profileCompletion! < 100)
+            SliverToBoxAdapter(child: _buildProfileCompletionBanner(context)),
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _contentFade,
@@ -562,6 +687,35 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               child: FadeTransition(
                 opacity: _contentFade,
                 child: _buildEmptyState(context, theme),
+              ),
+            )
+          else if (MediaQuery.sizeOf(context).width < 700)
+            // Mobile: use naturally sized cards in a list. A fixed-height grid
+            // clips the card's budget and action button on narrow screens.
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                _horizontalPadding(context),
+                0,
+                _horizontalPadding(context),
+                32,
+              ),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final project = _filteredProjects[index];
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _AnimatedProjectCard(
+                      key: ValueKey(project.id),
+                      project: project,
+                      index: index,
+                      isSaved: _savedProjectIds.contains(project.id),
+                      matchPercentage: _getMatchPercentage(project),
+                      onSave: () => _toggleSave(project),
+                      onOpen: () => _openProject(project),
+                    ),
+                  );
+                }, childCount: _visibleProjectCount),
               ),
             )
           else
@@ -1441,40 +1595,49 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _showProjectPreview(project);
   }
 
-  Future<void> _openFullProject(ProjectModel project) async {
-    Navigator.of(context).pop();
-
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-
-    if (!mounted) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            ProjectDetails(projectId: project.id, initialProject: project),
-      ),
-    );
-  }
-
-  void _showProjectPreview(ProjectModel project) {
-    showModalBottomSheet<void>(
+  Future<void> _showProjectPreview(ProjectModel project) async {
+    // The preview sheet contains the full project information. Close it first
+    // and then open the existing application form directly.
+    final shouldApply = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
+      builder: (sheetContext) {
         return _ProjectPreviewSheet(
           project: project,
           isSaved: _savedProjectIds.contains(project.id),
+          isApplied:
+              _applicationStatusByProjectId.containsKey(project.id) &&
+              _applicationStatusByProjectId[project.id] != 'withdrawn',
+          applicationStatus: _applicationStatusByProjectId[project.id],
           matchPercentage: _getMatchPercentage(project),
           onSave: () async {
-            Navigator.of(context).pop();
+            Navigator.of(sheetContext).pop(false);
             await _toggleSave(project);
           },
-          onViewFullProject: () {
-            _openFullProject(project);
+          onApply: () {
+            Navigator.of(sheetContext).pop(true);
           },
         );
       },
+    );
+
+    if (!mounted || shouldApply != true) return;
+
+    if (!project.isOpen) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This project is no longer accepting applications.'),
+        ),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            ApplyProject(projectId: project.id, initialProject: project),
+      ),
     );
   }
 
@@ -1937,7 +2100,9 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
                 ],
               ),
 
-              const Spacer(),
+              // Keep the card content in normal flow. Spacer requires a
+              // bounded height and can cause overflow in responsive lists.
+              const SizedBox(height: 16),
 
               if (project.skills.isNotEmpty)
                 SizedBox(
@@ -2239,14 +2404,18 @@ class _ProjectPreviewSheet extends StatelessWidget {
     required this.isSaved,
     required this.matchPercentage,
     required this.onSave,
-    required this.onViewFullProject,
+    required this.onApply,
+    required this.isApplied,
+    required this.applicationStatus,
   });
 
   final ProjectModel project;
   final bool isSaved;
   final int matchPercentage;
   final VoidCallback onSave;
-  final VoidCallback onViewFullProject;
+  final VoidCallback onApply;
+  final bool isApplied;
+  final String? applicationStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -2416,12 +2585,48 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: onViewFullProject,
-                          icon: const Icon(Icons.arrow_forward_rounded),
-                          label: const Text('View Full Project'),
+                          onPressed: isApplied ? null : onApply,
+                          icon: Icon(
+                            isApplied
+                                ? (applicationStatus == 'shortlisted'
+                                      ? Icons.star_rounded
+                                      : applicationStatus == 'rejected'
+                                      ? Icons.cancel_outlined
+                                      : applicationStatus == 'accepted'
+                                      ? Icons.verified_rounded
+                                      : Icons.hourglass_top_rounded)
+                                : Icons.send_rounded,
+                          ),
+                          label: Text(
+                            !isApplied
+                                ? 'Apply Now'
+                                : switch (applicationStatus) {
+                                    'shortlisted' => 'Shortlisted',
+                                    'rejected' => 'Application Rejected',
+                                    'accepted' => 'Application Accepted',
+                                    'pending' => 'Application Pending',
+                                    'withdrawn' => 'Apply Again',
+                                    _ => 'Application Submitted',
+                                  },
+                          ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4F46E5),
+                            backgroundColor: !isApplied
+                                ? const Color(0xFF4F46E5)
+                                : applicationStatus == 'rejected'
+                                ? const Color(0xFFDC2626)
+                                : applicationStatus == 'shortlisted' ||
+                                      applicationStatus == 'accepted'
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFF64748B),
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor:
+                                applicationStatus == 'rejected'
+                                ? const Color(0xFFDC2626)
+                                : applicationStatus == 'shortlisted' ||
+                                      applicationStatus == 'accepted'
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFF64748B),
+                            disabledForegroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(13),

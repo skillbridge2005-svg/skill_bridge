@@ -1,7 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -25,6 +24,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+
+  bool get _usingLocalAuthEmulator =>
+      kDebugMode &&
+      const bool.fromEnvironment('USE_FUNCTIONS_EMULATOR', defaultValue: false);
 
   // ------------------------------------------------------------
   // COLORS
@@ -63,12 +66,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final email = _emailController.text.trim();
-      final password = _passwordController.text.trim();
+      final password = _passwordController.text;
 
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      final userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+
+      final currentUser = userCredential.user;
+
+      if (currentUser != null && !currentUser.emailVerified) {
+        await FirebaseAuth.instance.signOut();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Please verify your email before logging in.'),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        );
+        return;
+      }
 
       if (!mounted) return;
 
@@ -87,7 +108,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       switch (e.code) {
         case 'user-not-found':
-          message = 'No account found with this email.';
+          message = _usingLocalAuthEmulator
+              ? 'No local test account exists for this email. Create an account in this app while local emulator mode is enabled.'
+              : 'No account found with this email.';
           break;
 
         case 'wrong-password':
@@ -464,6 +487,28 @@ class _LoginScreenState extends State<LoginScreen> {
                                   color: grey,
                                 ),
                               ),
+
+                              if (_usingLocalAuthEmulator) ...[
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF7ED),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: const Color(0xFFFED7AA),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Local test mode is enabled. Accounts from the live Firebase project are not available here. Create a local test account first; email verification links appear in the Auth emulator.',
+                                    style: TextStyle(
+                                      color: Color(0xFF9A3412),
+                                      fontSize: 12,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
 
                               const SizedBox(height: 26),
 

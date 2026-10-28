@@ -1,27 +1,165 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../localization/app_localizations.dart';
+import '../shared/leaderboard_screen.dart';
 import 'client_payments_screen.dart';
+import 'client_analytics_screen.dart';
+import 'how_to_use_skillbridge_screen.dart';
 
 class ClientProfileScreen extends StatelessWidget {
   const ClientProfileScreen({super.key});
 
-  Future<void> _editName(BuildContext context, String currentName) async {
+  Future<void> _uploadProfilePhoto(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
     final l10n = AppLocalizations.of(context);
 
-    final newName = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _EditNameDialog(initialName: currentName),
-    );
-
-    if (!context.mounted || newName == null || newName.trim().isEmpty) {
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.loginAgain),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
+
+    const defineSupabaseUrl = String.fromEnvironment('SUPABASE_URL');
+    const defineSupabasePublishableKey = String.fromEnvironment(
+      'SUPABASE_PUBLISHABLE_KEY',
+    );
+    final supabaseUrl = dotenv.env['SUPABASE_URL']?.trim().isNotEmpty == true
+        ? dotenv.env['SUPABASE_URL']!.trim()
+        : defineSupabaseUrl;
+    final supabasePublishableKey =
+        dotenv.env['SUPABASE_PUBLISHABLE_KEY']?.trim().isNotEmpty == true
+        ? dotenv.env['SUPABASE_PUBLISHABLE_KEY']!.trim()
+        : defineSupabasePublishableKey;
+    if (supabaseUrl.isEmpty || supabasePublishableKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Profile photo upload is not configured. Set the Supabase '
+            'URL and publishable key in the root .env file or with '
+            '--dart-define.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final storage = Supabase.instance.client.storage;
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1200,
+        maxHeight: 1200,
+      );
+
+      if (image == null || !context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Uploading profile picture...'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      final Uint8List bytes = await image.readAsBytes();
+      final extension = image.name.contains('.')
+          ? image.name.split('.').last.toLowerCase()
+          : 'jpg';
+      const allowedExtensions = {'jpg', 'jpeg', 'png', 'webp'};
+
+      if (!allowedExtensions.contains(extension)) {
+        throw const FormatException(
+          'Please select a JPG, JPEG, PNG, or WebP image.',
+        );
+      }
+
+      final contentType = switch (extension) {
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        _ => 'image/jpeg',
+      };
+      final path =
+          '${user.uid}/profile_${DateTime.now().millisecondsSinceEpoch}.$extension';
+
+      await storage
+          .from('profile-photos')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
+
+      final imageUrl = storage.from('profile-photos').getPublicUrl(path);
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'profileImageUrl': imageUrl,
+        'profileImagePath': path,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await user.updatePhotoURL(imageUrl);
+
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile picture updated successfully!'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on FirebaseException catch (error) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update profile picture: '
+            '${error.message ?? error.code}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+
+      final message = error is FormatException
+          ? error.message
+          : 'Could not update profile picture: $error';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
+
+  Future<void> _editProfile(
+    BuildContext context,
+    Map<String, dynamic> data,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _EditProfileDialog(data: data),
+    );
+
+    if (!context.mounted || result == null) return;
 
     final user = FirebaseAuth.instance.currentUser;
 
@@ -38,11 +176,26 @@ class ClientProfileScreen extends StatelessWidget {
       return;
     }
 
-    final updatedName = newName.trim();
-
     try {
+      final updatedName = result['name']!.trim();
+      if (updatedName.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Name must contain at least 2 characters.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'name': updatedName,
+        'phoneNumber': result['phoneNumber']!.trim(),
+        'companyName': result['companyName']!.trim(),
+        'jobTitle': result['jobTitle']!.trim(),
+        'location': result['location']!.trim(),
+        'bio': result['bio']!.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
       await user.updateDisplayName(updatedName);
@@ -337,6 +490,15 @@ class ClientProfileScreen extends StatelessWidget {
               final name = data['name']?.toString() ?? '';
               final email = data['email']?.toString() ?? user.email ?? '';
               final role = data['role']?.toString() ?? '';
+              final savedImageUrl = data['profileImageUrl']?.toString().trim();
+              final imageUrl = savedImageUrl != null && savedImageUrl.isNotEmpty
+                  ? savedImageUrl
+                  : user.photoURL ?? '';
+
+              String profileValue(String key) {
+                final value = data[key]?.toString().trim() ?? '';
+                return value.isEmpty ? l10n.noData : value;
+              }
 
               return SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -352,15 +514,30 @@ class ClientProfileScreen extends StatelessWidget {
                           email: email,
                           role: role,
                           initial: _initial(name),
+                          imageUrl: imageUrl,
+                          onChangePhoto: () => _uploadProfilePhoto(context),
                         ),
                         const SizedBox(height: 18),
                         _ProfileActionCard(
-                          onEdit: () => _editName(context, name),
+                          onEdit: () => _editProfile(context, data),
                           onPayments: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (_) => const ClientPaymentsScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileLinkCard(
+                          icon: Icons.emoji_events_rounded,
+                          title: 'Leaderboard',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const LeaderboardScreen(),
                               ),
                             );
                           },
@@ -384,6 +561,36 @@ class ClientProfileScreen extends StatelessWidget {
                           icon: Icons.badge_outlined,
                           title: 'Account Type',
                           value: _formatRole(context, role),
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileInfoCard(
+                          icon: Icons.phone_outlined,
+                          title: 'Phone Number',
+                          value: profileValue('phoneNumber'),
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileInfoCard(
+                          icon: Icons.business_outlined,
+                          title: 'Company Name',
+                          value: profileValue('companyName'),
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileInfoCard(
+                          icon: Icons.work_outline_rounded,
+                          title: 'Job Title',
+                          value: profileValue('jobTitle'),
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileInfoCard(
+                          icon: Icons.location_on_outlined,
+                          title: 'Location',
+                          value: profileValue('location'),
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileInfoCard(
+                          icon: Icons.info_outline_rounded,
+                          title: 'About Me',
+                          value: profileValue('bio'),
                         ),
                         const SizedBox(height: 30),
 
@@ -450,6 +657,22 @@ class ClientProfileScreen extends StatelessWidget {
                           },
                         ),
 
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.ondemand_video_rounded,
+                          title: 'How to Use SkillBridge',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const HowToUseSkillBridgeScreen(),
+                              ),
+                            );
+                          },
+                        ),
+
                         const SizedBox(height: 30),
 
                         const _ProfileSectionTitle(title: 'FOLLOW US'),
@@ -484,12 +707,16 @@ class _ProfileHero extends StatelessWidget {
   final String email;
   final String role;
   final String initial;
+  final String imageUrl;
+  final VoidCallback onChangePhoto;
 
   const _ProfileHero({
     required this.name,
     required this.email,
     required this.role,
     required this.initial,
+    required this.imageUrl,
+    required this.onChangePhoto,
   });
 
   @override
@@ -516,37 +743,80 @@ class _ProfileHero extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.12),
-                width: 2,
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x304F46E5),
-                  blurRadius: 18,
-                  offset: Offset(0, 7),
+          Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    width: 2,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x304F46E5),
+                      blurRadius: 18,
+                      offset: Offset(0, 7),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              initial,
-              style: const TextStyle(
-                fontSize: 27,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
+                child: ClipOval(
+                  child: imageUrl.isNotEmpty
+                      ? Image.network(
+                          imageUrl,
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Center(
+                              child: Text(
+                                initial,
+                                style: const TextStyle(
+                                  fontSize: 27,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : Center(
+                          child: Text(
+                            initial,
+                            style: const TextStyle(
+                              fontSize: 27,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                ),
               ),
-            ),
+              Material(
+                color: Colors.white,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onChangePhoto,
+                  child: const Padding(
+                    padding: EdgeInsets.all(5),
+                    child: Icon(
+                      Icons.camera_alt_rounded,
+                      size: 14,
+                      color: Color(0xFF4F46E5),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -1047,36 +1317,107 @@ class _ProfileAmbientPainter extends CustomPainter {
   }
 }
 
-class _EditNameDialog extends StatefulWidget {
-  final String initialName;
+class _EditProfileDialog extends StatefulWidget {
+  final Map<String, dynamic> data;
 
-  const _EditNameDialog({required this.initialName});
+  const _EditProfileDialog({required this.data});
 
   @override
-  State<_EditNameDialog> createState() => _EditNameDialogState();
+  State<_EditProfileDialog> createState() => _EditProfileDialogState();
 }
 
-class _EditNameDialogState extends State<_EditNameDialog> {
-  String _name = '';
+class _EditProfileDialogState extends State<_EditProfileDialog> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _companyController;
+  late final TextEditingController _jobTitleController;
+  late final TextEditingController _locationController;
+  late final TextEditingController _bioController;
 
   @override
   void initState() {
     super.initState();
-    _name = widget.initialName;
+
+    String value(String key) => widget.data[key]?.toString() ?? '';
+
+    _nameController = TextEditingController(text: value('name'));
+    _phoneController = TextEditingController(text: value('phoneNumber'));
+    _companyController = TextEditingController(text: value('companyName'));
+    _jobTitleController = TextEditingController(text: value('jobTitle'));
+    _locationController = TextEditingController(text: value('location'));
+    _bioController = TextEditingController(text: value('bio'));
   }
 
   void _save() {
-    final name = _name.trim();
-
-    if (name.isEmpty) {
+    if (_nameController.text.trim().length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid name.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
 
-    if (name.length < 2) {
-      return;
-    }
+    Navigator.of(context).pop({
+      'name': _nameController.text,
+      'phoneNumber': _phoneController.text,
+      'companyName': _companyController.text,
+      'jobTitle': _jobTitleController.text,
+      'location': _locationController.text,
+      'bio': _bioController.text,
+    });
+  }
 
-    Navigator.of(context).pop(name);
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    int maxLines = 1,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: TextField(
+        controller: controller,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, color: const Color(0xFF4F46E5)),
+          filled: true,
+          fillColor: const Color(0xFFF8FAFC),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 15,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(15),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(15),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(15),
+            borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 1.4),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _companyController.dispose();
+    _jobTitleController.dispose();
+    _locationController.dispose();
+    _bioController.dispose();
+    super.dispose();
   }
 
   @override
@@ -1111,10 +1452,10 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
+                  const Expanded(
                     child: Text(
-                      l10n.edit,
-                      style: const TextStyle(
+                      'Edit Profile',
+                      style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF111827),
@@ -1122,9 +1463,7 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                     ),
                   ),
                   IconButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
+                    onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(
                       Icons.close_rounded,
                       color: Color(0xFF667085),
@@ -1132,56 +1471,54 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
-              TextFormField(
-                initialValue: widget.initialName,
-                autofocus: true,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.done,
-                onChanged: (value) {
-                  _name = value;
-                },
-                onFieldSubmitted: (_) {
-                  _save();
-                },
-                decoration: InputDecoration(
-                  labelText: l10n.projectTitle,
-                  hintText: l10n.projectTitle,
-                  prefixIcon: const Icon(
-                    Icons.person_outline_rounded,
-                    color: Color(0xFF4F46E5),
-                  ),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 16,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF4F46E5),
-                      width: 1.4,
-                    ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _field(
+                        controller: _nameController,
+                        label: 'Full Name',
+                        icon: Icons.person_outline_rounded,
+                      ),
+                      _field(
+                        controller: _phoneController,
+                        label: 'Phone Number',
+                        icon: Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      _field(
+                        controller: _companyController,
+                        label: 'Company Name',
+                        icon: Icons.business_outlined,
+                      ),
+                      _field(
+                        controller: _jobTitleController,
+                        label: 'Job Title',
+                        icon: Icons.work_outline_rounded,
+                      ),
+                      _field(
+                        controller: _locationController,
+                        label: 'Location',
+                        icon: Icons.location_on_outlined,
+                      ),
+                      _field(
+                        controller: _bioController,
+                        label: 'About / Bio',
+                        icon: Icons.info_outline_rounded,
+                        maxLines: 3,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
+                    onPressed: () => Navigator.of(context).pop(),
                     child: Text(
                       l10n.cancel,
                       style: const TextStyle(

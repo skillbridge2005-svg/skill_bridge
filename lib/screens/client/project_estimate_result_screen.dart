@@ -4,8 +4,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:skill_bridge/services/supabase_storage_service.dart';
+
+import 'client_home.dart';
 
 const _primary = Color(0xFF2563EB);
 const _indigo = Color(0xFF4F46E5);
@@ -58,6 +64,7 @@ class _ProjectEstimateResultScreenState
     extends State<ProjectEstimateResultScreen> {
   bool _isSubmitting = false;
   bool _isRegenerating = false;
+  bool _isGeneratingRequirementsPdf = false;
   bool _acceptedCost = false;
   bool _acceptedTimeline = false;
   bool _acceptedTerms = false;
@@ -73,12 +80,48 @@ class _ProjectEstimateResultScreenState
 
   late Map<String, dynamic> _currentPlan;
   String? _currentPlanId;
+  Map<String, dynamic>? _previousPlan;
 
   @override
   void initState() {
     super.initState();
     _currentPlan = Map<String, dynamic>.from(widget.plan);
     _currentPlanId = widget.planId;
+
+    // Save the generated estimate as a draft on the existing project.
+    // This does not accept the estimate or create a new project.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _savePlanToExistingProject();
+    });
+  }
+
+  Future<void> _savePlanToExistingProject() async {
+    final projectId = widget.projectId?.trim();
+    if (projectId == null || projectId.isEmpty || _currentPlan.isEmpty) {
+      return;
+    }
+
+    try {
+      final draftData = <String, dynamic>{
+        'plan': _currentPlan,
+        'estimate': _estimate,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      final planId = _currentPlanId?.trim();
+      if (planId != null && planId.isNotEmpty) {
+        draftData['planId'] = planId;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('projects')
+          .doc(projectId)
+          .set(draftData, SetOptions(merge: true));
+    } catch (error, stackTrace) {
+      // Draft-save errors must not block estimate review or acceptance.
+      debugPrint('PROJECT ESTIMATE DRAFT SAVE ERROR: $error');
+      debugPrint('$stackTrace');
+    }
   }
 
   @override
@@ -91,15 +134,814 @@ class _ProjectEstimateResultScreenState
 
   Map<String, dynamic> get _team => _asMap(_currentPlan['team']);
 
-  int get _teamRoleCount {
+  List<String> get _teamRoleNames {
     final roles = _asList(_team['roles']);
-    if (roles.isNotEmpty) return roles.length;
-    return _currentPlan['team'] is List
-        ? _asList(_currentPlan['team']).length
-        : 0;
+
+    final entries = roles.isNotEmpty
+        ? roles
+        : _currentPlan['team'] is List
+        ? _asList(_currentPlan['team'])
+        : <dynamic>[];
+
+    final names = entries
+        .map((entry) {
+          if (entry is String) return entry.trim();
+
+          final member = _asMap(entry);
+          final role = _string(member['role']).trim();
+
+          if (role.isNotEmpty) return role;
+
+          return _string(member['name']).trim();
+        })
+        .where((name) => name.isNotEmpty)
+        .toList();
+
+    return names.toSet().toList();
   }
 
+  int get _teamRoleCount => _teamRoleNames.length;
+
   List<dynamic> get _modules => _asList(_currentPlan['modules']);
+
+  List<String> _featureNames(Map<String, dynamic> plan) {
+    final features = <String>[];
+
+    void addFeature(dynamic value) {
+      final text = value is String
+          ? value.trim()
+          : _firstNonEmpty([
+              _asMap(value)['name'],
+              _asMap(value)['title'],
+              _asMap(value)['requirement'],
+            ]);
+
+      if (text.isNotEmpty &&
+          !features.any((item) => item.toLowerCase() == text.toLowerCase())) {
+        features.add(text);
+      }
+    }
+
+    for (final item in _asList(plan['confirmedRequirements'])) {
+      addFeature(item);
+    }
+
+    for (final item in _asList(plan['modules'])) {
+      final module = _asMap(item);
+      addFeature(module['name'] ?? module['title']);
+
+      for (final task in _asList(module['tasks'])) {
+        addFeature(task);
+      }
+    }
+
+    return features;
+  }
+
+  List<String> _technologyNames(Map<String, dynamic> plan) {
+    final technologies = <String>[];
+
+    void collect(dynamic value) {
+      if (value is String) {
+        for (final item in value.split(RegExp(r'[,;\n]'))) {
+          final name = item.trim();
+          if (name.isNotEmpty) technologies.add(name);
+        }
+      } else if (value is List) {
+        for (final item in value) {
+          collect(item);
+        }
+      } else if (value is Map) {
+        for (final entry in value.entries) {
+          final key = entry.key.toString().toLowerCase();
+
+          if (key.contains('technolog') ||
+              key.contains('techstack') ||
+              key == 'stack' ||
+              key.contains('framework') ||
+              key.contains('language') ||
+              key.contains('database') ||
+              key.contains('platform')) {
+            collect(entry.value);
+          }
+        }
+      }
+    }
+
+    collect(plan['technologies']);
+    collect(plan['technologyStack']);
+    collect(plan['recommendedTechnologies']);
+    collect(plan['recommendedArchitecture']);
+
+    return technologies
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  List<String> _findAdded(List<String> oldItems, List<String> newItems) {
+    return newItems.where((item) {
+      return !oldItems.any(
+        (oldItem) => oldItem.toLowerCase() == item.toLowerCase(),
+      );
+    }).toList();
+  }
+
+  List<String> _findRemoved(List<String> oldItems, List<String> newItems) {
+    return oldItems.where((item) {
+      return !newItems.any(
+        (newItem) => newItem.toLowerCase() == item.toLowerCase(),
+      );
+    }).toList();
+  }
+
+  Widget _buildRegenerationComparison() {
+    final oldPlan = _previousPlan;
+    if (oldPlan == null) return const SizedBox.shrink();
+
+    final oldEstimate = _asMap(oldPlan['estimate']);
+    final newEstimate = _asMap(_currentPlan['estimate']);
+
+    final addedFeatures = _findAdded(
+      _featureNames(oldPlan),
+      _featureNames(_currentPlan),
+    );
+    final removedFeatures = _findRemoved(
+      _featureNames(oldPlan),
+      _featureNames(_currentPlan),
+    );
+    final removedTech = _findRemoved(
+      _technologyNames(oldPlan),
+      _technologyNames(_currentPlan),
+    );
+
+    // Read explicit replacement recommendations from the updated plan.
+    // Supported field: technologyReplacements: [{from, to, reason, benefits,
+    // tradeoffs, recommended}]
+    final replacements = _asList(_currentPlan['technologyReplacements'])
+        .map((item) => _asMap(item))
+        .where((item) {
+          final from = _string(
+            item['from'] ?? item['oldTechnology'] ?? item['replaces'],
+          );
+          final to = _string(
+            item['to'] ?? item['newTechnology'] ?? item['replacement'],
+          );
+          return from.isNotEmpty && to.isNotEmpty;
+        })
+        .toList();
+
+    String cost(Map<String, dynamic> estimate) {
+      final min = _number(estimate['costMinINR']);
+      final max = _number(estimate['costMaxINR']);
+      final currency = _string(estimate['currency']).isEmpty
+          ? 'INR'
+          : _string(estimate['currency']);
+
+      if (min != null && max != null) {
+        return '${_formatCurrency(min, currency)} – '
+            '${_formatCurrency(max, currency)}';
+      }
+
+      final range = _string(estimate['costRange']);
+      return range.isNotEmpty ? range : 'Not available';
+    }
+
+    final oldCost = cost(oldEstimate);
+    final newCost = cost(newEstimate);
+
+    final oldTimeline = _range(
+      oldEstimate['timelineMinWeeks'],
+      oldEstimate['timelineMaxWeeks'],
+      'weeks',
+    );
+    final newTimeline = _range(
+      newEstimate['timelineMinWeeks'],
+      newEstimate['timelineMaxWeeks'],
+      'weeks',
+    );
+
+    final budgetChanged = oldCost != newCost;
+    final timelineChanged = oldTimeline != newTimeline;
+
+    Widget sectionTitle(String title, String subtitle, IconData icon) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: _primary, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: _dark,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: _secondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget metricCard({
+      required String title,
+      required String oldValue,
+      required String newValue,
+      required IconData icon,
+      required bool changed,
+    }) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: _primary, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: _dark,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _comparisonValue('BEFORE', oldValue),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Icon(Icons.south_rounded, color: _secondary, size: 18),
+            ),
+            _comparisonValue('UPDATED', newValue),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: changed
+                    ? const Color(0xFFEFF6FF)
+                    : const Color(0xFFDCFCE7),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                changed ? 'Estimate changed' : 'No change',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: changed
+                      ? const Color(0xFF1D4ED8)
+                      : const Color(0xFF166534),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget infoCard({
+      required String title,
+      required String subtitle,
+      required IconData icon,
+      required Color color,
+      required List<String> items,
+    }) {
+      if (items.isEmpty) return const SizedBox.shrink();
+
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: color, size: 21),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: color,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          height: 1.45,
+                          color: _secondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.circle, color: color, size: 7),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        item,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          color: _dark,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget replacementCard(Map<String, dynamic> item) {
+      final from = _string(
+        item['from'] ?? item['oldTechnology'] ?? item['replaces'],
+      );
+      final to = _string(
+        item['to'] ?? item['newTechnology'] ?? item['replacement'],
+      );
+      final reason = _string(item['reason'] ?? item['recommendationReason']);
+      final benefits = _string(item['benefits']);
+      final tradeoffs = _string(item['tradeoffs'] ?? item['limitations']);
+      final recommended = item['recommended'] == true;
+
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(
+            color: recommended
+                ? const Color(0xFF86EFAC)
+                : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.swap_horiz_rounded, color: _primary, size: 22),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Technology replacement',
+                    style: TextStyle(
+                      color: _dark,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (recommended)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCFCE7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Recommended',
+                      style: TextStyle(
+                        color: Color(0xFF166534),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF1F2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'REPLACING',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFBE123C),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          from,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _dark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(
+                    Icons.arrow_forward_rounded,
+                    color: _primary,
+                    size: 21,
+                  ),
+                ),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'USING INSTEAD',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          to,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _dark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (reason.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Why make this change?',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _dark,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                reason,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: _secondary,
+                ),
+              ),
+            ],
+            if (benefits.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Row(
+                children: [
+                  Icon(
+                    Icons.thumb_up_alt_outlined,
+                    color: Color(0xFF15803D),
+                    size: 17,
+                  ),
+                  SizedBox(width: 7),
+                  Text(
+                    'Advantages of the new option',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: _dark,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                benefits,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: _secondary,
+                ),
+              ),
+            ],
+            if (tradeoffs.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Color(0xFFB45309), size: 17),
+                  SizedBox(width: 7),
+                  Text(
+                    'Things to consider',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: _dark,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                tradeoffs,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: _secondary,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.compare_arrows_rounded, color: _primary, size: 24),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'What Changed in Your Project?',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: _dark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Understand what is being replaced, what is recommended, '
+            'and which features are no longer included.',
+            style: TextStyle(fontSize: 12, height: 1.55, color: _secondary),
+          ),
+
+          const SizedBox(height: 22),
+          sectionTitle(
+            '1. Technology Replacements',
+            'What we are using instead, and why the new option may be better.',
+            Icons.swap_horiz_rounded,
+          ),
+
+          if (replacements.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Text(
+                'No explicit technology replacement was provided '
+                'in the updated plan. We will not guess which '
+                'technology replaces another.',
+                style: TextStyle(fontSize: 12, height: 1.55, color: _secondary),
+              ),
+            )
+          else
+            ...replacements.map(replacementCard),
+
+          const SizedBox(height: 12),
+          sectionTitle(
+            '2. Budget & Delivery',
+            'Compare the previous estimate with the updated estimate.',
+            Icons.calendar_month_rounded,
+          ),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final budget = metricCard(
+                title: 'Estimated budget',
+                oldValue: oldCost,
+                newValue: newCost,
+                icon: Icons.account_balance_wallet_outlined,
+                changed: budgetChanged,
+              );
+
+              final timeline = metricCard(
+                title: 'Expected timeline',
+                oldValue: oldTimeline,
+                newValue: newTimeline,
+                icon: Icons.schedule_rounded,
+                changed: timelineChanged,
+              );
+
+              if (constraints.maxWidth < 480) {
+                return Column(
+                  children: [budget, const SizedBox(height: 10), timeline],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: budget),
+                  const SizedBox(width: 12),
+                  Expanded(child: timeline),
+                ],
+              );
+            },
+          ),
+
+          const SizedBox(height: 22),
+          sectionTitle(
+            '3. Features Added',
+            'New capabilities included in the updated plan.',
+            Icons.add_circle_outline_rounded,
+          ),
+          infoCard(
+            title: 'New features',
+            subtitle: 'These were not listed in the previous plan.',
+            icon: Icons.add_circle_outline_rounded,
+            color: Colors.green.shade700,
+            items: addedFeatures,
+          ),
+          if (addedFeatures.isEmpty)
+            const Text(
+              'No newly added features detected.',
+              style: TextStyle(fontSize: 12, color: _secondary),
+            ),
+
+          const SizedBox(height: 18),
+          sectionTitle(
+            '4. Features Removed',
+            'These features are no longer listed in the updated plan.',
+            Icons.remove_circle_outline_rounded,
+          ),
+          infoCard(
+            title: 'Removed features',
+            subtitle: 'Review these before approving the revised scope.',
+            icon: Icons.remove_circle_outline_rounded,
+            color: Colors.red.shade700,
+            items: removedFeatures,
+          ),
+          if (removedFeatures.isEmpty)
+            const Text(
+              'No removed features detected.',
+              style: TextStyle(fontSize: 12, color: _secondary),
+            ),
+
+          const SizedBox(height: 18),
+          sectionTitle(
+            '5. Technologies Removed',
+            'Technologies no longer listed in the updated plan.',
+            Icons.delete_outline_rounded,
+          ),
+          infoCard(
+            title: 'Removed technologies',
+            subtitle: 'These are separate from confirmed replacements above.',
+            icon: Icons.delete_outline_rounded,
+            color: Colors.deepOrange.shade700,
+            items: removedTech,
+          ),
+          if (removedTech.isEmpty)
+            const Text(
+              'No removed technologies detected.',
+              style: TextStyle(fontSize: 12, color: _secondary),
+            ),
+
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBEB),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.lightbulb_outline_rounded,
+                  color: Color(0xFF92400E),
+                  size: 20,
+                ),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'A recommendation is only as reliable as its supporting '
+                    'project data. Review the reasons and trade-offs before '
+                    'approving a technology change.',
+                    style: TextStyle(
+                      color: Color(0xFF78350F),
+                      fontSize: 12,
+                      height: 1.55,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _comparisonValue(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            letterSpacing: 0.5,
+            fontWeight: FontWeight.w700,
+            color: _secondary,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13,
+            height: 1.45,
+            fontWeight: FontWeight.w800,
+            color: _dark,
+          ),
+        ),
+      ],
+    );
+  }
 
   List<dynamic> get _phases => _asList(_currentPlan['deliveryPhases']);
 
@@ -172,6 +1014,384 @@ class _ProjectEstimateResultScreenState
   bool get _needsRegeneration =>
       _costChoice == false || _timelineChoice == false;
 
+  Future<Uint8List> _createRequirementsPdf() async {
+    final pdf = pw.Document();
+    final projectTitle = _sanitizePdfText(
+      widget.title.trim().isEmpty ? 'Untitled Project' : widget.title.trim(),
+    );
+    final projectDescription = _pdfText(widget.description);
+    final projectCategories = _pdfText(widget.categories);
+    final projectRequirements = _pdfText(widget.requirements);
+    final projectTechnologies = _pdfText(widget.technologies);
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(36),
+        maxPages: 100,
+        header: (context) => pw.Container(
+          padding: const pw.EdgeInsets.only(bottom: 12),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: PdfColors.blue700, width: 1.5),
+            ),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'SKILLBRIDGE',
+                style: pw.TextStyle(
+                  fontSize: 15,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.blue700,
+                ),
+              ),
+              pw.Text(
+                'PROJECT REQUIREMENTS',
+                style: const pw.TextStyle(
+                  fontSize: 9,
+                  color: PdfColors.grey700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          margin: const pw.EdgeInsets.only(top: 12),
+          padding: const pw.EdgeInsets.only(top: 8),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              top: pw.BorderSide(color: PdfColors.grey400, width: 0.5),
+            ),
+          ),
+          child: pw.Text(
+            'Page ${context.pageNumber} of ${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+          ),
+        ),
+        build: (context) => [
+          pw.SizedBox(height: 12),
+          pw.Text(
+            projectTitle,
+            style: pw.TextStyle(
+              fontSize: 23,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue900,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'Project Requirements and Estimate',
+            style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
+          ),
+          pw.SizedBox(height: 20),
+          _pdfSection('1. Project Overview'),
+          _pdfLabelValue('Project Name', projectTitle),
+          _pdfLabelValue('Categories', projectCategories),
+          _pdfLabelValue('Description', projectDescription),
+          _pdfSection('2. Project Requirements'),
+          _pdfLabelValue('Submitted Requirements', projectRequirements),
+          ..._pdfDataSection('Confirmed Requirements', _requirements),
+          _pdfSection('3. Technologies'),
+          _pdfLabelValue('Requested Technologies', projectTechnologies),
+          ..._pdfDataSection(
+            'Recommended Technologies',
+            _technologyNames(_currentPlan),
+          ),
+          ..._pdfDataSection('4. Project Modules', _modules),
+          _pdfSection('5. Project Estimate'),
+          ..._pdfDataSection('Estimate Details', _estimate),
+          _pdfSection('6. Recommended Team'),
+          ..._pdfDataSection('Team Information', _team),
+          ..._pdfDataSection('Recommended Team Roles', _teamRoleNames),
+          ..._pdfDataSection('7. Delivery Phases', _phases),
+          ..._pdfDataSection('8. Risks and Considerations', _risks),
+          ..._pdfDataSection('9. Additional Findings', _findings),
+          ..._pdfDataSection('10. Questions and Clarifications', _questions),
+          pw.SizedBox(height: 24),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.blue50,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Text(
+              'This document summarizes the project information and estimate '
+              'available in SkillBridge at the time of generation. Final scope, '
+              'budget, and timeline should be confirmed by the client and '
+              'development team.',
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.blue900),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  String _pdfText(dynamic value) {
+    if (value == null) return '';
+    if (value is String) return _sanitizePdfText(value.trim());
+
+    if (value is Map) {
+      return value.entries
+          .map((entry) {
+            final item = _pdfText(entry.value);
+            if (item.isEmpty) return '';
+            return '${_sanitizePdfText(_pdfPrettyLabel(entry.key.toString()))}: $item';
+          })
+          .where((item) => item.isNotEmpty)
+          .join('\n');
+    }
+
+    if (value is Iterable) {
+      return value.map(_pdfText).where((item) => item.isNotEmpty).join('\n');
+    }
+
+    return _sanitizePdfText(value.toString());
+  }
+
+  String _sanitizePdfText(String text) {
+    return text
+        .replaceAll('\u2014', '-')
+        .replaceAll('\u2013', '-')
+        .replaceAll('\u2018', "'")
+        .replaceAll('\u2019', "'")
+        .replaceAll('\u201C', '"')
+        .replaceAll('\u201D', '"')
+        .replaceAll('\u2026', '...')
+        .replaceAll('\u2022', '-')
+        .replaceAll('\u20B9', 'INR');
+  }
+
+  String _pdfPrettyLabel(String value) {
+    return value
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .trim()
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+  }
+
+  pw.Widget _pdfSection(String title) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(top: 18, bottom: 10),
+      child: pw.Text(
+        title,
+        style: pw.TextStyle(
+          fontSize: 15,
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.blue900,
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _pdfLabelValue(String label, String value) {
+    if (value.trim().isEmpty) return pw.SizedBox();
+
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 10),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.grey800,
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            value,
+            style: const pw.TextStyle(fontSize: 10, lineSpacing: 3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<pw.Widget> _pdfDataSection(String title, dynamic data) {
+    if (data == null) return [];
+
+    final widgets = <pw.Widget>[];
+    if (data is Map) {
+      final entries = data.entries.where(
+        (entry) => _pdfText(entry.value).isNotEmpty,
+      );
+      if (entries.isEmpty) return [];
+
+      widgets.add(_pdfSection(title));
+      for (final entry in entries) {
+        widgets.add(
+          _pdfLabelValue(
+            _pdfPrettyLabel(entry.key.toString()),
+            _pdfText(entry.value),
+          ),
+        );
+      }
+      return widgets;
+    }
+
+    if (data is Iterable) {
+      final items = data
+          .map(_pdfText)
+          .where((item) => item.isNotEmpty)
+          .toList();
+      if (items.isEmpty) return [];
+
+      widgets.add(_pdfSection(title));
+      for (final item in items) {
+        widgets.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(left: 8, bottom: 7),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  '- ',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue700,
+                  ),
+                ),
+                pw.Expanded(
+                  child: pw.Text(
+                    item,
+                    style: const pw.TextStyle(fontSize: 10, lineSpacing: 3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return widgets;
+    }
+
+    final text = _pdfText(data);
+    if (text.isEmpty) return [];
+
+    widgets
+      ..add(_pdfSection(title))
+      ..add(
+        pw.Text(text, style: const pw.TextStyle(fontSize: 10, lineSpacing: 3)),
+      );
+    return widgets;
+  }
+
+  String get _requirementsPdfFileName {
+    final safeTitle = widget.title
+        .replaceAll(RegExp(r'[^\w\s-]'), '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '_');
+    final fileTitle = safeTitle.isEmpty ? 'SkillBridge_Project' : safeTitle;
+    return '${fileTitle}_Requirements.pdf';
+  }
+
+  Future<void> _handleRequirementsPdf({required bool share}) async {
+    if (_isGeneratingRequirementsPdf) return;
+
+    setState(() => _isGeneratingRequirementsPdf = true);
+    try {
+      final bytes = await _createRequirementsPdf();
+      if (!mounted) return;
+
+      if (share) {
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: _requirementsPdfFileName,
+        );
+      } else {
+        await Printing.layoutPdf(
+          name: _requirementsPdfFileName,
+          onLayout: (_) async => bytes,
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Requirements PDF error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Unable to ${share ? 'share' : 'download'} PDF. Please try again.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isGeneratingRequirementsPdf = false);
+      }
+    }
+  }
+
+  Future<void> _showRequirementsPdfOptions() async {
+    if (_isGeneratingRequirementsPdf) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Wrap(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Text(
+                  'Project Requirements PDF',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.download_rounded,
+                  color: Color(0xFF2563EB),
+                ),
+                title: const Text('Download PDF'),
+                subtitle: const Text(
+                  'Open the print dialog to save the document as PDF.',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _handleRequirementsPdf(share: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.share_rounded,
+                  color: Color(0xFF2563EB),
+                ),
+                title: const Text('Share PDF'),
+                subtitle: const Text(
+                  'Share the generated requirements document.',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _handleRequirementsPdf(share: true);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currency = _string(_estimate['currency']).isEmpty
@@ -181,14 +1401,107 @@ class _ProjectEstimateResultScreenState
     return Scaffold(
       backgroundColor: _background,
       appBar: AppBar(
-        title: const Text(
-          'Project Estimate',
-          style: TextStyle(color: _dark, fontWeight: FontWeight.w800),
-        ),
-        backgroundColor: _background,
-        foregroundColor: _dark,
+        toolbarHeight: 82,
         elevation: 0,
         scrolledUnderElevation: 0,
+        backgroundColor: _background,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _dark,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project estimate icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.request_quote_outlined,
+                    color: Color(0xFF2563EB),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Project Estimate',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _dark,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'ESTIMATE OVERVIEW',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -197,11 +1510,21 @@ class _ProjectEstimateResultScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildHero(),
+
+              if (_previousPlan != null) ...[
+                const SizedBox(height: 20),
+                _buildRegenerationComparison(),
+              ],
+
               const SizedBox(height: 20),
 
               _sectionTitle('Estimate at a glance', Icons.analytics_outlined),
               const SizedBox(height: 12),
               _buildEstimateCards(currency),
+              const SizedBox(height: 12),
+              _buildBudgetFeasibility(currency),
+              const SizedBox(height: 12),
+              _buildTaskRoleCostTable(currency),
               const SizedBox(height: 24),
 
               _sectionTitle('Project overview', Icons.description_outlined),
@@ -299,11 +1622,10 @@ class _ProjectEstimateResultScreenState
               ),
               const SizedBox(height: 12),
               _card(
-                child: Text(
+                child: _formattedText(
                   _string(_currentPlan['researchFindings']).isNotEmpty
                       ? _string(_currentPlan['researchFindings'])
                       : 'Research findings are shown below when provided by AI.',
-                  style: const TextStyle(color: _dark, height: 1.6),
                 ),
               ),
               const SizedBox(height: 12),
@@ -445,12 +1767,40 @@ class _ProjectEstimateResultScreenState
               ),
             ],
           ),
+          if (_teamRoleNames.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _teamRoleNames.map((role) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.13),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Text(
+                    role,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
           if ((_currentPlanId ?? '').trim().isNotEmpty) ...[
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.12),
+                color: Colors.white.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: Colors.white24),
               ),
@@ -464,6 +1814,249 @@ class _ProjectEstimateResultScreenState
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Displays the backend's feasibility decision when the backend supplies it.
+  /// Supports the flag at plan or estimate level without inventing a result.
+  Widget _buildBudgetFeasibility(String currency) {
+    final dynamic feasibleValue =
+        _currentPlan['budgetFeasible'] ?? _estimate['budgetFeasible'];
+    if (feasibleValue is! bool) return const SizedBox.shrink();
+
+    final rawBudget =
+        _currentPlan['budgetMax'] ??
+        _currentPlan['budgetMaxINR'] ??
+        _estimate['budgetMax'] ??
+        _estimate['budgetMaxINR'];
+    final budget = _number(rawBudget);
+    final actualMax = _number(_estimate['costMaxINR']);
+    final withinBudget = feasibleValue;
+    final color = withinBudget ? _success : const Color(0xFFB45309);
+    final background = withinBudget ? _successBg : _warningBg;
+    final title = withinBudget ? 'Within target budget' : 'Budget needs review';
+    final detail = budget != null && actualMax != null
+        ? withinBudget
+              ? 'Estimated maximum ${_formatCurrency(actualMax, currency)} is within the target ${_formatCurrency(budget, currency)}.'
+              : 'Estimated maximum ${_formatCurrency(actualMax, currency)} exceeds the target ${_formatCurrency(budget, currency)}. Review the scope or revise the budget.'
+        : withinBudget
+        ? 'The backend marked this estimate as within budget.'
+        : 'The backend marked this estimate as exceeding the target budget. Review the scope or revise the budget.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            withinBudget
+                ? Icons.check_circle_outline
+                : Icons.warning_amber_rounded,
+            color: color,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: const TextStyle(
+                    color: _dark,
+                    fontSize: 12,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the backend's actual task-level prices and primary-role mapping
+  /// in one table near the project estimate. Missing prices remain unavailable;
+  /// they are never silently displayed as zero.
+  Widget _buildTaskRoleCostTable(String currency) {
+    final rows = <Map<String, String>>[];
+
+    for (final moduleValue in _modules) {
+      final module = _asMap(moduleValue);
+      final moduleName = _firstNonEmpty([module['name'], module['title']]);
+      for (final taskValue in _asList(module['tasks'])) {
+        final task = _asMap(taskValue);
+        final taskName = _firstNonEmpty([task['name'], task['title']]);
+        final role = _string(task['primaryRole']).trim();
+        final min = _number(task['priceMinINR']);
+        final max = _number(task['priceMaxINR']);
+        final effortMin = _number(task['effortHoursMin']);
+        final effortMax = _number(task['effortHoursMax']);
+        final price = min != null && max != null
+            ? '${_formatCurrency(min, currency)} – ${_formatCurrency(max, currency)}'
+            : 'Not available';
+        final effort = effortMin != null && effortMax != null
+            ? _range(effortMin, effortMax, 'h')
+            : 'Not available';
+
+        rows.add({
+          'module': moduleName.isEmpty ? 'Module' : moduleName,
+          'task': taskName.isEmpty ? 'Task' : taskName,
+          'role': role.isEmpty ? 'Not assigned' : role,
+          'price': price,
+          'effort': effort,
+        });
+      }
+    }
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.table_chart_outlined, color: _primary, size: 22),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Task & Role Cost Breakdown',
+                  style: TextStyle(
+                    color: _dark,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Task prices and roles returned by the backend. These are task-level estimates; contingency is included in the overall project estimate separately.',
+            style: TextStyle(color: _secondary, fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columnSpacing: 20,
+              headingRowHeight: 44,
+              dataRowMinHeight: 54,
+              dataRowMaxHeight: 84,
+              columns: const [
+                DataColumn(label: Text('Module / Task')),
+                DataColumn(label: Text('Primary role')),
+                DataColumn(label: Text('Task cost')),
+                DataColumn(label: Text('Effort')),
+              ],
+              rows: rows.map((row) {
+                return DataRow(
+                  cells: [
+                    DataCell(
+                      SizedBox(
+                        width: 210,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              row['module']!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _secondary,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              row['task']!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _dark,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    DataCell(SizedBox(width: 125, child: Text(row['role']!))),
+                    DataCell(SizedBox(width: 145, child: Text(row['price']!))),
+                    DataCell(Text(row['effort']!)),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildRoleWiseCosts(currency),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleWiseCosts(String currency) {
+    final roleWiseCosts = _asMap(_currentPlan['roleWiseCosts']);
+
+    if (roleWiseCosts.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final roles = roleWiseCosts.entries.toList()
+      ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Role-wise Cost Breakdown',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _dark,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Task prices grouped by the primary role responsible for each task. '
+            'Contingency is shown separately in the project estimate.',
+            style: TextStyle(color: _secondary, height: 1.5, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          ...roles.map((entry) {
+            final roleCost = _asMap(entry.value);
+            final min = _number(roleCost['costMinINR']);
+            final max = _number(roleCost['costMaxINR']);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _labelValue(
+                entry.key,
+                min != null && max != null
+                    ? '${_formatCurrency(min, currency)} – '
+                          '${_formatCurrency(max, currency)}'
+                    : 'Cost unavailable',
+              ),
+            );
+          }),
         ],
       ),
     );
@@ -600,6 +2193,12 @@ class _ProjectEstimateResultScreenState
             const SizedBox(height: 10),
             ...tasks.asMap().entries.map((entry) {
               final task = _asMap(entry.value);
+              final taskPriceMin = _number(task['priceMinINR']);
+              final taskPriceMax = _number(task['priceMaxINR']);
+              final taskPrimaryRole = _string(task['primaryRole']);
+              final currency = _string(_estimate['currency']).isEmpty
+                  ? 'INR'
+                  : _string(_estimate['currency']);
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 14),
@@ -623,6 +2222,14 @@ class _ProjectEstimateResultScreenState
                       ),
                       _labelValue('Description', _string(task['description'])),
                       _labelValue('Deliverable', _string(task['deliverable'])),
+                      if (taskPriceMin != null && taskPriceMax != null)
+                        _labelValue(
+                          'Fixed price',
+                          '${_formatCurrency(taskPriceMin, currency)} – '
+                              '${_formatCurrency(taskPriceMax, currency)}',
+                        ),
+                      if (taskPrimaryRole.isNotEmpty)
+                        _labelValue('Primary role', taskPrimaryRole),
                       _labelValue(
                         'Effort',
                         _range(
@@ -886,13 +2493,13 @@ class _ProjectEstimateResultScreenState
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          _formattedText(
             confidence == null
                 ? 'Not available'
                 : confidence is Map || confidence is List
                 ? _pretty(confidence)
                 : confidence.toString(),
-            style: const TextStyle(color: _secondary, height: 1.5),
+            muted: true,
           ),
           const SizedBox(height: 12),
           Container(
@@ -917,6 +2524,116 @@ class _ProjectEstimateResultScreenState
     );
   }
 
+  Widget _buildActionLoadingAnimation() {
+    final isRegenerating = _isRegenerating;
+
+    final title = isRegenerating
+        ? 'AI is revising your project'
+        : 'Confirming your estimate';
+
+    final subtitle = isRegenerating
+        ? 'Reviewing your budget, timeline, features and team...'
+        : 'Saving your acceptance and preparing your project...';
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 450),
+      switchInCurve: Curves.easeOutBack,
+      switchOutCurve: Curves.easeIn,
+      child: Container(
+        key: ValueKey(isRegenerating),
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 18),
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0A2563EB),
+              blurRadius: 24,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            SizedBox(
+              width: 78,
+              height: 78,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 76,
+                    height: 76,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        isRegenerating ? _indigo : _success,
+                      ),
+                      backgroundColor: _border,
+                    ),
+                  ),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.85, end: 1.0),
+                    duration: const Duration(milliseconds: 900),
+                    curve: Curves.easeInOut,
+                    builder: (context, scale, child) {
+                      return Transform.scale(scale: scale, child: child);
+                    },
+                    child: Icon(
+                      isRegenerating
+                          ? Icons.auto_awesome_rounded
+                          : Icons.verified_rounded,
+                      color: isRegenerating ? _indigo : _success,
+                      size: 34,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+                color: _dark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: _secondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: const LinearProgressIndicator(
+                minHeight: 5,
+                backgroundColor: Color(0xFFEFF4FF),
+                valueColor: AlwaysStoppedAnimation<Color>(_primary),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Please wait. Do not close this screen.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: _secondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Client confirmation: cost Yes/No, timeline Yes/No, Terms checkbox only.
   // Selecting No reveals the relevant input and changes the primary action
@@ -928,6 +2645,9 @@ class _ProjectEstimateResultScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_isSubmitting || _isRegenerating) ...[
+            _buildActionLoadingAnimation(),
+          ],
           const Text(
             'Client confirmation',
             style: TextStyle(
@@ -980,38 +2700,36 @@ class _ProjectEstimateResultScreenState
             style: TextStyle(color: _dark, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          RadioListTile<bool>(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Yes, my budget matches this estimate'),
-            value: true,
+          RadioGroup<bool>(
             groupValue: _costChoice,
-            onChanged: _isSubmitting || _isRegenerating || _isAccepted
-                ? null
-                : (value) {
-                    setState(() {
-                      _costChoice = value;
-                      _acceptedCost = value == true;
+            onChanged: (value) {
+              if (_isSubmitting || _isRegenerating || _isAccepted) {
+                return;
+              }
 
-                      // Clear the old budget when the client switches back to Yes.
-                      if (value == true) {
-                        _targetBudgetController.clear();
-                      }
-                    });
-                  },
-          ),
-          RadioListTile<bool>(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('No, I have a different budget'),
-            value: false,
-            groupValue: _costChoice,
-            onChanged: _isSubmitting || _isRegenerating || _isAccepted
-                ? null
-                : (value) {
-                    setState(() {
-                      _costChoice = value;
-                      _acceptedCost = false;
-                    });
-                  },
+              setState(() {
+                _costChoice = value;
+                _acceptedCost = value == true;
+
+                if (value == true) {
+                  _targetBudgetController.clear();
+                }
+              });
+            },
+            child: const Column(
+              children: [
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Yes, my budget matches this estimate'),
+                  value: true,
+                ),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('No, I have a different budget'),
+                  value: false,
+                ),
+              ],
+            ),
           ),
           if (_costChoice == false) ...[
             Padding(
@@ -1039,38 +2757,36 @@ class _ProjectEstimateResultScreenState
             style: TextStyle(color: _dark, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          RadioListTile<bool>(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Yes, the estimated timeline works for me'),
-            value: true,
+          RadioGroup<bool>(
             groupValue: _timelineChoice,
-            onChanged: _isSubmitting || _isRegenerating || _isAccepted
-                ? null
-                : (value) {
-                    setState(() {
-                      _timelineChoice = value;
-                      _acceptedTimeline = value == true;
+            onChanged: (value) {
+              if (_isSubmitting || _isRegenerating || _isAccepted) {
+                return;
+              }
 
-                      // Clear the old date when the client switches back to Yes.
-                      if (value == true) {
-                        _targetDeliveryDate = null;
-                      }
-                    });
-                  },
-          ),
-          RadioListTile<bool>(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('No, I need the project by a different date'),
-            value: false,
-            groupValue: _timelineChoice,
-            onChanged: _isSubmitting || _isRegenerating || _isAccepted
-                ? null
-                : (value) {
-                    setState(() {
-                      _timelineChoice = value;
-                      _acceptedTimeline = false;
-                    });
-                  },
+              setState(() {
+                _timelineChoice = value;
+                _acceptedTimeline = value == true;
+
+                if (value == true) {
+                  _targetDeliveryDate = null;
+                }
+              });
+            },
+            child: const Column(
+              children: [
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Yes, the estimated timeline works for me'),
+                  value: true,
+                ),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('No, I need the project by a different date'),
+                  value: false,
+                ),
+              ],
+            ),
           ),
           if (_timelineChoice == false) ...[
             Padding(
@@ -1118,6 +2834,41 @@ class _ProjectEstimateResultScreenState
           ),
 
           const SizedBox(height: 18),
+
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: _isGeneratingRequirementsPdf
+                  ? null
+                  : _showRequirementsPdfOptions,
+              icon: _isGeneratingRequirementsPdf
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded),
+              label: Text(
+                _isGeneratingRequirementsPdf
+                    ? 'Generating PDF...'
+                    : 'Download & Share Requirements',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primary,
+                side: const BorderSide(color: _primary, width: 1.4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
 
           // The main action switches based on the client's cost/timeline choices.
           SizedBox(
@@ -1389,11 +3140,15 @@ class _ProjectEstimateResultScreenState
       );
     }
 
+    final previousPlan = Map<String, dynamic>.from(_currentPlan);
     setState(() => _isRegenerating = true);
 
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable(
+      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+      final callable = functions.httpsCallable(
         'generateAIProjectPlan',
+        options: HttpsCallableOptions(timeout: const Duration(seconds: 320)),
       );
 
       final result = await callable.call({
@@ -1417,22 +3172,27 @@ class _ProjectEstimateResultScreenState
 
       final data = _asMap(result.data);
       final newPlan = _asMap(data['plan']);
+      final returnedPlanId = _string(data['planId']).trim();
 
       if (newPlan.isEmpty) {
         throw Exception('The server did not return a valid plan.');
       }
 
+      if (returnedPlanId.isEmpty) {
+        throw Exception(
+          'The server did not return an estimate ID. '
+          'The previous estimate has been preserved.',
+        );
+      }
+
       if (!mounted) return;
 
       setState(() {
+        _previousPlan = previousPlan;
         _currentPlan = Map<String, dynamic>.from(newPlan);
+        _currentPlanId = returnedPlanId;
 
-        final returnedPlanId = _string(data['planId']);
-        if (returnedPlanId.isNotEmpty) {
-          _currentPlanId = returnedPlanId;
-        }
-
-        // All decisions must be made again for the new estimate.
+        // Reset all decisions for the newly generated estimate.
         _acceptedCost = false;
         _acceptedTimeline = false;
         _acceptedTerms = false;
@@ -1442,6 +3202,8 @@ class _ProjectEstimateResultScreenState
         _targetDeliveryDate = null;
         _submittedStatus = null;
       });
+
+      await _savePlanToExistingProject();
 
       _showMessage(
         'Updated estimate generated. Please review the new estimate and answer again.',
@@ -1499,6 +3261,25 @@ class _ProjectEstimateResultScreenState
       );
 
       if (status == 'accepted') {
+        // Step 1: Configure the authenticated role for this user.
+        final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+        await functions.httpsCallable('ensureSupabaseRole').call();
+
+        // Step 2: Refresh the Firebase ID token.
+        await user.getIdToken(true);
+
+        // Step 3: Verify the refreshed token contains the role.
+        final tokenResult = await user.getIdTokenResult();
+        final role = tokenResult.claims?['role'];
+
+        debugPrint('SUPABASE JWT ROLE AFTER REFRESH: $role');
+
+        if (role != 'authenticated') {
+          throw StateError('Firebase token is missing role=authenticated.');
+        }
+
+        // Step 4: Upload generated and reference images.
         final storage = SupabaseStorageService.instance;
 
         final safePlanId = _currentPlanId!.replaceAll(
@@ -1568,8 +3349,6 @@ class _ProjectEstimateResultScreenState
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      String? createdProjectId;
-
       if (status == 'accepted') {
         // Create/update the project and record acceptance atomically.
         // A deterministic confirmation ID makes retries idempotent: a timeout
@@ -1581,16 +3360,14 @@ class _ProjectEstimateResultScreenState
         );
         final confirmationRef = firestore
             .collection('projectEstimateConfirmations')
-            .doc('${user.uid}_${safePlanId}');
+            .doc('${user.uid}_$safePlanId');
         final requestedProjectId = widget.projectId?.trim();
         final newProjectRef =
             requestedProjectId != null && requestedProjectId.isNotEmpty
             ? firestore.collection('projects').doc(requestedProjectId)
             : firestore.collection('projects').doc();
 
-        createdProjectId = await firestore.runTransaction<String>((
-          transaction,
-        ) async {
+        await firestore.runTransaction<String>((transaction) async {
           final confirmationSnapshot = await transaction.get(confirmationRef);
           final priorConfirmation = confirmationSnapshot.data() ?? {};
           final priorProjectId =
@@ -1664,11 +3441,22 @@ class _ProjectEstimateResultScreenState
 
       setState(() => _submittedStatus = status);
 
-      _showMessage(
-        status == 'accepted'
-            ? 'Project created and estimate acceptance saved.'
-            : 'Your response has been submitted.',
-      );
+      if (status == 'accepted') {
+        _showMessage('Project created successfully!');
+
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(builder: (_) => const ClientHome()),
+          (route) => false,
+        );
+
+        return;
+      }
+
+      _showMessage('Your response has been submitted.');
     } catch (e, stackTrace) {
       debugPrint('ESTIMATE RESPONSE SAVE ERROR: $e');
       debugPrint('$stackTrace');
@@ -1687,7 +3475,7 @@ class _ProjectEstimateResultScreenState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: Colors.white24),
       ),
@@ -1868,36 +3656,75 @@ class _ProjectEstimateResultScreenState
     if (value.trim().isEmpty) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.only(top: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
+            label.toUpperCase(),
             style: const TextStyle(
               color: _secondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontSize: 11,
+              letterSpacing: 0.65,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 4),
-          SelectableText(
-            value,
-            style: const TextStyle(color: _dark, height: 1.5, fontSize: 14),
-          ),
+          const SizedBox(height: 5),
+          _formattedText(value),
         ],
       ),
     );
   }
 
-  String _rateRange(Map<String, dynamic> member) {
-    final min = _number(member['rateMinINRPerHour']);
-    final max = _number(member['rateMaxINRPerHour']);
+  /// Renders AI-generated Markdown as readable, selectable content instead of
+  /// showing raw Markdown markers or one dense block of text.
+  Widget _formattedText(String value, {bool muted = false}) {
+    if (value.trim().isEmpty) return const SizedBox.shrink();
 
-    if (min == null || max == null) return '';
+    final baseColor = muted ? _secondary : _dark;
+    final baseStyle = TextStyle(color: baseColor, fontSize: 14, height: 1.65);
 
-    return '${_formatCurrency(min, 'INR')} – '
-        '${_formatCurrency(max, 'INR')} per hour';
+    return MarkdownBody(
+      data: value.trim(),
+      selectable: true,
+      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+        p: baseStyle.copyWith(height: 1.65),
+        h1: const TextStyle(
+          color: _dark,
+          fontSize: 20,
+          height: 1.35,
+          fontWeight: FontWeight.w800,
+        ),
+        h2: const TextStyle(
+          color: _dark,
+          fontSize: 17,
+          height: 1.4,
+          fontWeight: FontWeight.w800,
+        ),
+        h3: const TextStyle(
+          color: _dark,
+          fontSize: 15,
+          height: 1.4,
+          fontWeight: FontWeight.w800,
+        ),
+        strong: const TextStyle(color: _dark, fontWeight: FontWeight.w800),
+        listBullet: baseStyle.copyWith(fontWeight: FontWeight.w700),
+        blockquote: baseStyle.copyWith(color: _secondary),
+        code: const TextStyle(
+          color: _indigo,
+          fontSize: 13,
+          fontFamily: 'monospace',
+          backgroundColor: Color(0xFFF1F5F9),
+        ),
+        blockquoteDecoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(left: BorderSide(color: _primary, width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        listIndent: 22,
+        blockSpacing: 8,
+      ),
+    );
   }
 
   String _range(dynamic min, dynamic max, String unit) {
@@ -1919,20 +3746,46 @@ class _ProjectEstimateResultScreenState
     if (value is String) return value.trim();
 
     if (value is List) {
-      return value.map(_pretty).where((e) => e.isNotEmpty).join(', ');
+      final items = value
+          .map(_pretty)
+          .where((item) => item.trim().isNotEmpty)
+          .toList();
+      if (items.isEmpty) return '';
+      if (items.length == 1) return items.first;
+      return items
+          .map((item) => '- ${item.replaceAll('\n', '\n  ')}')
+          .join('\n');
     }
 
     if (value is Map) {
       return value.entries
           .map((entry) {
             final child = _pretty(entry.value);
-            return child.isEmpty ? '' : '${entry.key}: $child';
+            if (child.isEmpty) return '';
+            final label = _humanizeKey(entry.key.toString());
+            if (child.contains('\n')) {
+              return '**$label:**\n${child.split('\n').map((line) => '  $line').join('\n')}';
+            }
+            return '**$label:** $child';
           })
-          .where((e) => e.isNotEmpty)
-          .join('\n');
+          .where((entry) => entry.isNotEmpty)
+          .join('\n\n');
     }
 
     return value.toString();
+  }
+
+  String _humanizeKey(String key) {
+    final spaced = key
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .trim();
+    if (spaced.isEmpty) return key;
+    return spaced[0].toUpperCase() + spaced.substring(1);
   }
 
   String _string(dynamic value) {

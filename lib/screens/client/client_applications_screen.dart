@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/skillbridge_avatar.dart';
+
 class ClientApplicationsScreen extends StatelessWidget {
   final String projectId;
   final String projectTitle;
@@ -56,54 +58,150 @@ class ClientApplicationsScreen extends StatelessWidget {
       return;
     }
 
+    // Only these actions are supported.
+    const allowedStatuses = {'shortlisted', 'rejected', 'accepted'};
+
+    if (!allowedStatuses.contains(newStatus)) {
+      _showMessage(context, 'Invalid application status.');
+      return;
+    }
+
     try {
-      // Verify that the current client owns this project.
-      final projectDoc = await _firestore
-          .collection('projects')
-          .doc(projectId)
-          .get();
-
-      if (!projectDoc.exists || projectDoc.data()?['clientId'] != user.uid) {
-        if (context.mounted) {
-          _showMessage(context, 'You cannot update this application.');
-        }
-        return;
-      }
-
-      // Verify that the application belongs to this project and client.
-      final applicationDoc = await _firestore
+      final projectRef = _firestore.collection('projects').doc(projectId);
+      final applicationRef = _firestore
           .collection('applications')
-          .doc(applicationId)
-          .get();
+          .doc(applicationId);
 
-      final application = applicationDoc.data();
+      await _firestore.runTransaction((transaction) async {
+        final projectSnapshot = await transaction.get(projectRef);
+        final applicationSnapshot = await transaction.get(applicationRef);
 
-      if (!applicationDoc.exists ||
-          application == null ||
-          application['projectId'] != projectId ||
-          application['clientId'] != user.uid) {
-        if (context.mounted) {
-          _showMessage(context, 'Application not found or access denied.');
+        if (!projectSnapshot.exists) {
+          throw Exception('PROJECT_NOT_FOUND');
         }
-        return;
-      }
 
-      await applicationDoc.reference.update({
-        'status': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
+        if (!applicationSnapshot.exists) {
+          throw Exception('APPLICATION_NOT_FOUND');
+        }
+
+        final projectData = projectSnapshot.data();
+        final applicationData = applicationSnapshot.data();
+
+        if (projectData == null || applicationData == null) {
+          throw Exception('INVALID_DOCUMENT');
+        }
+
+        if (projectData['clientId'] != user.uid) {
+          throw Exception('ACCESS_DENIED');
+        }
+
+        if (applicationData['projectId'] != projectId ||
+            applicationData['clientId'] != user.uid) {
+          throw Exception('APPLICATION_ACCESS_DENIED');
+        }
+
+        final currentApplicationStatus =
+            (applicationData['status'] ?? 'pending')
+                .toString()
+                .trim()
+                .toLowerCase();
+
+        if (currentApplicationStatus != 'pending' &&
+            currentApplicationStatus != 'shortlisted') {
+          throw Exception('APPLICATION_ALREADY_PROCESSED');
+        }
+
+        final now = FieldValue.serverTimestamp();
+
+        if (newStatus == 'accepted') {
+          final existingDeveloperId = (projectData['developerId'] ?? '')
+              .toString()
+              .trim();
+          final projectStatus = (projectData['status'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+
+          if (existingDeveloperId.isNotEmpty || projectStatus == 'active') {
+            throw Exception('PROJECT_ALREADY_ASSIGNED');
+          }
+
+          final applicantDeveloperId = (applicationData['developerId'] ?? '')
+              .toString()
+              .trim();
+
+          if (applicantDeveloperId.isEmpty) {
+            throw Exception('INVALID_DEVELOPER');
+          }
+
+          transaction.update(applicationRef, {
+            'status': 'accepted',
+            'updatedAt': now,
+          });
+
+          final agreedDuration = (applicationData['estimatedDuration'] ?? '')
+              .toString()
+              .trim();
+
+          if (agreedDuration.isEmpty) {
+            throw Exception('MISSING_PROJECT_DURATION');
+          }
+
+          transaction.update(projectRef, {
+            'developerId': applicantDeveloperId,
+            'status': 'active',
+            'startedAt': now,
+            'duration': agreedDuration,
+            'updatedAt': now,
+          });
+        } else {
+          transaction.update(applicationRef, {
+            'status': newStatus,
+            'updatedAt': now,
+          });
+        }
       });
 
       if (context.mounted) {
         _showMessage(
           context,
-          'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
+          newStatus == 'accepted'
+              ? 'Developer accepted and project assigned successfully.'
+              : 'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
         );
       }
     } catch (e) {
-      if (context.mounted) {
+      if (!context.mounted) return;
+
+      final error = e.toString();
+
+      if (error.contains('PROJECT_ALREADY_ASSIGNED')) {
         _showMessage(
           context,
-          'Could not update application. Please try again.',
+          'A developer has already been assigned to this project.',
+        );
+      } else if (error.contains('ACCESS_DENIED') ||
+          error.contains('APPLICATION_ACCESS_DENIED')) {
+        _showMessage(
+          context,
+          'You are not authorized to update this application.',
+        );
+      } else if (error.contains('PROJECT_NOT_FOUND')) {
+        _showMessage(context, 'Project not found.');
+      } else if (error.contains('APPLICATION_NOT_FOUND')) {
+        _showMessage(context, 'Application not found.');
+      } else if (error.contains('APPLICATION_ALREADY_PROCESSED')) {
+        _showMessage(context, 'This application has already been processed.');
+      } else if (error.contains('INVALID_DEVELOPER')) {
+        _showMessage(
+          context,
+          'The application does not contain a valid developer ID.',
+        );
+      } else {
+        debugPrint('Application status update failed: $e');
+        _showMessage(
+          context,
+          'Could not update application. Please check your Firestore rules and try again.',
         );
       }
     }
@@ -161,11 +259,106 @@ class ClientApplicationsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
-        title: const Text('Applications'),
-        centerTitle: false,
-        backgroundColor: const Color(0xF7FFFFFF),
-        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 82,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Applications icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.assignment_outlined,
+                    color: Color(0xFF2563EB),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                const Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Applications',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'DEVELOPER APPLICATIONS',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -424,23 +617,12 @@ class _ApplicationCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 25,
-                  backgroundColor: colors.primaryContainer,
-                  child: Icon(
-                    Icons.person_outline_rounded,
-                    color: colors.onPrimaryContainer,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
                   child: developerId.isEmpty
-                      ? Text(
-                          'Developer',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      ? _developerIdentity(
+                          theme: theme,
+                          colors: colors,
+                          userData: const {},
                         )
                       : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                           stream: FirebaseFirestore.instance
@@ -450,23 +632,10 @@ class _ApplicationCard extends StatelessWidget {
                           builder: (context, snapshot) {
                             final userData = snapshot.data?.data() ?? {};
 
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _developerName(userData),
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  'Developer',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                            return _developerIdentity(
+                              theme: theme,
+                              colors: colors,
+                              userData: userData,
                             );
                           },
                         ),
@@ -582,6 +751,49 @@ class _ApplicationCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _developerIdentity({
+    required ThemeData theme,
+    required ColorScheme colors,
+    required Map<String, dynamic> userData,
+  }) {
+    final name = _developerName(userData);
+    final profileImageUrl =
+        userData['profileImageUrl']?.toString().trim() ?? '';
+
+    return Row(
+      children: [
+        SkillBridgeAvatar(
+          profileImageUrl: profileImageUrl,
+          name: name,
+          size: 50,
+          backgroundColor: colors.primaryContainer,
+          foregroundColor: colors.onPrimaryContainer,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Developer',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../localization/app_localizations.dart';
+import '../../widgets/skillbridge_avatar.dart';
 
 class ClientTeamScreen extends StatelessWidget {
   final String projectId;
@@ -15,20 +16,106 @@ class ClientTeamScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        title: Text(
-          l10n.projectTeam,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project team icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.groups_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.projectTeam,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF111827),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'MANAGE YOUR PROJECT TEAM',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
       ),
       body: Stack(
         children: [
@@ -91,8 +178,16 @@ class ClientTeamScreen extends StatelessWidget {
                       final document = members[index - 1];
 
                       final data = document.data();
+                      final memberId =
+                          (data['userId'] ??
+                                  data['memberId'] ??
+                                  data['developerId'] ??
+                                  data['uid'] ??
+                                  document.id)
+                              .toString()
+                              .trim();
 
-                      return _TeamMemberCard(data: data);
+                      return _TeamMemberCard(data: data, memberId: memberId);
                     },
                   );
                 },
@@ -209,31 +304,9 @@ class _TeamHeader extends StatelessWidget {
 
 class _TeamMemberCard extends StatelessWidget {
   final Map<String, dynamic> data;
+  final String memberId;
 
-  const _TeamMemberCard({required this.data});
-
-  IconData _roleIcon(String role) {
-    switch (role) {
-      case 'frontend':
-        return Icons.web_rounded;
-
-      case 'backend':
-        return Icons.dns_rounded;
-
-      case 'database':
-        return Icons.storage_rounded;
-
-      case 'tester':
-        return Icons.bug_report_outlined;
-
-      case 'project_manager':
-      case 'team_leader':
-        return Icons.manage_accounts_outlined;
-
-      default:
-        return Icons.person_outline_rounded;
-    }
-  }
+  const _TeamMemberCard({required this.data, required this.memberId});
 
   String _formatRole(BuildContext context, String role) {
     final l10n = AppLocalizations.of(context);
@@ -283,6 +356,41 @@ class _TeamMemberCard extends StatelessWidget {
     }
   }
 
+  Widget _memberAvatar({required String name, required Color roleColor}) {
+    final storedImageUrl = data['profileImageUrl']?.toString() ?? '';
+
+    if (memberId.isEmpty) {
+      return SkillBridgeAvatar(
+        profileImageUrl: storedImageUrl,
+        name: name,
+        size: 56,
+        borderRadius: BorderRadius.circular(16),
+        backgroundColor: roleColor.withValues(alpha: 0.14),
+        foregroundColor: roleColor,
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(memberId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final userData = snapshot.data?.data();
+
+        return SkillBridgeAvatar(
+          profileImageUrl:
+              userData?['profileImageUrl']?.toString() ?? storedImageUrl,
+          name: userData?['name']?.toString() ?? name,
+          size: 56,
+          borderRadius: BorderRadius.circular(16),
+          backgroundColor: roleColor.withValues(alpha: 0.14),
+          foregroundColor: roleColor,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -312,22 +420,7 @@ class _TeamMemberCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  roleColor.withValues(alpha: 0.14),
-                  roleColor.withValues(alpha: 0.07),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(_roleIcon(role), color: roleColor, size: 25),
-          ),
+          _memberAvatar(name: name, roleColor: roleColor),
           const SizedBox(width: 14),
           Expanded(
             child: Column(

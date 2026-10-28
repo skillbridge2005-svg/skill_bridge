@@ -9,6 +9,8 @@ import 'package:image_picker/image_picker.dart';
 import '../../localization/app_localizations.dart';
 import 'initial_project_estimate_screen.dart';
 
+import 'package:flutter_markdown/flutter_markdown.dart';
+
 // ================================================================
 // DESIGN TOKENS — MATCH CLIENT HOME THEME
 // ================================================================
@@ -64,6 +66,9 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
   bool _generatingDescription = false;
   bool _generatingRequirements = false;
   bool _generatingTechnologies = false;
+  bool _descriptionPreview = true;
+  bool _requirementsPreview = true;
+  bool _technologiesPreview = true;
 
   List<_GeneratedDesignPage> _generatedPages = [];
   int _designPageIndex = 0;
@@ -689,55 +694,94 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     required int maxLines,
     required VoidCallback onGenerate,
     required String buttonText,
+    required bool showPreview,
+    required VoidCallback onTogglePreview,
     bool isGenerating = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 14,
-            color: _kTextDark,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  color: _kTextDark,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: onTogglePreview,
+              icon: Icon(
+                showPreview ? Icons.edit_outlined : Icons.visibility_outlined,
+                size: 18,
+              ),
+              label: Text(showPreview ? 'Edit' : 'Preview'),
+              style: TextButton.styleFrom(foregroundColor: _kPrimaryBlue),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          maxLines: maxLines,
-          style: const TextStyle(fontSize: 14, height: 1.5, color: _kTextDark),
-          decoration: _fieldDecoration(
-            suffixIcon: IconButton(
-              onPressed: () {
-                debugPrint('AI DEBUG: Sparkle icon tapped');
-                debugPrint('AI DEBUG: Button text = $buttonText');
-                debugPrint('AI DEBUG: Is generating = $isGenerating');
 
-                if (isGenerating) {
-                  debugPrint(
-                    'AI DEBUG: Button disabled because generation is running',
-                  );
-                  return;
-                }
+        if (showPreview)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _kCardBorder),
+            ),
+            child: AIFormattedContent(
+              content: controller.text.trim().isEmpty
+                  ? 'Nothing to preview yet. Generate or enter content first.'
+                  : controller.text,
+            ),
+          )
+        else
+          TextField(
+            controller: controller,
+            maxLines: maxLines,
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: _kTextDark,
+            ),
+            decoration: _fieldDecoration(
+              suffixIcon: IconButton(
+                onPressed: () {
+                  debugPrint('AI DEBUG: Sparkle icon tapped');
+                  debugPrint('AI DEBUG: Button text = $buttonText');
+                  debugPrint('AI DEBUG: Is generating = $isGenerating');
 
-                debugPrint('AI DEBUG: Executing onGenerate callback');
-                onGenerate();
-              },
-              tooltip: buttonText,
-              icon: isGenerating
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: _kPrimaryBlue,
-                      ),
-                    )
-                  : const Icon(Icons.auto_awesome, color: _kPrimaryBlue),
+                  if (isGenerating) {
+                    debugPrint(
+                      'AI DEBUG: Button disabled because generation is running',
+                    );
+                    return;
+                  }
+
+                  debugPrint('AI DEBUG: Executing onGenerate callback');
+                  onGenerate();
+                },
+                tooltip: buttonText,
+                icon: isGenerating
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _kPrimaryBlue,
+                        ),
+                      )
+                    : const Icon(Icons.auto_awesome, color: _kPrimaryBlue),
+              ),
             ),
           ),
-        ),
+
         const SizedBox(height: 8),
         Row(
           children: [
@@ -751,6 +795,8 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
               child: Text(
                 isGenerating
                     ? 'Generating with Gemini AI...'
+                    : showPreview
+                    ? 'Previewing formatted content.'
                     : 'Tap the sparkle icon to generate with AI.',
                 style: const TextStyle(fontSize: 12, color: _kTextSecondary),
               ),
@@ -807,14 +853,7 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                SelectableText(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: _kTextDark,
-                  ),
-                ),
+                AIFormattedContent(content: value),
               ],
             ),
           ),
@@ -897,19 +936,106 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
     return Scaffold(
       backgroundColor: _kBackground,
       appBar: AppBar(
-        title: Text(
-          l10n.aiProjectAssistant,
-          style: const TextStyle(
-            color: _kTextDark,
-            fontWeight: FontWeight.w800,
-            fontSize: 19,
-          ),
-        ),
-        backgroundColor: _kBackground,
-        foregroundColor: _kTextDark,
-        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 82,
         elevation: 0,
         scrolledUnderElevation: 0,
+        backgroundColor: _kBackground,
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // AI assistant icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 22,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.aiProjectAssistant,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _kTextDark,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'AI PROJECT WORKSPACE',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -1033,6 +1159,12 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   onGenerate: _generateDescription,
                   buttonText: 'Generate description with AI',
                   isGenerating: _generatingDescription,
+                  showPreview: _descriptionPreview,
+                  onTogglePreview: () {
+                    setState(() {
+                      _descriptionPreview = !_descriptionPreview;
+                    });
+                  },
                 ),
 
                 const SizedBox(height: 25),
@@ -1048,44 +1180,12 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   onGenerate: _generateRequirements,
                   buttonText: 'Generate requirements with AI',
                   isGenerating: _generatingRequirements,
-                ),
-
-                const SizedBox(height: 12),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: _generatingRequirements
-                        ? null
-                        : _generateRequirements,
-                    icon: _generatingRequirements
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _kPrimaryBlue,
-                            ),
-                          )
-                        : const Icon(Icons.auto_awesome, color: _kPrimaryBlue),
-                    label: Text(
-                      _generatingRequirements
-                          ? 'Generating Requirements...'
-                          : 'Generate Requirements with AI',
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _kPrimaryBlue,
-                      side: const BorderSide(color: _kPrimaryBlue),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+                  showPreview: _requirementsPreview,
+                  onTogglePreview: () {
+                    setState(() {
+                      _requirementsPreview = !_requirementsPreview;
+                    });
+                  },
                 ),
 
                 const SizedBox(height: 25),
@@ -1101,6 +1201,12 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
                   onGenerate: _generateTechnologies,
                   buttonText: 'Suggest technologies with AI',
                   isGenerating: _generatingTechnologies,
+                  showPreview: _technologiesPreview,
+                  onTogglePreview: () {
+                    setState(() {
+                      _technologiesPreview = !_technologiesPreview;
+                    });
+                  },
                 ),
 
                 const SizedBox(height: 25),
@@ -1536,6 +1642,62 @@ class _AIProjectAssistantScreenState extends State<AIProjectAssistantScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class AIFormattedContent extends StatelessWidget {
+  final String content;
+
+  const AIFormattedContent({super.key, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    return MarkdownBody(
+      data: content,
+      selectable: true,
+      styleSheet: MarkdownStyleSheet(
+        p: const TextStyle(fontSize: 14, height: 1.7, color: Color(0xFF101828)),
+        h1: const TextStyle(
+          fontSize: 21,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF101828),
+        ),
+        h2: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF101828),
+        ),
+        h3: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF101828),
+        ),
+        strong: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF101828),
+        ),
+        listBullet: const TextStyle(fontSize: 14, color: Color(0xFF2563EB)),
+        code: const TextStyle(
+          fontSize: 13,
+          color: Color(0xFF4338CA),
+          backgroundColor: Color(0xFFEFF4FF),
+        ),
+        blockquote: const TextStyle(
+          fontSize: 14,
+          height: 1.6,
+          color: Color(0xFF475569),
+        ),
+        blockquoteDecoration: const BoxDecoration(
+          color: Color(0xFFF5F7FB),
+          border: Border(left: BorderSide(color: Color(0xFF2563EB), width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.all(12),
+        h1Padding: const EdgeInsets.only(bottom: 8, top: 8),
+        h2Padding: const EdgeInsets.only(bottom: 6, top: 8),
+        h3Padding: const EdgeInsets.only(bottom: 4, top: 6),
+        pPadding: const EdgeInsets.only(bottom: 8),
       ),
     );
   }

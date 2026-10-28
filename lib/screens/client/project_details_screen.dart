@@ -1,15 +1,30 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
+import 'project_meeting_screen.dart';
 import 'client_applications_screen.dart';
+import 'developer_review_widget.dart';
+import 'widgets/project_payment_card.dart';
 
-class ProjectDetailsScreen extends StatelessWidget {
+final GlobalKey _projectEstimateSectionKey = GlobalKey();
+
+class ProjectDetailsScreen extends StatefulWidget {
   final String projectId;
 
   const ProjectDetailsScreen({super.key, required this.projectId});
+
+  @override
+  State<ProjectDetailsScreen> createState() => _ProjectDetailsScreenState();
+}
+
+class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
+  bool _showCompleteEstimate = false;
 
   String _formatStatus(BuildContext context, String status) {
     final l10n = AppLocalizations.of(context);
@@ -89,10 +104,93 @@ class ProjectDetailsScreen extends StatelessWidget {
     }
   }
 
+  String _firstValidValue(List<dynamic> values) {
+    for (final value in values) {
+      if (value == null) continue;
+      if (value is num && value <= 0) continue;
+
+      final text = value.toString().trim();
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  double _parseProjectAmount(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(
+            value.replaceAll(',', '').replaceAll('₹', '').trim(),
+          ) ??
+          0.0;
+    }
+    return 0.0;
+  }
+
+  Map<String, dynamic> _mapValue(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+
+  List<String> _stringList(dynamic value) {
+    if (value is! List) return <String>[];
+    return value
+        .where((item) => item != null)
+        .map((item) => item.toString())
+        .where((item) => item.trim().isNotEmpty)
+        .toList();
+  }
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 5,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  );
+                },
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openTeam(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ClientTeamScreen(projectId: projectId)),
+      MaterialPageRoute(
+        builder: (_) => ClientTeamScreen(projectId: widget.projectId),
+      ),
     );
   }
 
@@ -100,10 +198,704 @@ class ProjectDetailsScreen extends StatelessWidget {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            ClientProjectChat(projectId: projectId, projectTitle: projectTitle),
+        builder: (_) => ClientProjectChat(
+          projectId: widget.projectId,
+          projectTitle: projectTitle,
+        ),
       ),
     );
+  }
+
+  void _openMeetings(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectMeetingScreen(
+          projectId: widget.projectId,
+          projectTitle: projectTitle,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadPaymentReceipt({
+    required BuildContext context,
+    required String projectTitle,
+    required double projectTotal,
+    required String currency,
+  }) async {
+    final projectId = widget.projectId;
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating payment statement...')),
+      );
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('payments')
+          .where('projectId', isEqualTo: projectId)
+          .get();
+
+      final transactions = snapshot.docs.map((doc) {
+        final data = doc.data();
+        final status = (data['status'] ?? data['paymentStatus'] ?? 'pending')
+            .toString()
+            .toLowerCase()
+            .trim();
+
+        final rawAmount =
+            data['amount'] ??
+            data['paidAmount'] ??
+            data['paid_amount'] ??
+            (data['amountInPaise'] is num
+                ? (data['amountInPaise'] as num) / 100
+                : 0);
+        final amount = rawAmount is num
+            ? rawAmount.toDouble()
+            : double.tryParse(
+                    rawAmount.toString().replaceAll(',', '').trim(),
+                  ) ??
+                  0.0;
+
+        final dateValue =
+            data['paidAt'] ?? data['createdAt'] ?? data['updatedAt'];
+        final DateTime? date = switch (dateValue) {
+          Timestamp value => value.toDate(),
+          DateTime value => value,
+          String value => DateTime.tryParse(value),
+          _ => null,
+        };
+
+        return <String, Object?>{
+          'id':
+              (data['razorpayPaymentId'] ??
+                      data['paymentId'] ??
+                      data['transactionId'] ??
+                      doc.id)
+                  .toString(),
+          'amount': amount,
+          'status': status,
+          'date': date,
+        };
+      }).toList();
+
+      transactions.sort((a, b) {
+        final dateA = a['date'] as DateTime?;
+        final dateB = b['date'] as DateTime?;
+
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+
+        return dateB.compareTo(dateA);
+      });
+
+      bool isSuccessful(String status) {
+        return [
+          'paid',
+          'success',
+          'successful',
+          'completed',
+          'captured',
+          'verified',
+        ].contains(status);
+      }
+
+      final successfulTransactions = transactions.where((transaction) {
+        return isSuccessful(transaction['status'] as String);
+      }).toList();
+
+      final totalPaid = successfulTransactions.fold<double>(
+        0,
+        (sum, transaction) => sum + (transaction['amount'] as double),
+      );
+      final remainingAmount = (projectTotal - totalPaid)
+          .clamp(0.0, double.infinity)
+          .toDouble();
+      final paymentPercentage = projectTotal > 0
+          ? (totalPaid / projectTotal).clamp(0.0, 1.0).toDouble()
+          : 0.0;
+
+      final pdf = pw.Document();
+
+      final blue = PdfColor.fromHex('#2563EB');
+      final dark = PdfColor.fromHex('#0F172A');
+      final grey = PdfColor.fromHex('#64748B');
+      final lightBlue = PdfColor.fromHex('#EFF6FF');
+      final green = PdfColor.fromHex('#15803D');
+
+      String money(double amount) => '$currency ${amount.toStringAsFixed(2)}';
+
+      String formatDate(DateTime? date) {
+        if (date == null) return 'N/A';
+
+        final day = date.day.toString().padLeft(2, '0');
+        final month = date.month.toString().padLeft(2, '0');
+        return '$day/$month/${date.year}';
+      }
+
+      pw.Widget summaryCard(
+        String label,
+        String value,
+        PdfColor background,
+        PdfColor valueColor,
+      ) {
+        return pw.Container(
+          padding: const pw.EdgeInsets.all(14),
+          decoration: pw.BoxDecoration(
+            color: background,
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(label, style: pw.TextStyle(color: grey, fontSize: 10)),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                value,
+                style: pw.TextStyle(
+                  color: valueColor,
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          footer: (pageContext) => pw.Container(
+            margin: const pw.EdgeInsets.only(top: 16),
+            padding: const pw.EdgeInsets.only(top: 10),
+            decoration: pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'SkillBridge | Payment Statement',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+                pw.Text(
+                  'Page ${pageContext.pageNumber} of ${pageContext.pagesCount}',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+              ],
+            ),
+          ),
+          build: (pageContext) => [
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(24),
+              decoration: pw.BoxDecoration(
+                color: dark,
+                borderRadius: pw.BorderRadius.circular(16),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'SkillBridge',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 25,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'PAYMENT STATEMENT',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 13,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Text(
+                    'Complete payment overview and transaction history',
+                    style: pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'PROJECT DETAILS',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(12),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    projectTitle,
+                    style: pw.TextStyle(
+                      color: dark,
+                      fontSize: 17,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Project ID: $projectId',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    'Generated on: ${formatDate(DateTime.now())}',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'PAYMENT SUMMARY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Project Total',
+                    money(projectTotal),
+                    lightBlue,
+                    blue,
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Total Paid',
+                    money(totalPaid),
+                    PdfColor.fromHex('#DCFCE7'),
+                    green,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Remaining',
+                    money(remainingAmount),
+                    PdfColor.fromHex('#FEF3C7'),
+                    PdfColor.fromHex('#B45309'),
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Successful Payments',
+                    '${successfulTransactions.length}',
+                    PdfColor.fromHex('#F1F5F9'),
+                    dark,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pw.Text(
+              'PAYMENT PROGRESS',
+              style: pw.TextStyle(
+                color: dark,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.ClipRRect(
+              horizontalRadius: 6,
+              verticalRadius: 6,
+              child: pw.Container(
+                height: 12,
+                width: double.infinity,
+                color: PdfColors.grey200,
+                child: pw.Align(
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Container(
+                    width: 531 * paymentPercentage,
+                    height: 12,
+                    color: green,
+                  ),
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${(paymentPercentage * 100).toStringAsFixed(1)}% paid',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 10,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'TRANSACTION HISTORY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            if (transactions.isEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(10),
+                ),
+                child: pw.Text(
+                  'No transactions have been recorded for this project.',
+                  style: pw.TextStyle(color: grey, fontSize: 10),
+                ),
+              )
+            else
+              pw.TableHelper.fromTextArray(
+                headers: ['Date', 'Transaction ID', 'Status', 'Amount'],
+                data: transactions.map((transaction) {
+                  final status = transaction['status'] as String;
+                  final transactionId = transaction['id'] as String;
+
+                  return [
+                    formatDate(transaction['date'] as DateTime?),
+                    transactionId.length > 18
+                        ? '${transactionId.substring(0, 18)}...'
+                        : transactionId,
+                    status.toUpperCase(),
+                    money(transaction['amount'] as double),
+                  ];
+                }).toList(),
+                headerDecoration: pw.BoxDecoration(
+                  color: dark,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                headerStyle: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: pw.TextStyle(color: dark, fontSize: 8),
+                cellPadding: const pw.EdgeInsets.all(8),
+                border: pw.TableBorder(
+                  horizontalInside: pw.BorderSide(
+                    color: PdfColors.grey300,
+                    width: 0.5,
+                  ),
+                ),
+                oddRowDecoration: pw.BoxDecoration(color: PdfColors.grey100),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.1),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(1.3),
+                  3: const pw.FlexColumnWidth(1.5),
+                },
+              ),
+            pw.SizedBox(height: 24),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(14),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(10),
+              ),
+              child: pw.Text(
+                'Thank you for using SkillBridge. '
+                'This statement summarizes the project payment records '
+                'available in the system at the time of generation.',
+                style: pw.TextStyle(color: dark, fontSize: 9),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: 'SkillBridge_Payment_Statement_$projectId.pdf',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to generate payment statement: $e')),
+      );
+    }
+  }
+
+  void _openEstimate(
+    BuildContext context,
+    String title,
+    Map<String, dynamic> data,
+  ) {
+    final hasSavedPlan =
+        data['plan'] is Map && (data['plan'] as Map).isNotEmpty;
+    final hasSavedEstimate =
+        data['estimate'] is Map && (data['estimate'] as Map).isNotEmpty;
+
+    if (!hasSavedPlan && !hasSavedEstimate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No saved estimate is available for this project yet.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _showCompleteEstimate = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+      final targetContext = _projectEstimateSectionKey.currentContext;
+      if (targetContext != null) {
+        Scrollable.ensureVisible(
+          targetContext,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeInOut,
+          alignment: 0.08,
+        );
+      }
+    });
+  }
+
+  bool _developerHasConfirmed(Map<String, dynamic> data) {
+    // Only explicit assignment/acceptance fields count here.
+    // A workflow status or a teamId alone is not proof of confirmation.
+    const confirmationFields = [
+      'assignedDeveloperId',
+      'selectedDeveloperId',
+      'hiredDeveloperId',
+      'acceptedDeveloperId',
+      'developerId',
+      'confirmedDeveloperId',
+      'developerConfirmed',
+      'developerAccepted',
+      'isDeveloperConfirmed',
+      'isDeveloperAccepted',
+    ];
+
+    for (final field in confirmationFields) {
+      final value = data[field];
+      if (value == true) return true;
+      if (value is String && value.trim().isNotEmpty) return true;
+      if (value is List && value.isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  Future<bool> _hasConfirmedApplication(
+    FirebaseFirestore firestore,
+    String projectId,
+  ) async {
+    const collections = ['applications', 'projectApplications'];
+    const confirmedStatuses = {
+      'accepted',
+      'confirmed',
+      'hired',
+      'approved',
+      'developer_confirmed',
+      'developer_accepted',
+    };
+
+    for (final collectionName in collections) {
+      final query = await firestore
+          .collection(collectionName)
+          .where('projectId', isEqualTo: projectId)
+          .get();
+
+      for (final application in query.docs) {
+        final applicationData = application.data();
+        final status = (applicationData['status'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replaceAll(' ', '_');
+
+        if (confirmedStatuses.contains(status) ||
+            applicationData['accepted'] == true ||
+            applicationData['confirmed'] == true ||
+            applicationData['hired'] == true ||
+            applicationData['isAccepted'] == true ||
+            applicationData['isConfirmed'] == true) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _deleteProject(
+    BuildContext context,
+    Map<String, dynamic> data,
+    String projectTitle,
+  ) async {
+    if (_developerHasConfirmed(data)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A developer has already been confirmed for this project. '
+            'For safety, this project cannot be deleted.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(
+          Icons.delete_forever_outlined,
+          color: Color(0xFFDC2626),
+          size: 34,
+        ),
+        title: const Text('Delete project?'),
+        content: Text(
+          '“$projectTitle” and its project-linked database records will be '
+          'deleted. This action cannot be undone. You can delete only before '
+          'a developer is confirmed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete project'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final projectRef = firestore.collection('projects').doc(widget.projectId);
+
+      // Re-read the project immediately before deletion so a developer
+      // confirmation that happened while the dialog was open blocks deletion.
+      final latestSnapshot = await projectRef.get();
+      if (!context.mounted) return;
+
+      if (!latestSnapshot.exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This project has already been deleted.'),
+          ),
+        );
+        Navigator.of(context).maybePop();
+        return;
+      }
+
+      final latestData = latestSnapshot.data() ?? <String, dynamic>{};
+      final hasConfirmedApplication = await _hasConfirmedApplication(
+        firestore,
+        widget.projectId,
+      );
+      if (!context.mounted) return;
+
+      if (_developerHasConfirmed(latestData) || hasConfirmedApplication) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'A developer has now been confirmed. This project cannot be deleted.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      // Delete project-linked top-level records where projectId is stored.
+      // Each batch is kept below Firestore's 500-write limit.
+      const relatedCollections = [
+        'applications',
+        'projectApplications',
+        'projectMeetings',
+        'meetings',
+        'notifications',
+      ];
+
+      for (final collectionName in relatedCollections) {
+        final query = await firestore
+            .collection(collectionName)
+            .where('projectId', isEqualTo: widget.projectId)
+            .get();
+
+        for (var start = 0; start < query.docs.length; start += 450) {
+          final batch = firestore.batch();
+          final end = (start + 450 < query.docs.length)
+              ? start + 450
+              : query.docs.length;
+          for (final doc in query.docs.sublist(start, end)) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+        }
+      }
+
+      // Delete the parent project document last, after its linked records.
+      await projectRef.delete();
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Project and linked records deleted successfully.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.of(context).maybePop();
+    } on FirebaseException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not delete project: ${error.message ?? error.code}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete project: $error')),
+      );
+    }
   }
 
   void _openApplications(BuildContext context, String projectTitle) {
@@ -111,7 +903,7 @@ class ProjectDetailsScreen extends StatelessWidget {
       context,
       MaterialPageRoute(
         builder: (_) => ClientApplicationsScreen(
-          projectId: projectId,
+          projectId: widget.projectId,
           projectTitle: projectTitle,
         ),
       ),
@@ -236,25 +1028,287 @@ class ProjectDetailsScreen extends StatelessWidget {
     return 'Chat with your team';
   }
 
+  String _cleanDescription(String value) {
+    var cleaned = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+
+    // Remove Markdown emphasis markers while keeping the actual description text.
+    cleaned = cleaned.replaceAll('**', '').replaceAll('__', '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)'),
+      (match) => match.group(1) ?? '',
+    );
+
+    // Convert Markdown star bullets to regular bullets instead of showing asterisks.
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'(^|\n)\s*\*\s+'),
+      (match) => '${match.group(1)}• ',
+    );
+
+    // Remove Markdown heading markers and normalize excessive blank lines.
+    cleaned = cleaned.replaceAll(
+      RegExp(r'^\s{0,3}#{1,6}\s*', multiLine: true),
+      '',
+    );
+    cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+
+    return cleaned.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
+    Widget buildEstimateValue(String label, dynamic value, {int depth = 0}) {
+      if (value == null) {
+        return const SizedBox.shrink();
+      }
+
+      if (value is String && value.trim().isEmpty) {
+        return const SizedBox.shrink();
+      }
+
+      if (value is Map) {
+        final entries = value.entries.where((entry) {
+          return entry.value != null;
+        }).toList();
+
+        if (entries.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Padding(
+          padding: EdgeInsets.only(left: depth > 0 ? 12 : 0, bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (label.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    _formatPlanLabel(label),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF344054),
+                    ),
+                  ),
+                ),
+              ...entries.map(
+                (entry) => buildEstimateValue(
+                  entry.key.toString(),
+                  entry.value,
+                  depth: depth + 1,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      if (value is List) {
+        final items = value.where((item) => item != null).toList();
+
+        if (items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Padding(
+          padding: EdgeInsets.only(left: depth > 0 ? 12 : 0, bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (label.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    _formatPlanLabel(label),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF344054),
+                    ),
+                  ),
+                ),
+              ...items.asMap().entries.map((entry) {
+                final item = entry.value;
+
+                if (item is Map || item is List) {
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                    ),
+                    child: buildEstimateValue(
+                      item is Map ? '' : 'Item ${entry.key + 1}',
+                      item,
+                      depth: depth + 1,
+                    ),
+                  );
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 17,
+                        color: Color(0xFF4F46E5),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item.toString(),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: Color(0xFF475467),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      }
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _formatPlanLabel(label),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF667085),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value.toString(),
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.5,
+                color: Color(0xFF344054),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
+
       appBar: AppBar(
+        toolbarHeight: 82,
         elevation: 0,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 20,
-        iconTheme: const IconThemeData(color: Color(0xFF111827)),
-        title: Text(
-          l10n.projectDetails,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-            letterSpacing: -0.3,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF5F7FB),
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE5EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x070F172A),
+                  blurRadius: 18,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Back button
+                Material(
+                  color: const Color(0xFFEFF4FF),
+                  borderRadius: BorderRadius.circular(13),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(13),
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Project icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.folder_copy_rounded,
+                    color: Color(0xFF2563EB),
+                    size: 21,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Title and subtitle
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppLocalizations.of(context).projectDetails,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF101828),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'PROJECT OVERVIEW',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -268,7 +1322,7 @@ class ProjectDetailsScreen extends StatelessWidget {
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
                 .collection('projects')
-                .doc(projectId)
+                .doc(widget.projectId)
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -318,9 +1372,16 @@ class ProjectDetailsScreen extends StatelessWidget {
 
               final title = data['title']?.toString() ?? l10n.project;
 
-              final category = data['category']?.toString() ?? '';
+              // Support both singular category and legacy categories lists.
+              final categories = _stringList(data['categories']);
+              final category = _firstValidValue([
+                data['category'],
+                if (categories.isNotEmpty) categories.join(', '),
+              ]);
 
-              final description = data['description']?.toString() ?? '';
+              final description = _cleanDescription(
+                data['description']?.toString() ?? '',
+              );
 
               final requirements = data['requirements']?.toString() ?? '';
 
@@ -328,11 +1389,13 @@ class ProjectDetailsScreen extends StatelessWidget {
                   ? Map<String, dynamic>.from(data['plan'] as Map)
                   : <String, dynamic>{};
 
-              final estimate = data['estimate'] is Map
-                  ? Map<String, dynamic>.from(data['estimate'] as Map)
-                  : (plan['estimate'] is Map
-                        ? Map<String, dynamic>.from(plan['estimate'] as Map)
-                        : <String, dynamic>{});
+              // Prefer the top-level estimate, but fall back to the saved
+              // plan estimate if the top-level map is absent or empty.
+              final directEstimate = _mapValue(data['estimate']);
+              final planEstimate = _mapValue(plan['estimate']);
+              final estimate = directEstimate.isNotEmpty
+                  ? directEstimate
+                  : planEstimate;
 
               String firstValidValue(List<dynamic> values) {
                 for (final value in values) {
@@ -350,6 +1413,8 @@ class ProjectDetailsScreen extends StatelessWidget {
 
               final budget = firstValidValue([
                 data['budget'],
+                data['amount'],
+                data['projectAmount'],
                 estimate['totalCost'],
                 estimate['totalBudget'],
                 estimate['budget'],
@@ -357,25 +1422,69 @@ class ProjectDetailsScreen extends StatelessWidget {
                 estimate['amount'],
               ]);
 
+              final projectTotal = _parseProjectAmount(
+                _firstValidValue([
+                  data['budget'],
+                  data['amount'],
+                  data['projectAmount'],
+                  estimate['totalCost'],
+                  estimate['totalBudget'],
+                  estimate['budget'],
+                  estimate['estimatedCost'],
+                  estimate['amount'],
+                ]),
+              );
+
               final timeline = firstValidValue([
                 data['timeline'],
+                data['estimatedDuration'],
                 estimate['timeline'],
                 estimate['duration'],
                 estimate['estimatedDuration'],
                 plan['timeline'],
                 plan['duration'],
               ]);
+              final budgetType = data['budgetType']?.toString() ?? '';
+              final currency = data['currency']?.toString() ?? 'INR';
+              final deadline = data['deadline'];
+              final deadlineText = deadline is Timestamp
+                  ? '${deadline.toDate().day.toString().padLeft(2, '0')}/'
+                        '${deadline.toDate().month.toString().padLeft(2, '0')}/'
+                        '${deadline.toDate().year}'
+                  : '';
+              final experienceLevel = data['experienceLevel']?.toString() ?? '';
+              final workMode = data['workMode']?.toString() ?? '';
+              final priority = data['priority']?.toString() ?? '';
+              final additionalInfo = data['additionalInfo']?.toString() ?? '';
               final status = data['status']?.toString() ?? 'requirement';
+              final milestones = data['milestones'] is Map
+                  ? Map<String, dynamic>.from(data['milestones'] as Map)
+                  : <String, dynamic>{};
+              const milestoneKeys = [
+                'requirements',
+                'architecture',
+                'design',
+                'development',
+                'testing',
+                'deployment',
+              ];
+              final completedMilestones = milestoneKeys
+                  .where((key) => milestones[key] == true)
+                  .length;
+              final calculatedProgress =
+                  (completedMilestones / milestoneKeys.length * 100).round();
+              final isCompleted =
+                  calculatedProgress == 100 ||
+                  status.trim().toLowerCase() == 'completed';
+              final acceptedScope = _stringList(data['acceptedScope']);
+              final acceptedCost = data['acceptedCost'] == true;
+              final acceptedTimeline = data['acceptedTimeline'] == true;
+              final acceptedTerms = data['acceptedTerms'] == true;
 
               final statusColor = _statusColor(status);
-
-              final acceptedScope = data['acceptedScope'] is List
-                  ? List<String>.from(
-                      (data['acceptedScope'] as List).map(
-                        (item) => item.toString(),
-                      ),
-                    )
-                  : <String>[];
+              final designImages = _stringList(data['designImageUrls'])
+                  .where((url) => url.startsWith('https://'))
+                  .toList();
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -405,6 +1514,97 @@ class ProjectDetailsScreen extends StatelessWidget {
                               statusIcon: _statusIcon(status),
                               statusText: _formatStatus(context, status),
                             ),
+                            if (isCompleted) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Project Completed',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (designImages.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              _DetailsCard(
+                                title: 'Project Design Images',
+                                icon: Icons.image_outlined,
+                                child: SizedBox(
+                                  height: 190,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: designImages.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 12),
+                                    itemBuilder: (context, index) {
+                                      final imageUrl = designImages[index];
+
+                                      return GestureDetector(
+                                        onTap: () =>
+                                            _showFullImage(context, imageUrl),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          child: Image.network(
+                                            imageUrl,
+                                            width: 250,
+                                            height: 190,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder:
+                                                (context, child, progress) {
+                                                  if (progress == null) {
+                                                    return child;
+                                                  }
+                                                  return const SizedBox(
+                                                    width: 250,
+                                                    child: Center(
+                                                      child:
+                                                          CircularProgressIndicator(),
+                                                    ),
+                                                  );
+                                                },
+                                            errorBuilder: (_, _, _) =>
+                                                Container(
+                                                  width: 250,
+                                                  color: const Color(
+                                                    0xFFF1F5F9,
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.broken_image_outlined,
+                                                    size: 40,
+                                                  ),
+                                                ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
 
                             const SizedBox(height: 16),
 
@@ -430,21 +1630,52 @@ class ProjectDetailsScreen extends StatelessWidget {
                                     subtitle: _messagesSubtitle(context),
                                     onTap: () => _openMessages(context, title),
                                   ),
+                                  _ActionButton(
+                                    icon: Icons.video_call_rounded,
+                                    title: 'Project Meetings',
+                                    subtitle: 'Schedule or view team meetings',
+                                    onTap: () => _openMeetings(context, title),
+                                  ),
+                                  _ActionButton(
+                                    icon: Icons.calculate_outlined,
+                                    title: 'Project Estimate',
+                                    subtitle: 'View the saved project plan and estimate',
+                                    onTap: () =>
+                                        _openEstimate(context, title, data),
+                                  ),
+                                  _ActionButton(
+                                    icon: Icons.delete_outline_rounded,
+                                    title: 'Delete Project',
+                                    subtitle: _developerHasConfirmed(data)
+                                        ? 'Unavailable after developer confirmation'
+                                        : 'Delete project before a developer is confirmed',
+                                    onTap: () =>
+                                        _deleteProject(context, data, title),
+                                  ),
                                 ];
 
                                 if (actionConstraints.maxWidth > 650) {
-                                  return Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                  return Column(
                                     children: [
-                                      for (
-                                        int i = 0;
-                                        i < buttons.length;
-                                        i++
-                                      ) ...[
-                                        if (i > 0) const SizedBox(width: 14),
-                                        Expanded(child: buttons[i]),
-                                      ],
+                                      Row(
+                                        children: [
+                                          Expanded(child: buttons[0]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[1]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        children: [
+                                          Expanded(child: buttons[2]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[3]),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      buttons[4],
+                                      const SizedBox(height: 14),
+                                      buttons[5],
                                     ],
                                   );
                                 }
@@ -464,19 +1695,94 @@ class ProjectDetailsScreen extends StatelessWidget {
                               },
                             ),
 
+                            // Keep the existing live payment summary and PDF statement.
+                            ProjectPaymentCard(
+                              projectId: widget.projectId,
+                              projectTotal: projectTotal,
+                              currency: currency,
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _downloadPaymentReceipt(
+                                  context: context,
+                                  projectTitle: title,
+                                  projectTotal: projectTotal,
+                                  currency: currency,
+                                ),
+                                icon: const Icon(Icons.picture_as_pdf_rounded),
+                                label: const Text('Share Payment Statement'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  elevation: 2,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                              ),
+                            ),
+
                             const SizedBox(height: 18),
 
                             _DetailsCard(
                               title: l10n.projectDescription,
                               icon: Icons.description_outlined,
-                              child: Text(
-                                description.isEmpty
-                                    ? _noDescriptionText(context)
-                                    : description,
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  height: 1.65,
-                                  color: Color(0xFF475467),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Color(0xFFF8FAFF),
+                                      Color(0xFFF5F7FF),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFE0E7FF),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFE0E7FF),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(
+                                        Icons.notes_rounded,
+                                        size: 18,
+                                        color: Color(0xFF4F46E5),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: SelectableText(
+                                        description.isEmpty
+                                            ? _noDescriptionText(context)
+                                            : description,
+                                        textAlign: TextAlign.start,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          height: 1.75,
+                                          letterSpacing: 0.1,
+                                          color: Color(0xFF344054),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -486,14 +1792,26 @@ class ProjectDetailsScreen extends StatelessWidget {
                             _DetailsCard(
                               title: l10n.requirements,
                               icon: Icons.checklist_rounded,
-                              child: Text(
-                                requirements.isEmpty
-                                    ? _noRequirementsText(context)
-                                    : requirements,
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  height: 1.65,
-                                  color: Color(0xFF475467),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFE5EAF2),
+                                  ),
+                                ),
+                                child: SelectableText(
+                                  requirements.isEmpty
+                                      ? _noRequirementsText(context)
+                                      : requirements,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    height: 1.75,
+                                    letterSpacing: 0.1,
+                                    color: Color(0xFF344054),
+                                  ),
                                 ),
                               ),
                             ),
@@ -507,7 +1825,7 @@ class ProjectDetailsScreen extends StatelessWidget {
                                   title: l10n.budget,
                                   value: budget.isEmpty
                                       ? _notSpecifiedText(context)
-                                      : budget,
+                                      : '$currency $budget',
                                 );
 
                                 final timelineCard = _InfoCard(
@@ -543,19 +1861,76 @@ class ProjectDetailsScreen extends StatelessWidget {
                             _DetailsCard(
                               title: l10n.progress,
                               icon: Icons.timeline_rounded,
-                              child: _ProgressTimeline(
-                                currentStatus: status,
-                                isStepActive: _isStepActive,
+                              child: _MilestoneProgressTracker(
+                                milestones: data['milestones'],
+                                updatedAt: data['updatedAt'],
                               ),
                             ),
-                            const SizedBox(height: 14),
-
-                            if (data['acceptedCost'] == true ||
-                                data['acceptedTimeline'] == true ||
-                                data['acceptedTerms'] == true ||
+                            const SizedBox(height: 20),
+                            DeveloperReviewWidget(
+                              projectId: widget.projectId,
+                              projectTitle: title,
+                              developerId:
+                                  (data['developerId'] ??
+                                          data['assignedDeveloperId'] ??
+                                          '')
+                                      .toString(),
+                              projectStatus: status,
+                              progress: calculatedProgress,
+                            ),
+                            if (budgetType.isNotEmpty ||
+                                deadlineText.isNotEmpty ||
+                                experienceLevel.isNotEmpty ||
+                                workMode.isNotEmpty ||
+                                priority.isNotEmpty ||
+                                additionalInfo.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              _DetailsCard(
+                                title: 'Additional Project Details',
+                                icon: Icons.tune_rounded,
+                                child: Column(
+                                  children: [
+                                    if (budgetType.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Payment Type',
+                                        value: budgetType,
+                                      ),
+                                    if (deadlineText.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Deadline',
+                                        value: deadlineText,
+                                      ),
+                                    if (experienceLevel.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Experience Level',
+                                        value: experienceLevel,
+                                      ),
+                                    if (workMode.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Work Arrangement',
+                                        value: workMode,
+                                      ),
+                                    if (priority.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Priority',
+                                        value: priority,
+                                      ),
+                                    if (additionalInfo.isNotEmpty)
+                                      _DetailRow(
+                                        label: 'Additional Instructions',
+                                        value: additionalInfo,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (acceptedCost ||
+                                acceptedTimeline ||
+                                acceptedTerms ||
+                                acceptedScope.isNotEmpty ||
                                 plan.isNotEmpty ||
-                                estimate.isNotEmpty ||
-                                acceptedScope.isNotEmpty)
+                                estimate.isNotEmpty) ...[
+                              const SizedBox(height: 14),
                               _DetailsCard(
                                 title: 'Final Accepted Plan & Estimate',
                                 icon: Icons.task_alt_rounded,
@@ -564,26 +1939,26 @@ class ProjectDetailsScreen extends StatelessWidget {
                                   children: [
                                     if ((plan['projectSummary']?.toString() ??
                                             '')
+                                        .trim()
                                         .isNotEmpty) ...[
                                       const Text(
                                         'Project Summary',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(plan['projectSummary'].toString()),
                                       const SizedBox(height: 14),
                                     ],
-
                                     if (acceptedScope.isNotEmpty) ...[
                                       const Text(
                                         'Accepted Scope',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 8),
                                       for (final item in acceptedScope)
                                         Padding(
                                           padding: const EdgeInsets.only(
@@ -605,12 +1980,11 @@ class ProjectDetailsScreen extends StatelessWidget {
                                         ),
                                       const SizedBox(height: 14),
                                     ],
-
                                     if (estimate.isNotEmpty) ...[
                                       const Text(
                                         'Estimate Details',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
@@ -645,7 +2019,6 @@ class ProjectDetailsScreen extends StatelessWidget {
                                             ),
                                           ),
                                     ],
-
                                     if (plan['deliveryPhases'] is List &&
                                         (plan['deliveryPhases'] as List)
                                             .isNotEmpty) ...[
@@ -653,7 +2026,7 @@ class ProjectDetailsScreen extends StatelessWidget {
                                       const Text(
                                         'Delivery Phases',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
@@ -679,9 +2052,89 @@ class ProjectDetailsScreen extends StatelessWidget {
                                             child: Text(phase.toString()),
                                           ),
                                     ],
+                                    if (acceptedCost ||
+                                        acceptedTimeline ||
+                                        acceptedTerms) ...[
+                                      const SizedBox(height: 12),
+                                      const Divider(),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Acceptance Status',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      if (acceptedCost)
+                                        const _AcceptedBadge(
+                                          label: 'Budget Accepted',
+                                        ),
+                                      if (acceptedTimeline)
+                                        const _AcceptedBadge(
+                                          label: 'Timeline Accepted',
+                                        ),
+                                      if (acceptedTerms)
+                                        const _AcceptedBadge(
+                                          label: 'Terms Accepted',
+                                        ),
+                                    ],
                                   ],
                                 ),
                               ),
+                            ],
+
+                            if (_showCompleteEstimate &&
+                                (plan.isNotEmpty || estimate.isNotEmpty)) ...[
+                              const SizedBox(height: 14),
+                              _DetailsCard(
+                                key: _projectEstimateSectionKey,
+                                title: 'Complete Project Estimate',
+                                icon: Icons.analytics_outlined,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (plan['projectSummary'] != null)
+                                      buildEstimateValue(
+                                        'Project Summary',
+                                        plan['projectSummary'],
+                                      ),
+
+                                    ...plan.entries
+                                        .where(
+                                          (entry) =>
+                                              entry.key != 'projectSummary' &&
+                                              entry.key != 'estimate',
+                                        )
+                                        .map(
+                                          (entry) => buildEstimateValue(
+                                            entry.key.toString(),
+                                            entry.value,
+                                          ),
+                                        ),
+
+                                    if (estimate.isNotEmpty) ...[
+                                      const Divider(height: 24),
+                                      const Text(
+                                        'Estimate Details',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF111827),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+
+                                      ...estimate.entries.map(
+                                        (entry) => buildEstimateValue(
+                                          entry.key.toString(),
+                                          entry.value,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -963,6 +2416,7 @@ class _DetailsCard extends StatelessWidget {
   final Widget child;
 
   const _DetailsCard({
+    super.key,
     required this.title,
     required this.icon,
     required this.child,
@@ -1216,6 +2670,432 @@ class _ProgressStep extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ADDITIONAL DETAIL ROW
+// ============================================================================
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF667085),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF344054),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// ACCEPTED BADGE
+// ============================================================================
+
+class _AcceptedBadge extends StatelessWidget {
+  final String label;
+
+  const _AcceptedBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF166534),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// LIVE MILESTONE PROGRESS — CLIENT READ-ONLY VIEW
+// ============================================================================
+
+class _MilestoneProgressTracker extends StatelessWidget {
+  final dynamic milestones;
+  final dynamic updatedAt;
+
+  const _MilestoneProgressTracker({
+    required this.milestones,
+    required this.updatedAt,
+  });
+
+  static const Color _primary = Color(0xFF4F46E5);
+  static const Color _green = Color(0xFF059669);
+  static const Color _muted = Color(0xFF667085);
+  static const Color _border = Color(0xFFE5E7EB);
+
+  static const List<Map<String, String>> _steps = [
+    {
+      'key': 'requirements',
+      'title': 'Requirements',
+      'description': 'Finalize project requirements and specifications.',
+    },
+    {
+      'key': 'architecture',
+      'title': 'Architecture',
+      'description': 'Define the system architecture and database design.',
+    },
+    {
+      'key': 'design',
+      'title': 'UI/UX Design',
+      'description': 'Complete the user interface and experience design.',
+    },
+    {
+      'key': 'development',
+      'title': 'Development',
+      'description': 'Implement the planned project functionality.',
+    },
+    {
+      'key': 'testing',
+      'title': 'Testing',
+      'description': 'Test functionality and resolve identified issues.',
+    },
+    {
+      'key': 'deployment',
+      'title': 'Deployment',
+      'description': 'Deploy the completed project.',
+    },
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = milestones is Map
+        ? Map<String, dynamic>.from(milestones as Map)
+        : <String, dynamic>{};
+    final completedCount = _steps
+        .where((step) => completed[step['key']] == true)
+        .length;
+    final total = _steps.length;
+    final progress = completedCount / total;
+    final currentIndex = _steps.indexWhere(
+      (step) => completed[step['key']] != true,
+    );
+    final allCompleted = currentIndex == -1;
+
+    DateTime? lastUpdated;
+    if (updatedAt is Timestamp) {
+      lastUpdated = updatedAt.toDate();
+    } else if (updatedAt is DateTime) {
+      lastUpdated = updatedAt;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Expanded(
+              child: Text(
+                'Overall Completion',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              '${(progress * 100).round()}%',
+              style: const TextStyle(
+                color: _primary,
+                fontSize: 23,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 10,
+            backgroundColor: const Color(0xFFE5E7EB),
+            color: allCompleted ? _green : _primary,
+          ),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            const Icon(Icons.check_circle_outline, size: 15, color: _muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$completedCount of $total milestones completed',
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+            ),
+            if (lastUpdated != null)
+              Text(
+                'Updated '
+                '${lastUpdated.day.toString().padLeft(2, '0')}/'
+                '${lastUpdated.month.toString().padLeft(2, '0')}/'
+                '${lastUpdated.year}',
+                style: const TextStyle(color: _muted, fontSize: 10),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        for (int i = 0; i < _steps.length; i++)
+          _buildStep(_steps[i], i, completed, currentIndex),
+        if (allCompleted)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.verified_rounded, color: _green, size: 25),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'All milestones completed! '
+                    'The project has reached 100% progress.',
+                    style: TextStyle(
+                      color: Color(0xFF065F46),
+                      fontWeight: FontWeight.w700,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _border),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Progress updates automatically when the '
+                    'developer completes a milestone.',
+                    style: TextStyle(color: _muted, fontSize: 12, height: 1.45),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStep(
+    Map<String, String> step,
+    int index,
+    Map<String, dynamic> completed,
+    int currentIndex,
+  ) {
+    final key = step['key']!;
+    final isCompleted = completed[key] == true;
+    final isCurrent = index == currentIndex;
+    final isUpcoming = !isCompleted && !isCurrent;
+    final color = isCompleted
+        ? _green
+        : isCurrent
+        ? _primary
+        : const Color(0xFF98A2B3);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 38,
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? const Color(0xFFD1FAE5)
+                        : isCurrent
+                        ? const Color(0xFFEEF2FF)
+                        : const Color(0xFFF3F4F6),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 1.4),
+                  ),
+                  child: Icon(
+                    isCompleted
+                        ? Icons.check_rounded
+                        : isCurrent
+                        ? Icons.play_arrow_rounded
+                        : Icons.lock_outline_rounded,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+                if (index != _steps.length - 1)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      color: isCompleted ? _green : const Color(0xFFE5E7EB),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 15),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isCurrent ? const Color(0xFFF5F3FF) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCurrent ? const Color(0xFFC7D2FE) : _border,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          step['title']!,
+                          style: TextStyle(
+                            color: isUpcoming
+                                ? _muted
+                                : const Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      _statusPill(
+                        isCompleted
+                            ? 'COMPLETED'
+                            : isCurrent
+                            ? 'CURRENT'
+                            : 'UPCOMING',
+                        color,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    step['description']!,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                  if (isCompleted) ...[
+                    const SizedBox(height: 8),
+                    const Row(
+                      children: [
+                        Icon(Icons.verified_rounded, color: _green, size: 15),
+                        SizedBox(width: 5),
+                        Text(
+                          'Completed successfully',
+                          style: TextStyle(
+                            color: _green,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
 
 class _ProjectLoader extends StatelessWidget {
   const _ProjectLoader();

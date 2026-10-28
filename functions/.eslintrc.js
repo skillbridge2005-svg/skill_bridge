@@ -40,6 +40,9 @@ module.exports = {
 
     // Avoid legacy JSDoc validation errors.
     "valid-jsdoc": "off",
+
+    // Avoid Windows CRLF line-ending lint errors.
+    "linebreak-style": "off",
   },
 
   overrides: [

@@ -10,6 +10,7 @@ class NotificationModel {
     required this.isRead,
     this.projectId,
     this.applicationId,
+    this.meetingId,
     this.createdAt,
   });
 
@@ -19,8 +20,10 @@ class NotificationModel {
   final String body;
   final String type;
   final bool isRead;
+
   final String? projectId;
   final String? applicationId;
+  final String? meetingId;
   final DateTime? createdAt;
 
   factory NotificationModel.fromFirestore(
@@ -36,16 +39,13 @@ class NotificationModel {
       type: _stringValue(data['type']),
       isRead: _boolValue(data['isRead']),
       projectId: _nullableStringValue(data['projectId']),
-      applicationId:
-          _nullableStringValue(data['applicationId']),
+      applicationId: _nullableStringValue(data['applicationId']),
+      meetingId: _nullableStringValue(data['meetingId']),
       createdAt: _dateTimeValue(data['createdAt']),
     );
   }
 
-  factory NotificationModel.fromMap(
-    String id,
-    Map<String, dynamic> data,
-  ) {
+  factory NotificationModel.fromMap(String id, Map<String, dynamic> data) {
     return NotificationModel(
       id: id,
       developerId: _stringValue(data['developerId']),
@@ -54,8 +54,8 @@ class NotificationModel {
       type: _stringValue(data['type']),
       isRead: _boolValue(data['isRead']),
       projectId: _nullableStringValue(data['projectId']),
-      applicationId:
-          _nullableStringValue(data['applicationId']),
+      applicationId: _nullableStringValue(data['applicationId']),
+      meetingId: _nullableStringValue(data['meetingId']),
       createdAt: _dateTimeValue(data['createdAt']),
     );
   }
@@ -69,6 +69,7 @@ class NotificationModel {
       'isRead': isRead,
       'projectId': projectId,
       'applicationId': applicationId,
+      'meetingId': meetingId,
       'createdAt': createdAt,
     };
   }
@@ -81,6 +82,7 @@ class NotificationModel {
     bool? isRead,
     String? projectId,
     String? applicationId,
+    String? meetingId,
     DateTime? createdAt,
   }) {
     return NotificationModel(
@@ -91,8 +93,8 @@ class NotificationModel {
       type: type ?? this.type,
       isRead: isRead ?? this.isRead,
       projectId: projectId ?? this.projectId,
-      applicationId:
-          applicationId ?? this.applicationId,
+      applicationId: applicationId ?? this.applicationId,
+      meetingId: meetingId ?? this.meetingId,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -100,35 +102,23 @@ class NotificationModel {
   bool get isUnread => !isRead;
 
   static String _stringValue(dynamic value) {
-    if (value == null) {
-      return '';
-    }
-
+    if (value == null) return '';
     return value.toString().trim();
   }
 
   static String? _nullableStringValue(dynamic value) {
-    if (value == null) {
-      return null;
-    }
+    if (value == null) return null;
 
     final result = value.toString().trim();
 
-    if (result.isEmpty) {
-      return null;
-    }
+    if (result.isEmpty) return null;
 
     return result;
   }
 
   static bool _boolValue(dynamic value) {
-    if (value is bool) {
-      return value;
-    }
-
-    if (value is num) {
-      return value != 0;
-    }
+    if (value is bool) return value;
+    if (value is num) return value != 0;
 
     if (value is String) {
       return value.toLowerCase() == 'true';
@@ -138,13 +128,8 @@ class NotificationModel {
   }
 
   static DateTime? _dateTimeValue(dynamic value) {
-    if (value is Timestamp) {
-      return value.toDate();
-    }
-
-    if (value is DateTime) {
-      return value;
-    }
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
 
     if (value is String) {
       return DateTime.tryParse(value);

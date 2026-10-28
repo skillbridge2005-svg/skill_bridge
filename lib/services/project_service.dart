@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../models/project_model.dart';
 
 /// Service responsible for all project-related Firestore operations.
@@ -13,11 +14,9 @@ import '../models/project_model.dart';
 /// This keeps Firestore logic outside the UI so the Discover Projects screen
 /// remains focused on presentation and interaction.
 class ProjectService {
-  ProjectService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  ProjectService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -37,45 +36,32 @@ class ProjectService {
   /// Streams all currently open projects.
   ///
   /// Ordered by newest first.
-Stream<List<ProjectModel>> watchOpenProjects() {
-  return _projectsCollection
-      .where(
-        'status',
-        whereIn: ['open', 'requirement'],
-      )
-      .snapshots()
-      .map(_documentsToProjects);
-}
+  Stream<List<ProjectModel>> watchOpenProjects() {
+    return _projectsCollection
+        .where('status', whereIn: ['open', 'requirement'])
+        .snapshots()
+        .map(_documentsToProjects);
+  }
 
   /// Streams every project.
   ///
   /// Mainly useful for admin/client-side features.
   Stream<List<ProjectModel>> watchAllProjects() {
     return _projectsCollection
-        .orderBy(
-          'createdAt',
-          descending: true,
-        )
+        .orderBy('createdAt', descending: true)
         .snapshots()
         .map(_documentsToProjects);
   }
 
   /// Streams one project.
-  Stream<ProjectModel?> watchProject(
-    String projectId,
-  ) {
-    return _projectsCollection
-        .doc(projectId)
-        .snapshots()
-        .map(
-          (snapshot) {
-            if (!snapshot.exists) {
-              return null;
-            }
+  Stream<ProjectModel?> watchProject(String projectId) {
+    return _projectsCollection.doc(projectId).snapshots().map((snapshot) {
+      if (!snapshot.exists) {
+        return null;
+      }
 
-            return ProjectModel.fromFirestore(snapshot);
-          },
-        );
+      return ProjectModel.fromFirestore(snapshot);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -83,23 +69,17 @@ Stream<List<ProjectModel>> watchOpenProjects() {
   // ---------------------------------------------------------------------------
 
   /// Fetches all open projects once.
-Future<List<ProjectModel>> getOpenProjects() async {
-  final snapshot = await _projectsCollection
-      .where(
-        'status',
-        whereIn: ['open', 'requirement'],
-      )
-      .get();
-
-  return _documentsToProjects(snapshot);
-}
-  /// Fetches one project.
-  Future<ProjectModel?> getProject(
-    String projectId,
-  ) async {
+  Future<List<ProjectModel>> getOpenProjects() async {
     final snapshot = await _projectsCollection
-        .doc(projectId)
+        .where('status', whereIn: ['open', 'requirement'])
         .get();
+
+    return _documentsToProjects(snapshot);
+  }
+
+  /// Fetches one project.
+  Future<ProjectModel?> getProject(String projectId) async {
+    final snapshot = await _projectsCollection.doc(projectId).get();
 
     if (!snapshot.exists) {
       return null;
@@ -109,18 +89,10 @@ Future<List<ProjectModel>> getOpenProjects() async {
   }
 
   /// Fetches projects created by a particular client.
-  Future<List<ProjectModel>> getClientProjects(
-    String clientId,
-  ) async {
+  Future<List<ProjectModel>> getClientProjects(String clientId) async {
     final snapshot = await _projectsCollection
-        .where(
-          'clientId',
-          isEqualTo: clientId,
-        )
-        .orderBy(
-          'createdAt',
-          descending: true,
-        )
+        .where('clientId', isEqualTo: clientId)
+        .orderBy('createdAt', descending: true)
         .get();
 
     return _documentsToProjects(snapshot);
@@ -145,9 +117,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
   /// - project type
   /// - work mode
   /// - duration
-  Future<List<ProjectModel>> searchProjects(
-    String query,
-  ) async {
+  Future<List<ProjectModel>> searchProjects(String query) async {
     final projects = await getOpenProjects();
 
     final normalizedQuery = query.trim().toLowerCase();
@@ -157,11 +127,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
     }
 
     return projects
-        .where(
-          (project) => project.matchesSearch(
-            normalizedQuery,
-          ),
-        )
+        .where((project) => project.matchesSearch(normalizedQuery))
         .toList();
   }
 
@@ -188,16 +154,11 @@ Future<List<ProjectModel>> getOpenProjects() async {
     double? maximumBudget,
   }) {
     final normalizedQuery = query.trim().toLowerCase();
-    final normalizedTechnology =
-        technology?.trim().toLowerCase();
-    final normalizedSkill =
-        skill?.trim().toLowerCase();
-    final normalizedWorkMode =
-        workMode?.trim().toLowerCase();
-    final normalizedProjectType =
-        projectType?.trim().toLowerCase();
-    final normalizedDuration =
-        duration?.trim().toLowerCase();
+    final normalizedTechnology = technology?.trim().toLowerCase();
+    final normalizedSkill = skill?.trim().toLowerCase();
+    final normalizedWorkMode = workMode?.trim().toLowerCase();
+    final normalizedProjectType = projectType?.trim().toLowerCase();
+    final normalizedDuration = duration?.trim().toLowerCase();
 
     return projects.where((project) {
       // Search
@@ -210,9 +171,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
       if (normalizedTechnology != null &&
           normalizedTechnology.isNotEmpty &&
           !project.technologies.any(
-            (item) =>
-                item.trim().toLowerCase() ==
-                normalizedTechnology,
+            (item) => item.trim().toLowerCase() == normalizedTechnology,
           )) {
         return false;
       }
@@ -221,9 +180,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
       if (normalizedSkill != null &&
           normalizedSkill.isNotEmpty &&
           !project.skills.any(
-            (item) =>
-                item.trim().toLowerCase() ==
-                normalizedSkill,
+            (item) => item.trim().toLowerCase() == normalizedSkill,
           )) {
         return false;
       }
@@ -231,30 +188,21 @@ Future<List<ProjectModel>> getOpenProjects() async {
       // Work mode
       if (normalizedWorkMode != null &&
           normalizedWorkMode.isNotEmpty &&
-          !_matchesFlexibleValue(
-            project.workMode,
-            normalizedWorkMode,
-          )) {
+          !_matchesFlexibleValue(project.workMode, normalizedWorkMode)) {
         return false;
       }
 
       // Project type
       if (normalizedProjectType != null &&
           normalizedProjectType.isNotEmpty &&
-          !_matchesFlexibleValue(
-            project.projectType,
-            normalizedProjectType,
-          )) {
+          !_matchesFlexibleValue(project.projectType, normalizedProjectType)) {
         return false;
       }
 
       // Duration
       if (normalizedDuration != null &&
           normalizedDuration.isNotEmpty &&
-          !_matchesFlexibleValue(
-            project.duration,
-            normalizedDuration,
-          )) {
+          !_matchesFlexibleValue(project.duration, normalizedDuration)) {
         return false;
       }
 
@@ -298,46 +246,30 @@ Future<List<ProjectModel>> getOpenProjects() async {
 
     switch (sortBy) {
       case 'oldest':
-        sorted.sort(
-          (a, b) => _dateCompare(
-            a.createdAt,
-            b.createdAt,
-          ),
-        );
+        sorted.sort((a, b) => _dateCompare(a.createdAt, b.createdAt));
         break;
 
       case 'budget_high':
         sorted.sort(
-          (a, b) => b.effectiveBudgetMax.compareTo(
-            a.effectiveBudgetMax,
-          ),
+          (a, b) => b.effectiveBudgetMax.compareTo(a.effectiveBudgetMax),
         );
         break;
 
       case 'budget_low':
         sorted.sort(
-          (a, b) => a.effectiveBudgetMin.compareTo(
-            b.effectiveBudgetMin,
-          ),
+          (a, b) => a.effectiveBudgetMin.compareTo(b.effectiveBudgetMin),
         );
         break;
 
       case 'applications_low':
         sorted.sort(
-          (a, b) => a.applicationsCount.compareTo(
-            b.applicationsCount,
-          ),
+          (a, b) => a.applicationsCount.compareTo(b.applicationsCount),
         );
         break;
 
       case 'newest':
       default:
-        sorted.sort(
-          (a, b) => _dateCompare(
-            b.createdAt,
-            a.createdAt,
-          ),
-        );
+        sorted.sort((a, b) => _dateCompare(b.createdAt, a.createdAt));
         break;
     }
 
@@ -386,18 +318,13 @@ Future<List<ProjectModel>> getOpenProjects() async {
 
       if (score >= minimumScore) {
         recommendations.add(
-          ProjectRecommendation(
-            project: project,
-            matchPercentage: score,
-          ),
+          ProjectRecommendation(project: project, matchPercentage: score),
         );
       }
     }
 
     recommendations.sort(
-      (a, b) => b.matchPercentage.compareTo(
-        a.matchPercentage,
-      ),
+      (a, b) => b.matchPercentage.compareTo(a.matchPercentage),
     );
 
     if (recommendations.length > limit) {
@@ -411,8 +338,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
   // SAVED PROJECTS
   // ---------------------------------------------------------------------------
 
-  CollectionReference<Map<String, dynamic>>
-      _savedProjectsCollection(
+  CollectionReference<Map<String, dynamic>> _savedProjectsCollection(
     String developerId,
   ) {
     return _firestore
@@ -422,62 +348,48 @@ Future<List<ProjectModel>> getOpenProjects() async {
   }
 
   /// Saves a project for the currently logged-in developer.
-  Future<void> saveProject(
-    String projectId,
-  ) async {
+  Future<void> saveProject(String projectId) async {
     final developerId = _requireDeveloper();
 
-    await _savedProjectsCollection(
-      developerId,
-    ).doc(projectId).set({
-      'projectId': projectId,
-      'savedAt': FieldValue.serverTimestamp(),
-    });
+    await _savedProjectsCollection(developerId)
+        .doc(projectId)
+        .set({'projectId': projectId, 'savedAt': FieldValue.serverTimestamp()});
   }
 
   /// Removes a project from saved projects.
-  Future<void> unsaveProject(
-    String projectId,
-  ) async {
+  Future<void> unsaveProject(String projectId) async {
     final developerId = _requireDeveloper();
 
-    await _savedProjectsCollection(
-      developerId,
-    ).doc(projectId).delete();
+    await _savedProjectsCollection(developerId).doc(projectId).delete();
   }
 
   /// Checks whether the current developer saved a project.
-  Future<bool> isProjectSaved(
-    String projectId,
-  ) async {
+  Future<bool> isProjectSaved(String projectId) async {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
       return false;
     }
 
-    final snapshot = await _savedProjectsCollection(
-      developerId,
-    ).doc(projectId).get();
+    final snapshot = await _savedProjectsCollection(developerId)
+        .doc(projectId)
+        .get();
 
     return snapshot.exists;
   }
 
   /// Streams whether a project is saved.
-  Stream<bool> watchProjectSaved(
-    String projectId,
-  ) {
+  Stream<bool> watchProjectSaved(String projectId) {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
       return Stream<bool>.value(false);
     }
 
-    return _savedProjectsCollection(
-      developerId,
-    ).doc(projectId).snapshots().map(
-          (snapshot) => snapshot.exists,
-        );
+    return _savedProjectsCollection(developerId)
+        .doc(projectId)
+        .snapshots()
+        .map((snapshot) => snapshot.exists);
   }
 
   /// Streams all saved project IDs.
@@ -488,28 +400,18 @@ Future<List<ProjectModel>> getOpenProjects() async {
       return Stream<Set<String>>.value(<String>{});
     }
 
-    return _savedProjectsCollection(
-      developerId,
-    ).snapshots().map(
-          (snapshot) => snapshot.docs
-              .map(
-                (doc) => doc.id,
-              )
-              .toSet(),
-        );
+    return _savedProjectsCollection(developerId)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) => doc.id).toSet());
   }
 
   /// Gets saved project IDs once.
   Future<Set<String>> getSavedProjectIds() async {
     final developerId = _requireDeveloper();
 
-    final snapshot = await _savedProjectsCollection(
-      developerId,
-    ).get();
+    final snapshot = await _savedProjectsCollection(developerId).get();
 
-    return snapshot.docs
-        .map((doc) => doc.id)
-        .toSet();
+    return snapshot.docs.map((doc) => doc.id).toSet();
   }
 
   /// Gets the complete saved ProjectModel objects.
@@ -523,30 +425,17 @@ Future<List<ProjectModel>> getOpenProjects() async {
     final projects = <ProjectModel>[];
 
     // Firestore whereIn has a limit, so process IDs in chunks.
-    final chunks = _chunkList(
-      ids.toList(),
-      30,
-    );
+    final chunks = _chunkList(ids.toList(), 30);
 
     for (final chunk in chunks) {
       final snapshot = await _projectsCollection
-          .where(
-            FieldPath.documentId,
-            whereIn: chunk,
-          )
+          .where(FieldPath.documentId, whereIn: chunk)
           .get();
 
-      projects.addAll(
-        _documentsToProjects(snapshot),
-      );
+      projects.addAll(_documentsToProjects(snapshot));
     }
 
-    projects.sort(
-      (a, b) => _dateCompare(
-        b.createdAt,
-        a.createdAt,
-      ),
-    );
+    projects.sort((a, b) => _dateCompare(b.createdAt, a.createdAt));
 
     return projects;
   }
@@ -574,9 +463,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
     required String workMode,
   }) async {
     if (title.trim().isEmpty) {
-      throw const ProjectServiceException(
-        'Project title cannot be empty.',
-      );
+      throw const ProjectServiceException('Project title cannot be empty.');
     }
 
     if (description.trim().isEmpty) {
@@ -586,9 +473,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
     }
 
     if (clientId.trim().isEmpty) {
-      throw const ProjectServiceException(
-        'Client ID cannot be empty.',
-      );
+      throw const ProjectServiceException('Client ID cannot be empty.');
     }
 
     if (skills.isEmpty) {
@@ -631,32 +516,22 @@ Future<List<ProjectModel>> getOpenProjects() async {
     Map<String, dynamic> updates,
   ) async {
     if (projectId.trim().isEmpty) {
-      throw const ProjectServiceException(
-        'Project ID cannot be empty.',
-      );
+      throw const ProjectServiceException('Project ID cannot be empty.');
     }
 
     if (updates.isEmpty) {
       return;
     }
 
-    final safeUpdates = Map<String, dynamic>.from(
-      updates,
-    );
+    final safeUpdates = Map<String, dynamic>.from(updates);
 
-    safeUpdates['updatedAt'] =
-        FieldValue.serverTimestamp();
+    safeUpdates['updatedAt'] = FieldValue.serverTimestamp();
 
-    await _projectsCollection
-        .doc(projectId)
-        .update(safeUpdates);
+    await _projectsCollection.doc(projectId).update(safeUpdates);
   }
 
   /// Changes the status of a project.
-  Future<void> updateProjectStatus(
-    String projectId,
-    String status,
-  ) async {
+  Future<void> updateProjectStatus(String projectId, String status) async {
     final normalizedStatus = status.trim().toLowerCase();
 
     const validStatuses = {
@@ -668,35 +543,22 @@ Future<List<ProjectModel>> getOpenProjects() async {
     };
 
     if (!validStatuses.contains(normalizedStatus)) {
-      throw ProjectServiceException(
-        'Invalid project status: $status',
-      );
+      throw ProjectServiceException('Invalid project status: $status');
     }
 
-    await updateProject(
-      projectId,
-      {
-        'status': normalizedStatus,
-      },
-    );
+    await updateProject(projectId, {'status': normalizedStatus});
   }
 
   /// Deletes a project.
   ///
   /// Application/saved-project cleanup can be handled separately when those
   /// features are implemented.
-  Future<void> deleteProject(
-    String projectId,
-  ) async {
+  Future<void> deleteProject(String projectId) async {
     if (projectId.trim().isEmpty) {
-      throw const ProjectServiceException(
-        'Project ID cannot be empty.',
-      );
+      throw const ProjectServiceException('Project ID cannot be empty.');
     }
 
-    await _projectsCollection
-        .doc(projectId)
-        .delete();
+    await _projectsCollection.doc(projectId).delete();
   }
 
   // ---------------------------------------------------------------------------
@@ -711,9 +573,7 @@ Future<List<ProjectModel>> getOpenProjects() async {
   ///
   /// The Discover/Apply implementation can use this before creating an
   /// application to prevent duplicates.
-  Future<bool> hasAppliedToProject(
-    String projectId,
-  ) async {
+  Future<bool> hasAppliedToProject(String projectId) async {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
@@ -722,14 +582,8 @@ Future<List<ProjectModel>> getOpenProjects() async {
 
     final snapshot = await _firestore
         .collection('applications')
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('developerId', isEqualTo: developerId)
+        .where('projectId', isEqualTo: projectId)
         .limit(1)
         .get();
 
@@ -737,15 +591,10 @@ Future<List<ProjectModel>> getOpenProjects() async {
   }
 
   /// Returns the number of applications currently stored for a project.
-  Future<int> getApplicationCount(
-    String projectId,
-  ) async {
+  Future<int> getApplicationCount(String projectId) async {
     final snapshot = await _firestore
         .collection('applications')
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('projectId', isEqualTo: projectId)
         .count()
         .get();
 
@@ -756,33 +605,21 @@ Future<List<ProjectModel>> getOpenProjects() async {
   // HELPERS
   // ---------------------------------------------------------------------------
 
-List<ProjectModel> _documentsToProjects(
-  QuerySnapshot<Map<String, dynamic>> snapshot,
-) {
-  return snapshot.docs
-      .map(ProjectModel.fromFirestore)
-      .toList();
-}
-
-  DateTime _safeDate(
-    DateTime? date,
+  List<ProjectModel> _documentsToProjects(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
   ) {
+    return snapshot.docs.map(ProjectModel.fromFirestore).toList();
+  }
+
+  DateTime _safeDate(DateTime? date) {
     return date ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
 
-  int _dateCompare(
-    DateTime? first,
-    DateTime? second,
-  ) {
-    return _safeDate(first).compareTo(
-      _safeDate(second),
-    );
+  int _dateCompare(DateTime? first, DateTime? second) {
+    return _safeDate(first).compareTo(_safeDate(second));
   }
 
-  bool _matchesFlexibleValue(
-    String projectValue,
-    String requestedValue,
-  ) {
+  bool _matchesFlexibleValue(String projectValue, String requestedValue) {
     final project = projectValue.trim().toLowerCase();
     final requested = requestedValue.trim().toLowerCase();
 
@@ -790,23 +627,18 @@ List<ProjectModel> _documentsToProjects(
       return true;
     }
 
-    if (project.contains(requested) ||
-        requested.contains(project)) {
+    if (project.contains(requested) || requested.contains(project)) {
       return true;
     }
 
-    if (project == 'both' ||
-        project == 'any' ||
-        project == 'flexible') {
+    if (project == 'both' || project == 'any' || project == 'flexible') {
       return true;
     }
 
     return false;
   }
 
-  List<String> _cleanList(
-    List<String> values,
-  ) {
+  List<String> _cleanList(List<String> values) {
     return values
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty)
@@ -814,20 +646,13 @@ List<ProjectModel> _documentsToProjects(
         .toList();
   }
 
-  List<List<T>> _chunkList<T>(
-    List<T> items,
-    int size,
-  ) {
+  List<List<T>> _chunkList<T>(List<T> items, int size) {
     final chunks = <List<T>>[];
 
     for (var i = 0; i < items.length; i += size) {
-      final end = (i + size < items.length)
-          ? i + size
-          : items.length;
+      final end = (i + size < items.length) ? i + size : items.length;
 
-      chunks.add(
-        items.sublist(i, end),
-      );
+      chunks.add(items.sublist(i, end));
     }
 
     return chunks;

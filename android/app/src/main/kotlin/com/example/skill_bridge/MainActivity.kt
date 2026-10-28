@@ -1,4 +1,4 @@
-package com.skill_bridge.app
+package com.example.skill_bridge
 
 import io.flutter.embedding.android.FlutterActivity
 
