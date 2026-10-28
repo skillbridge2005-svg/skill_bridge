@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../localization/app_localizations.dart';
+import '../../widgets/skillbridge_avatar.dart';
 
 class ClientTeamScreen extends StatelessWidget {
   final String projectId;
@@ -177,8 +178,16 @@ class ClientTeamScreen extends StatelessWidget {
                       final document = members[index - 1];
 
                       final data = document.data();
+                      final memberId =
+                          (data['userId'] ??
+                                  data['memberId'] ??
+                                  data['developerId'] ??
+                                  data['uid'] ??
+                                  document.id)
+                              .toString()
+                              .trim();
 
-                      return _TeamMemberCard(data: data);
+                      return _TeamMemberCard(data: data, memberId: memberId);
                     },
                   );
                 },
@@ -295,31 +304,9 @@ class _TeamHeader extends StatelessWidget {
 
 class _TeamMemberCard extends StatelessWidget {
   final Map<String, dynamic> data;
+  final String memberId;
 
-  const _TeamMemberCard({required this.data});
-
-  IconData _roleIcon(String role) {
-    switch (role) {
-      case 'frontend':
-        return Icons.web_rounded;
-
-      case 'backend':
-        return Icons.dns_rounded;
-
-      case 'database':
-        return Icons.storage_rounded;
-
-      case 'tester':
-        return Icons.bug_report_outlined;
-
-      case 'project_manager':
-      case 'team_leader':
-        return Icons.manage_accounts_outlined;
-
-      default:
-        return Icons.person_outline_rounded;
-    }
-  }
+  const _TeamMemberCard({required this.data, required this.memberId});
 
   String _formatRole(BuildContext context, String role) {
     final l10n = AppLocalizations.of(context);
@@ -369,6 +356,41 @@ class _TeamMemberCard extends StatelessWidget {
     }
   }
 
+  Widget _memberAvatar({required String name, required Color roleColor}) {
+    final storedImageUrl = data['profileImageUrl']?.toString() ?? '';
+
+    if (memberId.isEmpty) {
+      return SkillBridgeAvatar(
+        profileImageUrl: storedImageUrl,
+        name: name,
+        size: 56,
+        borderRadius: BorderRadius.circular(16),
+        backgroundColor: roleColor.withValues(alpha: 0.14),
+        foregroundColor: roleColor,
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(memberId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final userData = snapshot.data?.data();
+
+        return SkillBridgeAvatar(
+          profileImageUrl:
+              userData?['profileImageUrl']?.toString() ?? storedImageUrl,
+          name: userData?['name']?.toString() ?? name,
+          size: 56,
+          borderRadius: BorderRadius.circular(16),
+          backgroundColor: roleColor.withValues(alpha: 0.14),
+          foregroundColor: roleColor,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -398,22 +420,7 @@ class _TeamMemberCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  roleColor.withValues(alpha: 0.14),
-                  roleColor.withValues(alpha: 0.07),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(_roleIcon(role), color: roleColor, size: 25),
-          ),
+          _memberAvatar(name: name, roleColor: roleColor),
           const SizedBox(width: 14),
           Expanded(
             child: Column(

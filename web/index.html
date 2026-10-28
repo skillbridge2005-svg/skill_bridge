@@ -25,30 +25,36 @@
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
   <script>
-    window.openRazorpayCheckout = function (optionsJson, onSuccess) {
+    window.openRazorpayCheckout = function (
+      optionsJson,
+      onSuccess,
+      onFailure,
+      onDismissed
+    ) {
       const options = JSON.parse(optionsJson);
+      let completed = false;
 
       options.handler = function (response) {
+        completed = true;
         onSuccess(
-          response.razorpay_payment_id || '',
-          response.razorpay_order_id || '',
-          response.razorpay_signature || ''
+          JSON.stringify(response)
         );
       };
 
-      options.modal = {
+      options.modal = Object.assign({}, options.modal, {
         ondismiss: function () {
-          console.log('Razorpay checkout closed');
+          if (!completed) {
+            onDismissed();
+          }
         }
-      };
+      });
 
       const razorpay = new Razorpay(options);
 
       razorpay.on('payment.failed', function (response) {
-        console.error(
-          'Razorpay payment failed:',
-          response.error
-        );
+        completed = true;
+        razorpay.close();
+        onFailure(JSON.stringify(response.error || {}));
       });
 
       razorpay.open();

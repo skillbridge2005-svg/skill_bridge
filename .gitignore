@@ -53,3 +53,6 @@ functions/.env
 rules-tests/node_modules/
 
 firebase-admin-key.json
+
+# Flutter app configuration
+.env

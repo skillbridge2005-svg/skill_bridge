@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/individual_chat_service.dart';
+import '../../widgets/skillbridge_avatar.dart';
 import 'individual_chat_screen.dart' hide IndividualChatService;
 
 class IndividualChatsScreen extends StatelessWidget {
@@ -166,20 +167,25 @@ class IndividualChatsScreen extends StatelessWidget {
                     horizontal: 16,
                     vertical: 10,
                   ),
-                  leading: CircleAvatar(
-                    radius: 25,
-                    backgroundColor: const Color(0xFFE0E7FF),
-                    child: Text(
-                      otherName.trim().isEmpty
-                          ? '?'
-                          : otherName.trim()[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Color(0xFF4338CA),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 18,
+                  leading:
+                      StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                        stream: FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(otherUid)
+                            .snapshots(),
+                        builder: (context, profileSnapshot) {
+                          final profile = profileSnapshot.data?.data() ?? {};
+
+                          return SkillBridgeAvatar(
+                            profileImageUrl: profile['profileImageUrl']
+                                ?.toString(),
+                            name: profile['name']?.toString() ?? otherName,
+                            size: 50,
+                            backgroundColor: const Color(0xFFE0E7FF),
+                            foregroundColor: const Color(0xFF4338CA),
+                          );
+                        },
                       ),
-                    ),
-                  ),
                   title: Text(
                     otherName,
                     maxLines: 1,

@@ -6,6 +6,7 @@ class DeveloperNote {
   final String title;
   final String category;
   final String content;
+  final String? projectId;
   final Map<String, dynamic> details;
   final List<String> tags;
   final bool isPinned;
@@ -18,6 +19,7 @@ class DeveloperNote {
     required this.title,
     required this.category,
     required this.content,
+    this.projectId,
     this.details = const {},
     this.tags = const [],
     this.isPinned = false,
@@ -36,6 +38,7 @@ class DeveloperNote {
       title: data['title'] as String? ?? '',
       category: data['category'] as String? ?? 'project_idea',
       content: data['content'] as String? ?? '',
+      projectId: data['projectId'] as String?,
       details: Map<String, dynamic>.from(data['details'] as Map? ?? {}),
       tags: List<String>.from(data['tags'] as List? ?? []),
       isPinned: data['isPinned'] as bool? ?? false,
@@ -50,6 +53,7 @@ class DeveloperNote {
       'title': title,
       'category': category,
       'content': content,
+      'projectId': projectId,
       'details': details,
       'tags': tags,
       'isPinned': isPinned,

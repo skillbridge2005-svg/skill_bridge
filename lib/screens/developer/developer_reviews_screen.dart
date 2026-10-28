@@ -1,14 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/skillbridge_avatar.dart';
+
 class DeveloperReviewsScreen extends StatelessWidget {
   final String developerId;
 
   const DeveloperReviewsScreen({super.key, required this.developerId});
 
-  Future<String> _getClientName(String clientId) async {
+  Future<Map<String, String>> _getClientProfile(String clientId) async {
     if (clientId.isEmpty) {
-      return 'Unknown Client';
+      return {'name': 'Unknown Client', 'profileImageUrl': ''};
     }
 
     final doc = await FirebaseFirestore.instance
@@ -17,12 +19,16 @@ class DeveloperReviewsScreen extends StatelessWidget {
         .get();
 
     if (!doc.exists) {
-      return 'Unknown Client';
+      return {'name': 'Unknown Client', 'profileImageUrl': ''};
     }
 
     final data = doc.data() ?? <String, dynamic>{};
-    return (data['name'] ?? data['fullName'] ?? data['displayName'] ?? 'Client')
-        .toString();
+    return {
+      'name':
+          (data['name'] ?? data['fullName'] ?? data['displayName'] ?? 'Client')
+              .toString(),
+      'profileImageUrl': data['profileImageUrl']?.toString() ?? '',
+    };
   }
 
   @override
@@ -195,44 +201,58 @@ class DeveloperReviewsScreen extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  const CircleAvatar(
-                                    backgroundColor: Color(0xFFE0E7FF),
-                                    child: Icon(
-                                      Icons.person,
-                                      color: Color(0xFF2563EB),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        FutureBuilder<String>(
-                                          future: _getClientName(clientId),
-                                          builder: (context, snapshot) {
-                                            return Text(
-                                              snapshot.hasError
-                                                  ? 'Unable to load client'
-                                                  : snapshot.data ??
-                                                        'Loading client...',
-                                              style: const TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          formattedDate,
-                                          style: const TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 13,
+                                  FutureBuilder<Map<String, String>>(
+                                    future: _getClientProfile(clientId),
+                                    builder: (context, snapshot) {
+                                      final client =
+                                          snapshot.data ??
+                                          const <String, String>{};
+                                      final clientName =
+                                          client['name'] ?? 'Client';
+                                      return Row(
+                                        children: [
+                                          SkillBridgeAvatar(
+                                            profileImageUrl:
+                                                client['profileImageUrl'],
+                                            name: clientName,
+                                            size: 40,
+                                            backgroundColor: const Color(
+                                              0xFFE0E7FF,
+                                            ),
+                                            foregroundColor: const Color(
+                                              0xFF2563EB,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  snapshot.hasError
+                                                      ? 'Unable to load client'
+                                                      : snapshot.data?['name'] ??
+                                                            'Loading client...',
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  formattedDate,
+                                                  style: const TextStyle(
+                                                    color: Colors.grey,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
                                   ),
                                 ],
                               ),

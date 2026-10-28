@@ -121,7 +121,7 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
               return const _ErrorScreen(message: 'User profile is empty.');
             }
 
-            final role = data['role'];
+            final role = data['role']?.toString().trim().toLowerCase();
 
             if (role == 'client') {
               return const ClientHome();

@@ -49,7 +49,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Build. Connect. Grow.',
+                    'Connect-Build-Grow',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 25,

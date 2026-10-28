@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/developer_rating_summary.dart';
 import '../../widgets/developer_reviews_list.dart';
+import '../../widgets/skillbridge_avatar.dart';
 
 /// Read-only profile view for a developer other than the signed-in user.
 /// The profile is loaded using the selected developer's UID.
@@ -79,7 +80,11 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
           );
           final email = _value(profile, 'email', _value(user, 'email'));
           final headline = _value(profile, 'headline', 'Developer');
-          final photoUrl = _value(profile, 'photoUrl');
+          final photoUrl = _value(
+            user,
+            'profileImageUrl',
+            _value(profile, 'photoUrl'),
+          );
           final skills = _strings(profile['skills']);
           final technologies = _strings(profile['technologies']);
           final languages = _strings(profile['languages']);
@@ -99,19 +104,12 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    CircleAvatar(
-                      radius: 48,
+                    SkillBridgeAvatar(
+                      profileImageUrl: photoUrl,
+                      name: name,
+                      size: 96,
                       backgroundColor: const Color(0xFFE0E7FF),
-                      backgroundImage: photoUrl.startsWith('http')
-                          ? NetworkImage(photoUrl)
-                          : null,
-                      child: photoUrl.startsWith('http')
-                          ? null
-                          : const Icon(
-                              Icons.person,
-                              size: 48,
-                              color: Color(0xFF4338CA),
-                            ),
+                      foregroundColor: const Color(0xFF4338CA),
                     ),
                     const SizedBox(height: 14),
                     Text(

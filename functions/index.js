@@ -19,6 +19,8 @@ const {
   onCall,
   HttpsError,
 } = require("firebase-functions/v2/https");
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {getMessaging} = require("firebase-admin/messaging");
 
 const logger = require("firebase-functions/logger");
 const Razorpay = require("razorpay");
@@ -400,6 +402,175 @@ function getProjectAmount(projectData) {
   return null;
 }
 
+function getProjectAmountInPaise(projectData) {
+  const amount = getProjectAmount(projectData);
+
+  if (
+    amount === null ||
+    !Number.isFinite(amount) ||
+    amount <= 0
+  ) {
+    return null;
+  }
+
+  const amountInPaise = Math.round(amount * 100);
+
+  return Number.isSafeInteger(amountInPaise) &&
+      amountInPaise > 0 ?
+    amountInPaise :
+    null;
+}
+
+async function initializeProjectPaymentState(
+  projectId,
+  clientId,
+) {
+  const projectRef = db.collection("projects").doc(projectId);
+
+  const stateRef = db
+      .collection("projectPaymentStates")
+      .doc(projectId);
+  const paymentsQuery = db
+      .collection("payments")
+      .where("projectId", "==", projectId)
+      .where("status", "==", "verified");
+
+  return db.runTransaction(async (transaction) => {
+    const [
+      projectSnapshot,
+      stateSnapshot,
+      paymentsSnapshot,
+    ] = await Promise.all([
+      transaction.get(projectRef),
+      transaction.get(stateRef),
+      transaction.get(paymentsQuery),
+    ]);
+
+    if (!projectSnapshot.exists) {
+      throw new HttpsError(
+        "not-found",
+        "Project not found.",
+      );
+    }
+
+    const projectData = projectSnapshot.data();
+
+    if (projectData.clientId !== clientId) {
+      throw new HttpsError(
+        "permission-denied",
+        "You cannot access this project's payment state.",
+      );
+    }
+
+    const projectTotalInPaise =
+      getProjectAmountInPaise(projectData);
+
+    if (projectTotalInPaise === null) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The project budget is invalid.",
+      );
+    }
+
+    const {
+      paymentCount,
+      totalPaidInPaise,
+    } = validateVerifiedPayments(
+      paymentsSnapshot,
+      clientId,
+      projectId,
+    );
+
+    if (
+      totalPaidInPaise > projectTotalInPaise ||
+      paymentCount > 3
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Verified payment records exceed the project payment limits.",
+      );
+    }
+
+    if (stateSnapshot.exists) {
+      const existingState = stateSnapshot.data();
+
+      if (
+        existingState.clientId !== clientId ||
+        existingState.projectTotalInPaise !== projectTotalInPaise ||
+        existingState.totalPaidInPaise !== totalPaidInPaise ||
+        existingState.remainingInPaise !==
+          projectTotalInPaise - totalPaidInPaise ||
+        existingState.successfulPaymentCount !== paymentCount
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Project payment state does not match verified payment records and requires reconciliation.",
+        );
+      }
+
+      return existingState;
+    }
+
+    const initialState = {
+      projectId,
+      clientId,
+      projectTotalInPaise,
+      totalPaidInPaise,
+      remainingInPaise: projectTotalInPaise - totalPaidInPaise,
+      successfulPaymentCount: paymentCount,
+      activeOrderId: null,
+      activeOrderAmountInPaise: 0,
+      activeOrderReceipt: null,
+      activeOrderCreatedAt: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    transaction.create(stateRef, initialState);
+
+    return initialState;
+  });
+}
+
+function validateVerifiedPayments(
+  paymentsSnapshot,
+  clientId,
+  projectId,
+) {
+  let totalPaidInPaise = 0;
+
+  for (const paymentDoc of paymentsSnapshot.docs) {
+    const payment = paymentDoc.data();
+
+    if (
+      payment.projectId !== projectId ||
+      payment.clientId !== clientId ||
+      payment.currency !== "INR" ||
+      payment.status !== "verified" ||
+      !Number.isSafeInteger(payment.amountInPaise) ||
+      payment.amountInPaise <= 0
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "An existing payment record is invalid.",
+      );
+    }
+
+    totalPaidInPaise += payment.amountInPaise;
+
+    if (!Number.isSafeInteger(totalPaidInPaise)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The total paid amount is invalid.",
+      );
+    }
+  }
+
+  return {
+    paymentCount: paymentsSnapshot.size,
+    totalPaidInPaise,
+  };
+}
+
 /*
 |--------------------------------------------------------------------------
 | Create Razorpay Order
@@ -409,92 +580,373 @@ function getProjectAmount(projectData) {
 exports.createRazorpayOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-        "unauthenticated",
-        "You must be logged in to create a payment order.",
+      "unauthenticated",
+      "You must be logged in to create a payment order.",
     );
   }
 
-  const {projectId} = request.data || {};
-
-  if (!projectId || typeof projectId !== "string") {
-    throw new HttpsError(
-        "invalid-argument",
-        "A valid project ID is required.",
-    );
-  }
-
+  const { projectId, amount } = request.data || {};
   const clientId = request.auth.uid;
 
+  if (
+    typeof projectId !== "string" ||
+    !projectId.trim()
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      "A valid project ID is required.",
+    );
+  }
+
+  if (
+    typeof amount !== "number" ||
+    !Number.isFinite(amount) ||
+    amount <= 0
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Enter a valid payment amount.",
+    );
+  }
+
+  const requestedAmountInPaise = Math.round(amount * 100);
+
+  if (
+    !Number.isSafeInteger(requestedAmountInPaise) ||
+    requestedAmountInPaise <= 0
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      "The payment amount is invalid.",
+    );
+  }
+
+  const projectRef = db.collection("projects").doc(projectId);
+  const stateRef = db
+      .collection("projectPaymentStates")
+      .doc(projectId);
+
+  let reservation;
+  let createdOrderId = null;
+  const reservationToken = crypto.randomUUID();
+  const receipt = `sb_${reservationToken.replace(/-/g, "")}`;
+
   try {
-    const projectReference = db
-        .collection("projects")
-        .doc(projectId);
-
-    const projectSnapshot = await projectReference.get();
-
-    if (!projectSnapshot.exists) {
+    if (
+      !process.env.RAZORPAY_KEY_ID ||
+      !process.env.RAZORPAY_KEY_SECRET
+    ) {
       throw new HttpsError(
-          "not-found",
-          "The SkillBridge project was not found.",
+        "failed-precondition",
+        "Razorpay credentials are not configured for Cloud Functions.",
       );
     }
 
-    const projectData = projectSnapshot.data();
+    await initializeProjectPaymentState(projectId, clientId);
 
-    if (projectData.clientId !== clientId) {
-      throw new HttpsError(
+    reservation = await db.runTransaction(async (transaction) => {
+      const [projectSnapshot, stateSnapshot] = await Promise.all([
+        transaction.get(projectRef),
+        transaction.get(stateRef),
+      ]);
+
+      if (!projectSnapshot.exists || !stateSnapshot.exists) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Project payment state is unavailable.",
+        );
+      }
+
+      const projectData = projectSnapshot.data();
+      const state = stateSnapshot.data();
+
+      if (
+        projectData.clientId !== clientId ||
+        state.clientId !== clientId
+      ) {
+        throw new HttpsError(
           "permission-denied",
-          "You are not authorized to make a payment for this project.",
-      );
-    }
+          "You are not authorized to pay for this project.",
+        );
+      }
 
-    const projectAmount = getProjectAmount(projectData);
+      const currentProjectTotalInPaise =
+        getProjectAmountInPaise(projectData);
 
-    if (
-      projectAmount === null ||
-      !Number.isFinite(projectAmount) ||
-      projectAmount <= 0
-    ) {
-      throw new HttpsError(
+      if (
+        currentProjectTotalInPaise === null ||
+        currentProjectTotalInPaise !== state.projectTotalInPaise
+      ) {
+        throw new HttpsError(
           "failed-precondition",
-          "The project does not have a valid payment amount.",
-      );
-    }
+          "The project budget has changed. Payment state requires reconciliation.",
+        );
+      }
 
-    const amountInPaise = Math.round(projectAmount * 100);
-
-    if (
-      !Number.isSafeInteger(amountInPaise) ||
-      amountInPaise <= 0
-    ) {
-      throw new HttpsError(
+      if (state.successfulPaymentCount >= 3) {
+        throw new HttpsError(
           "failed-precondition",
-          "The project payment amount is invalid.",
-      );
-    }
+          "The maximum of three successful payments has been reached.",
+        );
+      }
 
-    if (projectData.paymentStatus === "paid") {
-      throw new HttpsError(
+      if (state.activeOrderId) {
+        if (
+          !Number.isSafeInteger(state.activeOrderAmountInPaise) ||
+          state.activeOrderAmountInPaise <= 0
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            "The active payment reservation is invalid and requires reconciliation.",
+          );
+        }
+
+        return {
+          existingOrderId: state.activeOrderId.startsWith("order_") ?
+            state.activeOrderId :
+            null,
+          existingReservationToken: state.activeOrderId.startsWith("order_") ?
+            null :
+            state.activeOrderId,
+          receipt: state.activeOrderReceipt || null,
+          amountInPaise: state.activeOrderAmountInPaise,
+          successfulPaymentCount: state.successfulPaymentCount,
+        };
+      }
+
+      const remainingInPaise =
+        state.projectTotalInPaise - state.totalPaidInPaise;
+
+      if (
+        remainingInPaise <= 0 ||
+        remainingInPaise !== state.remainingInPaise
+      ) {
+        throw new HttpsError(
           "failed-precondition",
-          "This project has already been paid.",
+          "The remaining project balance is invalid or fully paid.",
+        );
+      }
+
+      if (requestedAmountInPaise > remainingInPaise) {
+        throw new HttpsError(
+          "invalid-argument",
+          `Payment cannot exceed the remaining balance of ${(remainingInPaise / 100).toFixed(2)} INR.`,
+        );
+      }
+
+      if (
+        state.successfulPaymentCount === 2 &&
+        requestedAmountInPaise !== remainingInPaise
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The third payment must cover the entire remaining balance.",
+        );
+      }
+
+      transaction.update(stateRef, {
+        activeOrderId: reservationToken,
+        activeOrderAmountInPaise: requestedAmountInPaise,
+        activeOrderReceipt: receipt,
+        activeOrderCreatedAt: Date.now(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      return {
+        existingOrderId: null,
+        existingReservationToken: null,
+        reservationToken,
+        receipt,
+        amountInPaise: requestedAmountInPaise,
+        projectTotalInPaise: state.projectTotalInPaise,
+        successfulPaymentCount: state.successfulPaymentCount,
+        remainingInPaise,
+      };
+    });
+
+    if (reservation.existingOrderId || reservation.existingReservationToken) {
+      let existingOrder;
+
+      if (reservation.existingOrderId) {
+        existingOrder = await razorpay.orders.fetch(
+            reservation.existingOrderId,
+        );
+      } else if (reservation.receipt) {
+        const orders = await razorpay.orders.all({
+          receipt: reservation.receipt,
+          count: 100,
+        });
+        existingOrder = orders.items.find((item) =>
+          item.receipt === reservation.receipt,
+        );
+
+        if (existingOrder) {
+          await db.runTransaction(async (transaction) => {
+            const stateSnapshot = await transaction.get(stateRef);
+
+            if (!stateSnapshot.exists) {
+              throw new HttpsError(
+                "failed-precondition",
+                "Project payment state was not found.",
+              );
+            }
+
+            const state = stateSnapshot.data();
+
+            if (
+              state.activeOrderId !==
+                reservation.existingReservationToken ||
+              state.activeOrderAmountInPaise !==
+                reservation.amountInPaise
+            ) {
+              throw new HttpsError(
+                "aborted",
+                "The payment reservation changed during order recovery.",
+              );
+            }
+
+            transaction.update(stateRef, {
+              activeOrderId: existingOrder.id,
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          });
+        }
+      }
+
+      if (!existingOrder) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The reserved Razorpay order is still being reconciled. Do not create another payment; retry this request shortly.",
+        );
+      }
+
+      if (
+        existingOrder.notes?.clientId !== clientId ||
+        existingOrder.notes?.projectId !== projectId ||
+        (reservation.receipt &&
+          existingOrder.receipt !== reservation.receipt) ||
+        (reservation.existingReservationToken &&
+          existingOrder.notes?.reservationToken !==
+            reservation.existingReservationToken) ||
+        !Number.isSafeInteger(existingOrder.amount) ||
+        existingOrder.amount !== reservation.amountInPaise ||
+        existingOrder.currency !== "INR"
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The existing Razorpay order does not match its payment reservation.",
+        );
+      }
+
+      const existingPayments = await razorpay.orders.fetchPayments(
+          existingOrder.id,
       );
+      const paymentAttempts = existingPayments.items || [];
+      const capturedAttempts = paymentAttempts.filter(
+          (payment) => payment.status === "captured",
+      );
+      const unsettledAttempt = paymentAttempts.find((payment) =>
+        ["created", "authorized", "captured"].includes(payment.status),
+      );
+
+      logger.info("Inspected active Razorpay order", {
+        orderId: existingOrder.id,
+        projectId,
+        orderStatus: existingOrder.status,
+        paymentStatuses: paymentAttempts.map((payment) => payment.status),
+      });
+
+      if (capturedAttempts.length === 1) {
+        return {
+          success: true,
+          reconcileRequired: true,
+          orderId: existingOrder.id,
+          amount: existingOrder.amount,
+          currency: existingOrder.currency,
+          keyId: process.env.RAZORPAY_KEY_ID,
+          projectId,
+        };
+      }
+
+      if (existingOrder.status === "paid" || unsettledAttempt) {
+        throw new HttpsError(
+          "failed-precondition",
+          "This Razorpay order has a pending or successful payment attempt. Payment status must be reconciled before another checkout can start.",
+        );
+      }
+
+      if (reservation.amountInPaise !== requestedAmountInPaise) {
+        throw new HttpsError(
+          "failed-precondition",
+          `A payment order for ${(reservation.amountInPaise / 100).toFixed(2)} INR is already reserved. Enter that amount to continue the existing order, or contact support to reconcile it.`,
+        );
+      }
+
+      logger.info("Reusing existing Razorpay installment order", {
+        orderId: existingOrder.id,
+        projectId,
+        clientId,
+        amountInPaise: existingOrder.amount,
+        paymentAttemptCount: paymentAttempts.length,
+      });
+
+      return {
+        success: true,
+        orderId: existingOrder.id,
+        amount: existingOrder.amount,
+        currency: existingOrder.currency,
+        keyId: process.env.RAZORPAY_KEY_ID,
+        projectId,
+        reused: true,
+      };
     }
 
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
+      amount: reservation.amountInPaise,
       currency: "INR",
-      receipt: `skillbridge_${projectId}_${Date.now()}`,
+      receipt: reservation.receipt,
       notes: {
-        projectId: projectId,
-        clientId: clientId,
+        projectId,
+        clientId,
+        reservationToken: reservation.reservationToken,
       },
     });
+    createdOrderId = order.id;
 
-    logger.info("Razorpay order created", {
+    await db.runTransaction(async (transaction) => {
+      const stateSnapshot = await transaction.get(stateRef);
+
+      if (!stateSnapshot.exists) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Project payment state was not found.",
+        );
+      }
+
+      const state = stateSnapshot.data();
+
+      if (
+        state.activeOrderId !== reservation.reservationToken ||
+        state.activeOrderAmountInPaise !== reservation.amountInPaise
+      ) {
+        throw new HttpsError(
+          "aborted",
+          "The payment reservation changed unexpectedly.",
+        );
+      }
+
+      transaction.update(stateRef, {
+        activeOrderId: order.id,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    logger.info("Razorpay installment order created", {
       orderId: order.id,
-      projectId: projectId,
-      clientId: clientId,
-      amount: projectAmount,
+      projectId,
+      clientId,
+      amountInPaise: order.amount,
+      successfulPaymentCount: reservation.successfulPaymentCount,
     });
 
     return {
@@ -503,17 +955,74 @@ exports.createRazorpayOrder = onCall(async (request) => {
       amount: order.amount,
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
+      projectId,
     };
   } catch (error) {
-    logger.error("Razorpay order creation failed", error);
+    const definitiveProviderRejection =
+      [400, 401, 403, 422].includes(error?.statusCode);
+
+    if (
+      reservation?.reservationToken &&
+      !createdOrderId &&
+      definitiveProviderRejection
+    ) {
+      try {
+        await db.runTransaction(async (transaction) => {
+          const stateSnapshot = await transaction.get(stateRef);
+
+          if (!stateSnapshot.exists) {
+            return;
+          }
+
+          const state = stateSnapshot.data();
+
+          if (state.activeOrderId === reservation.reservationToken) {
+            transaction.update(stateRef, {
+              activeOrderId: null,
+              activeOrderAmountInPaise: 0,
+              activeOrderReceipt: null,
+              activeOrderCreatedAt: null,
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          }
+        });
+      } catch (releaseError) {
+        logger.error("Failed to release payment reservation", {
+          projectId,
+          message: releaseError.message,
+        });
+      }
+    } else if (reservation?.reservationToken && !createdOrderId) {
+      logger.warn("Razorpay order outcome is uncertain; reservation retained", {
+        projectId,
+        reservationToken: reservation.reservationToken,
+        receipt: reservation.receipt,
+        errorStatusCode: error?.statusCode,
+      });
+    }
+
+    logger.error("Razorpay order creation failed", {
+      projectId,
+      clientId,
+      errorMessage: error?.message,
+      errorStatusCode: error?.statusCode,
+      errorDescription: error?.error?.description,
+      errorCode: error?.error?.code,
+      errorField: error?.error?.field,
+      errorSource: error?.error?.source,
+      errorReason: error?.error?.reason,
+      stack: error?.stack,
+    });
 
     if (error instanceof HttpsError) {
       throw error;
     }
 
     throw new HttpsError(
-        "internal",
-        "Unable to create Razorpay order.",
+      "internal",
+      error?.error?.description ||
+      error?.message ||
+      "Unable to create Razorpay order.",
     );
   }
 });
@@ -527,332 +1036,471 @@ exports.createRazorpayOrder = onCall(async (request) => {
 exports.verifyRazorpayPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-        "unauthenticated",
-        "You must be logged in to verify a payment.",
+      "unauthenticated",
+      "You must be logged in to verify a payment.",
     );
   }
 
   const {
-    razorpayOrderId,
-    razorpayPaymentId,
-    razorpaySignature,
+    razorpayOrderId: suppliedOrderId,
+    razorpayPaymentId: suppliedPaymentId,
+    razorpaySignature: suppliedSignature,
+    reconcileOrderId,
   } = request.data || {};
+  const isReconciliation = typeof reconcileOrderId === "string" &&
+    reconcileOrderId.length > 0;
+
+  let razorpayOrderId = suppliedOrderId;
+  let razorpayPaymentId = suppliedPaymentId;
+  let razorpaySignature = suppliedSignature;
 
   if (
-    typeof razorpayOrderId !== "string" ||
-    !razorpayOrderId ||
-    typeof razorpayPaymentId !== "string" ||
-    !razorpayPaymentId ||
-    typeof razorpaySignature !== "string" ||
-    !/^[a-fA-F0-9]{64}$/.test(razorpaySignature)
+    (isReconciliation &&
+      (typeof reconcileOrderId !== "string" || !reconcileOrderId)) ||
+    (!isReconciliation &&
+      (typeof razorpayOrderId !== "string" ||
+        !razorpayOrderId ||
+        typeof razorpayPaymentId !== "string" ||
+        !razorpayPaymentId ||
+        typeof razorpaySignature !== "string" ||
+        !/^[a-fA-F0-9]{64}$/.test(razorpaySignature)))
   ) {
     throw new HttpsError(
-        "invalid-argument",
-        "Payment verification data is incomplete.",
+      "invalid-argument",
+      "Payment verification data is incomplete.",
     );
   }
 
   const clientId = request.auth.uid;
-
-  const paymentReference = db
-      .collection("payments")
-      .doc(razorpayPaymentId);
+  let paymentReference;
 
   try {
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!keySecret) {
       throw new HttpsError(
-          "internal",
-          "Payment verification is not configured.",
+        "internal",
+        "Payment verification is not configured.",
       );
     }
 
-    /*
-     * 1. Verify Razorpay signature.
-     */
+    if (isReconciliation) {
+      razorpayOrderId = reconcileOrderId;
+      const reconciliationOrder = await razorpay.orders.fetch(
+          razorpayOrderId,
+      );
+
+      if (
+        !reconciliationOrder.notes ||
+        reconciliationOrder.notes.clientId !== clientId
+      ) {
+        throw new HttpsError(
+          "permission-denied",
+          "This payment order does not belong to you.",
+        );
+      }
+
+      const reconciliationPayments = await razorpay.orders.fetchPayments(
+          razorpayOrderId,
+      );
+      const capturedPayments = (reconciliationPayments.items || [])
+          .filter((item) => item.status === "captured");
+
+      if (capturedPayments.length !== 1) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The order does not have exactly one captured payment to reconcile.",
+        );
+      }
+
+      razorpayPaymentId = capturedPayments[0].id;
+      razorpaySignature = crypto
+          .createHmac("sha256", keySecret)
+          .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+          .digest("hex");
+    }
+
+    if (
+      typeof razorpayOrderId !== "string" ||
+      !razorpayOrderId ||
+      typeof razorpayPaymentId !== "string" ||
+      !razorpayPaymentId ||
+      typeof razorpaySignature !== "string"
+    ) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Payment verification data is incomplete.",
+      );
+    }
+
     const generatedSignature = crypto
         .createHmac("sha256", keySecret)
         .update(`${razorpayOrderId}|${razorpayPaymentId}`)
         .digest("hex");
 
-    const isValid = crypto.timingSafeEqual(
-        Buffer.from(generatedSignature, "hex"),
-        Buffer.from(razorpaySignature, "hex"),
+    const suppliedBuffer = Buffer.from(
+        razorpaySignature,
+        "hex",
     );
 
-    if (!isValid) {
-      logger.warn("Invalid Razorpay payment signature", {
-        orderId: razorpayOrderId,
-        paymentId: razorpayPaymentId,
-        userId: clientId,
-      });
+    const generatedBuffer = Buffer.from(
+        generatedSignature,
+        "hex",
+    );
 
+    if (
+      suppliedBuffer.length !== generatedBuffer.length ||
+      !crypto.timingSafeEqual(generatedBuffer, suppliedBuffer)
+    ) {
       throw new HttpsError(
-          "permission-denied",
-          "Payment verification failed.",
+        "permission-denied",
+        "Payment signature verification failed.",
       );
     }
 
-    /*
-     * 2. Check duplicate payment.
-     */
-    const existingPayment = await paymentReference.get();
+    paymentReference = db
+        .collection("payments")
+        .doc(razorpayPaymentId);
 
-    if (existingPayment.exists) {
-      const existingData = existingPayment.data();
-
-      const matchesVerifiedPayment =
-        existingData.paymentId === razorpayPaymentId &&
-        existingData.orderId === razorpayOrderId &&
-        existingData.clientId === clientId &&
-        existingData.status === "verified" &&
-        typeof existingData.projectId === "string";
-
-      if (!matchesVerifiedPayment) {
-        throw new HttpsError(
-            "already-exists",
-            "A conflicting payment record already exists.",
-        );
-      }
-
-      return {
-        success: true,
-        verified: true,
-        alreadyProcessed: true,
-        paymentId: razorpayPaymentId,
-        orderId: razorpayOrderId,
-        projectId: existingData.projectId,
-      };
-    }
-
-    /*
-     * 3. Fetch Razorpay order.
-     */
     const order = await razorpay.orders.fetch(razorpayOrderId);
 
-    /*
-     * 4. Check order ownership.
-     */
     if (
       !order.notes ||
       order.notes.clientId !== clientId
     ) {
-      logger.warn("Razorpay order does not belong to caller", {
-        orderId: razorpayOrderId,
-        userId: clientId,
-      });
-
       throw new HttpsError(
-          "permission-denied",
-          "This payment order does not belong to you.",
+        "permission-denied",
+        "This payment order does not belong to you.",
       );
     }
 
-    /*
-     * 5. Get project ID from order notes.
-     */
     const projectId = order.notes.projectId;
+    const reservationToken = order.notes.reservationToken;
 
     if (
       typeof projectId !== "string" ||
-      !projectId
+      !projectId ||
+      typeof reservationToken !== "string" ||
+      !reservationToken
     ) {
       throw new HttpsError(
-          "failed-precondition",
-          "Project information is missing from the payment order.",
+        "failed-precondition",
+        "Project or reservation information is missing.",
       );
     }
 
-    /*
-     * 6. Validate order amount and currency.
-     */
     if (
       !Number.isSafeInteger(order.amount) ||
       order.amount <= 0 ||
       order.currency !== "INR"
     ) {
       throw new HttpsError(
-          "failed-precondition",
-          "The payment order has an invalid amount or currency.",
+        "failed-precondition",
+        "The Razorpay order amount or currency is invalid.",
       );
     }
 
-    /*
-     * 7. Fetch actual Razorpay payment.
-     */
     const payment = await razorpay.payments.fetch(
         razorpayPaymentId,
     );
 
-    /*
-     * 8. Verify payment belongs to order.
-     */
     if (payment.order_id !== razorpayOrderId) {
       throw new HttpsError(
-          "failed-precondition",
-          "Payment does not belong to the specified order.",
+        "failed-precondition",
+        "Payment does not belong to this order.",
       );
     }
 
-    /*
-     * 9. Verify payment is captured.
-     */
     if (payment.status !== "captured") {
       throw new HttpsError(
-          "failed-precondition",
-          `Payment is not captured. Current status: ${payment.status}`,
+        "failed-precondition",
+        "The payment has not been captured.",
       );
     }
 
-    /*
-     * 10. Verify payment amount.
-     */
-    if (payment.amount !== order.amount) {
+    if (
+      payment.amount !== order.amount ||
+      payment.currency !== order.currency
+    ) {
       throw new HttpsError(
-          "failed-precondition",
-          "Payment amount does not match the order amount.",
+        "failed-precondition",
+        "The captured payment does not match the order.",
       );
     }
 
-    /*
-     * 11. Verify currency.
-     */
-    if (payment.currency !== order.currency) {
-      throw new HttpsError(
-          "failed-precondition",
-          "Payment currency does not match the order currency.",
-      );
-    }
-
-    const verifiedAmount = order.amount / 100;
-
-    /*
-     * 12. Prepare project reference.
-     */
     const projectReference = db
         .collection("projects")
         .doc(projectId);
 
-    /*
-     * 13. Atomic Firestore transaction.
-     */
-    await db.runTransaction(async (transaction) => {
+    const stateReference = db
+        .collection("projectPaymentStates")
+        .doc(projectId);
+
+    const verifiedAmountInPaise = order.amount;
+
+    const result = await db.runTransaction(async (transaction) => {
       const [
-        existingPaymentInTransaction,
+        existingPaymentSnapshot,
         projectSnapshot,
+        stateSnapshot,
       ] = await Promise.all([
         transaction.get(paymentReference),
         transaction.get(projectReference),
+        transaction.get(stateReference),
       ]);
 
-      if (!projectSnapshot.exists) {
+      if (existingPaymentSnapshot.exists) {
+        const existingPayment = existingPaymentSnapshot.data();
+
+        if (
+          existingPayment.paymentId === razorpayPaymentId &&
+          existingPayment.orderId === razorpayOrderId &&
+          existingPayment.projectId === projectId &&
+          existingPayment.clientId === clientId &&
+          existingPayment.amountInPaise === verifiedAmountInPaise &&
+          existingPayment.status === "verified"
+        ) {
+          const currentState = stateSnapshot.exists ?
+            stateSnapshot.data() :
+            null;
+
+          return {
+            alreadyProcessed: true,
+            amount: existingPayment.amount,
+            paidAmount: currentState ?
+              currentState.totalPaidInPaise / 100 :
+              null,
+            remainingAmount: currentState ?
+              currentState.remainingInPaise / 100 :
+              null,
+            paymentCount: currentState ?
+              currentState.successfulPaymentCount :
+              null,
+            paymentStatus: currentState ?
+              currentState.remainingInPaise === 0 ?
+                "paid" :
+                "partially_paid" :
+              null,
+          };
+        }
+
         throw new HttpsError(
-            "not-found",
-            "The SkillBridge project was not found.",
+          "already-exists",
+          "A conflicting payment record already exists.",
+        );
+      }
+
+      if (!projectSnapshot.exists || !stateSnapshot.exists) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The project payment state is unavailable.",
         );
       }
 
       const projectData = projectSnapshot.data();
+      const state = stateSnapshot.data();
 
-      if (projectData.clientId !== clientId) {
+      if (
+        projectData.clientId !== clientId ||
+        state.clientId !== clientId
+      ) {
         throw new HttpsError(
-            "permission-denied",
-            "You are not authorized to pay for this project.",
+          "permission-denied",
+          "You are not authorized to pay for this project.",
         );
       }
 
-      const projectAmount = getProjectAmount(projectData);
+      const currentProjectTotalInPaise =
+        getProjectAmountInPaise(projectData);
 
-      if (projectAmount === null) {
+      if (
+        currentProjectTotalInPaise === null ||
+        currentProjectTotalInPaise !== state.projectTotalInPaise
+      ) {
         throw new HttpsError(
-            "failed-precondition",
-            "The project does not have a valid payment amount.",
+          "failed-precondition",
+          "The project budget has changed.",
         );
       }
 
-      const expectedAmountInPaise = Math.round(
-          projectAmount * 100,
-      );
-
-      if (expectedAmountInPaise !== order.amount) {
+      if (
+        state.activeOrderId !== razorpayOrderId &&
+        state.activeOrderId !== reservationToken
+      ) {
         throw new HttpsError(
-            "failed-precondition",
-            "Payment amount does not match the project amount.",
+          "failed-precondition",
+          "This payment order no longer has an active reservation.",
         );
       }
 
-      if (existingPaymentInTransaction.exists) {
-        const existingData =
-          existingPaymentInTransaction.data();
-
-        const matchesVerifiedPayment =
-          existingData.paymentId === razorpayPaymentId &&
-          existingData.orderId === razorpayOrderId &&
-          existingData.projectId === projectId &&
-          existingData.clientId === clientId &&
-          existingData.amount === verifiedAmount &&
-          existingData.amountInPaise === order.amount &&
-          existingData.currency === order.currency &&
-          existingData.status === "verified";
-
-        if (!matchesVerifiedPayment) {
-          throw new HttpsError(
-              "already-exists",
-              "A conflicting payment record already exists.",
-          );
-        }
-      } else {
-        transaction.create(paymentReference, {
-          paymentId: razorpayPaymentId,
-          orderId: razorpayOrderId,
-          projectId: projectId,
-          clientId: clientId,
-          amount: verifiedAmount,
-          amountInPaise: order.amount,
-          currency: order.currency,
-          status: "verified",
-          createdAt: FieldValue.serverTimestamp(),
-        });
+      if (
+        state.activeOrderAmountInPaise !== verifiedAmountInPaise
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The payment amount does not match the reserved amount.",
+        );
       }
 
-      if (projectData.paymentStatus !== "paid") {
-        transaction.update(projectReference, {
-          paymentStatus: "paid",
-          paymentId: razorpayPaymentId,
-          paidAmount: verifiedAmount,
-          paidAt: FieldValue.serverTimestamp(),
-        });
+      if (
+        !Number.isSafeInteger(state.totalPaidInPaise) ||
+        !Number.isSafeInteger(state.remainingInPaise) ||
+        !Number.isSafeInteger(state.successfulPaymentCount) ||
+        state.totalPaidInPaise < 0 ||
+        state.successfulPaymentCount < 0
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The project payment state is invalid.",
+        );
       }
+
+      if (state.successfulPaymentCount >= 3) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The maximum of three successful payments has been reached.",
+        );
+      }
+
+      const expectedRemainingInPaise =
+        state.projectTotalInPaise - state.totalPaidInPaise;
+
+      if (
+        expectedRemainingInPaise <= 0 ||
+        expectedRemainingInPaise !== state.remainingInPaise
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The remaining project balance is invalid.",
+        );
+      }
+
+      if (verifiedAmountInPaise > expectedRemainingInPaise) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The payment exceeds the remaining balance.",
+        );
+      }
+
+      if (
+        state.successfulPaymentCount === 2 &&
+        verifiedAmountInPaise !== expectedRemainingInPaise
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The third payment must cover the entire remaining balance.",
+        );
+      }
+
+      const newPaidInPaise =
+        state.totalPaidInPaise + verifiedAmountInPaise;
+
+      const newRemainingInPaise =
+        state.projectTotalInPaise - newPaidInPaise;
+
+      const newPaymentCount =
+        state.successfulPaymentCount + 1;
+
+      if (
+        newPaymentCount === 3 &&
+        newRemainingInPaise !== 0
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The third payment must complete the project payment.",
+        );
+      }
+
+      const newPaymentStatus =
+        newRemainingInPaise === 0 ?
+          "paid" :
+          "partially_paid";
+
+      const amount = verifiedAmountInPaise / 100;
+
+      transaction.create(paymentReference, {
+        paymentId: razorpayPaymentId,
+        orderId: razorpayOrderId,
+        projectId,
+        clientId,
+        amount,
+        amountInPaise: verifiedAmountInPaise,
+        currency: "INR",
+        status: "verified",
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(stateReference, {
+        totalPaidInPaise: newPaidInPaise,
+        remainingInPaise: newRemainingInPaise,
+        successfulPaymentCount: newPaymentCount,
+        activeOrderId: null,
+        activeOrderAmountInPaise: 0,
+        activeOrderReceipt: null,
+        activeOrderCreatedAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(projectReference, {
+        paymentStatus: newPaymentStatus,
+        paidAmount: newPaidInPaise / 100,
+        remainingAmount: newRemainingInPaise / 100,
+        paymentCount: newPaymentCount,
+        lastPaymentId: razorpayPaymentId,
+        paidAt: newRemainingInPaise === 0 ?
+          FieldValue.serverTimestamp() :
+          null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      return {
+        alreadyProcessed: false,
+        amount,
+        paidAmount: newPaidInPaise / 100,
+        remainingAmount: newRemainingInPaise / 100,
+        paymentCount: newPaymentCount,
+        paymentStatus: newPaymentStatus,
+      };
     });
 
-    logger.info("Payment verified and saved", {
+    logger.info("Razorpay payment verification completed", {
       paymentId: razorpayPaymentId,
       orderId: razorpayOrderId,
-      projectId: projectId,
-      clientId: clientId,
-      amount: verifiedAmount,
+      projectId,
+      clientId,
+      amount: result.amount,
+      alreadyProcessed: result.alreadyProcessed,
     });
 
     return {
       success: true,
       verified: true,
+      alreadyProcessed: result.alreadyProcessed,
       paymentId: razorpayPaymentId,
       orderId: razorpayOrderId,
-      projectId: projectId,
-      amount: verifiedAmount,
-      currency: order.currency,
+      projectId,
+      amount: result.amount,
+      paidAmount: result.paidAmount,
+      remainingAmount: result.remainingAmount,
+      paymentCount: result.paymentCount,
+      paymentStatus: result.paymentStatus,
+      currency: "INR",
     };
   } catch (error) {
-    logger.error("Payment verification failed", error);
+    logger.error("Razorpay payment verification failed", {
+      message: error.message,
+      paymentId: razorpayPaymentId,
+      orderId: razorpayOrderId,
+      clientId,
+    });
 
     if (error instanceof HttpsError) {
       throw error;
     }
 
     throw new HttpsError(
-        "internal",
-        "Unable to verify and save payment.",
+      "internal",
+      "Unable to verify and save payment.",
     );
   }
 });
@@ -3707,4 +4355,117 @@ exports.notifyDevelopersOnProjectCreated = onDocumentCreated(
         createdCount,
       });
     },
+);
+
+/**
+ * Send a push notification when a SkillBridge notification is created.
+ */
+exports.sendNotificationPush = onDocumentCreated(
+  {
+    document: "notifications/{notificationId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const snapshot = event.data;
+
+    if (!snapshot) {
+      return;
+    }
+
+    const notification = snapshot.data();
+    const developerId = notification.developerId;
+    const title = notification.title;
+    const body = notification.body;
+
+    if (!developerId || !title || !body) {
+      logger.warn("Notification is missing required fields.", {
+        notificationId: event.params.notificationId,
+      });
+      return;
+    }
+
+    try {
+      const userSnapshot = await db
+          .collection("users")
+          .doc(developerId)
+          .get();
+
+      if (!userSnapshot.exists) {
+        logger.warn("Notification recipient does not exist.", {
+          developerId,
+        });
+        return;
+      }
+
+      const userData = userSnapshot.data();
+      const tokens = Array.isArray(userData.fcmTokens) ?
+        userData.fcmTokens.filter(
+            (token) => typeof token === "string" && token.length > 0,
+        ) :
+        [];
+
+      if (tokens.length === 0) {
+        logger.info("No FCM tokens registered for recipient.", {
+          developerId,
+        });
+        return;
+      }
+
+      const response = await getMessaging().sendEachForMulticast({
+        tokens,
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          notificationId: event.params.notificationId,
+          type: String(notification.type || ""),
+          projectId: String(notification.projectId || ""),
+          applicationId: String(notification.applicationId || ""),
+          meetingId: String(notification.meetingId || ""),
+        },
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "skillbridge_notifications",
+          },
+        },
+      });
+
+      logger.info("FCM notification delivery attempted.", {
+        developerId,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+
+      const invalidTokens = [];
+
+      response.responses.forEach((result, index) => {
+        if (
+          !result.success &&
+          (
+            result.error?.code ===
+              "messaging/registration-token-not-registered" ||
+            result.error?.code ===
+              "messaging/invalid-registration-token"
+          )
+        ) {
+          invalidTokens.push(tokens[index]);
+        }
+      });
+
+      if (invalidTokens.length > 0) {
+        await db.collection("users").doc(developerId).update({
+          fcmTokens: FieldValue.arrayRemove(...invalidTokens),
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to send SkillBridge push notification.", {
+        notificationId: event.params.notificationId,
+        error: error.message,
+      });
+
+      throw error;
+    }
+  },
 );

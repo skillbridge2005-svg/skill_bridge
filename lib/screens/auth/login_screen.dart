@@ -26,6 +26,13 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  bool get _usingLocalAuthEmulator =>
+      kDebugMode &&
+      const bool.fromEnvironment(
+        'USE_FUNCTIONS_EMULATOR',
+        defaultValue: false,
+      );
+
   // ------------------------------------------------------------
   // COLORS
   // ------------------------------------------------------------
@@ -63,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final email = _emailController.text.trim();
-      final password = _passwordController.text.trim();
+      final password = _passwordController.text;
 
       final userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
@@ -87,7 +94,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       switch (e.code) {
         case 'user-not-found':
-          message = 'No account found with this email.';
+          message = _usingLocalAuthEmulator
+              ? 'No local test account exists for this email. Create an account in this app while local emulator mode is enabled.'
+              : 'No account found with this email.';
           break;
 
         case 'wrong-password':
@@ -499,6 +508,28 @@ class _LoginScreenState extends State<LoginScreen> {
                                   color: grey,
                                 ),
                               ),
+
+                              if (_usingLocalAuthEmulator) ...[
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF7ED),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: const Color(0xFFFED7AA),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Local test mode is enabled. Accounts from the live Firebase project are not available here. Create a local test account first; email verification links appear in the Auth emulator.',
+                                    style: TextStyle(
+                                      color: Color(0xFF9A3412),
+                                      fontSize: 12,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
 
                               const SizedBox(height: 26),
 

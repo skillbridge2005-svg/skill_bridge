@@ -1,5 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
@@ -7,6 +10,7 @@ import 'client_team_screen.dart';
 import 'project_meeting_screen.dart';
 import 'client_applications_screen.dart';
 import 'developer_review_widget.dart';
+import 'widgets/project_payment_card.dart';
 
 final GlobalKey _projectEstimateSectionKey = GlobalKey();
 
@@ -100,6 +104,44 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     }
   }
 
+  String _firstValidValue(List<dynamic> values) {
+    for (final value in values) {
+      if (value == null) continue;
+      if (value is num && value <= 0) continue;
+
+      final text = value.toString().trim();
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  double _parseProjectAmount(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(
+            value.replaceAll(',', '').replaceAll('₹', '').trim(),
+          ) ??
+          0.0;
+    }
+    return 0.0;
+  }
+
+  Map<String, dynamic> _mapValue(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+
+  List<String> _stringList(dynamic value) {
+    if (value is! List) return <String>[];
+    return value
+        .where((item) => item != null)
+        .map((item) => item.toString())
+        .where((item) => item.trim().isNotEmpty)
+        .toList();
+  }
+
   void _showFullImage(BuildContext context, String imageUrl) {
     showDialog<void>(
       context: context,
@@ -174,6 +216,438 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _downloadPaymentReceipt({
+    required BuildContext context,
+    required String projectTitle,
+    required double projectTotal,
+    required String currency,
+  }) async {
+    final projectId = widget.projectId;
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating payment statement...')),
+      );
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('payments')
+          .where('projectId', isEqualTo: projectId)
+          .get();
+
+      final transactions = snapshot.docs.map((doc) {
+        final data = doc.data();
+        final status = (data['status'] ?? data['paymentStatus'] ?? 'pending')
+            .toString()
+            .toLowerCase()
+            .trim();
+
+        final rawAmount =
+            data['amount'] ??
+            data['paidAmount'] ??
+            data['paid_amount'] ??
+            (data['amountInPaise'] is num
+                ? (data['amountInPaise'] as num) / 100
+                : 0);
+        final amount = rawAmount is num
+            ? rawAmount.toDouble()
+            : double.tryParse(
+                    rawAmount.toString().replaceAll(',', '').trim(),
+                  ) ??
+                  0.0;
+
+        final dateValue =
+            data['paidAt'] ?? data['createdAt'] ?? data['updatedAt'];
+        final DateTime? date = switch (dateValue) {
+          Timestamp value => value.toDate(),
+          DateTime value => value,
+          String value => DateTime.tryParse(value),
+          _ => null,
+        };
+
+        return <String, Object?>{
+          'id':
+              (data['razorpayPaymentId'] ??
+                      data['paymentId'] ??
+                      data['transactionId'] ??
+                      doc.id)
+                  .toString(),
+          'amount': amount,
+          'status': status,
+          'date': date,
+        };
+      }).toList();
+
+      transactions.sort((a, b) {
+        final dateA = a['date'] as DateTime?;
+        final dateB = b['date'] as DateTime?;
+
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+
+        return dateB.compareTo(dateA);
+      });
+
+      bool isSuccessful(String status) {
+        return [
+          'paid',
+          'success',
+          'successful',
+          'completed',
+          'captured',
+          'verified',
+        ].contains(status);
+      }
+
+      final successfulTransactions = transactions.where((transaction) {
+        return isSuccessful(transaction['status'] as String);
+      }).toList();
+
+      final totalPaid = successfulTransactions.fold<double>(
+        0,
+        (sum, transaction) => sum + (transaction['amount'] as double),
+      );
+      final remainingAmount = (projectTotal - totalPaid)
+          .clamp(0.0, double.infinity)
+          .toDouble();
+      final paymentPercentage = projectTotal > 0
+          ? (totalPaid / projectTotal).clamp(0.0, 1.0).toDouble()
+          : 0.0;
+
+      final pdf = pw.Document();
+
+      final blue = PdfColor.fromHex('#2563EB');
+      final dark = PdfColor.fromHex('#0F172A');
+      final grey = PdfColor.fromHex('#64748B');
+      final lightBlue = PdfColor.fromHex('#EFF6FF');
+      final green = PdfColor.fromHex('#15803D');
+
+      String money(double amount) => '$currency ${amount.toStringAsFixed(2)}';
+
+      String formatDate(DateTime? date) {
+        if (date == null) return 'N/A';
+
+        final day = date.day.toString().padLeft(2, '0');
+        final month = date.month.toString().padLeft(2, '0');
+        return '$day/$month/${date.year}';
+      }
+
+      pw.Widget summaryCard(
+        String label,
+        String value,
+        PdfColor background,
+        PdfColor valueColor,
+      ) {
+        return pw.Container(
+          padding: const pw.EdgeInsets.all(14),
+          decoration: pw.BoxDecoration(
+            color: background,
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(label, style: pw.TextStyle(color: grey, fontSize: 10)),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                value,
+                style: pw.TextStyle(
+                  color: valueColor,
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          footer: (pageContext) => pw.Container(
+            margin: const pw.EdgeInsets.only(top: 16),
+            padding: const pw.EdgeInsets.only(top: 10),
+            decoration: pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'SkillBridge | Payment Statement',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+                pw.Text(
+                  'Page ${pageContext.pageNumber} of ${pageContext.pagesCount}',
+                  style: pw.TextStyle(color: grey, fontSize: 9),
+                ),
+              ],
+            ),
+          ),
+          build: (pageContext) => [
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(24),
+              decoration: pw.BoxDecoration(
+                color: dark,
+                borderRadius: pw.BorderRadius.circular(16),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'SkillBridge',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 25,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'PAYMENT STATEMENT',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 13,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Text(
+                    'Complete payment overview and transaction history',
+                    style: pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'PROJECT DETAILS',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(12),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    projectTitle,
+                    style: pw.TextStyle(
+                      color: dark,
+                      fontSize: 17,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Project ID: $projectId',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    'Generated on: ${formatDate(DateTime.now())}',
+                    style: pw.TextStyle(color: grey, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'PAYMENT SUMMARY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Project Total',
+                    money(projectTotal),
+                    lightBlue,
+                    blue,
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Total Paid',
+                    money(totalPaid),
+                    PdfColor.fromHex('#DCFCE7'),
+                    green,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: summaryCard(
+                    'Remaining',
+                    money(remainingAmount),
+                    PdfColor.fromHex('#FEF3C7'),
+                    PdfColor.fromHex('#B45309'),
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: summaryCard(
+                    'Successful Payments',
+                    '${successfulTransactions.length}',
+                    PdfColor.fromHex('#F1F5F9'),
+                    dark,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pw.Text(
+              'PAYMENT PROGRESS',
+              style: pw.TextStyle(
+                color: dark,
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.ClipRRect(
+              horizontalRadius: 6,
+              verticalRadius: 6,
+              child: pw.Container(
+                height: 12,
+                width: double.infinity,
+                color: PdfColors.grey200,
+                child: pw.Align(
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Container(
+                    width: 531 * paymentPercentage,
+                    height: 12,
+                    color: green,
+                  ),
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${(paymentPercentage * 100).toStringAsFixed(1)}% paid',
+              style: pw.TextStyle(
+                color: green,
+                fontSize: 10,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'TRANSACTION HISTORY',
+              style: pw.TextStyle(
+                color: blue,
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            if (transactions.isEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(10),
+                ),
+                child: pw.Text(
+                  'No transactions have been recorded for this project.',
+                  style: pw.TextStyle(color: grey, fontSize: 10),
+                ),
+              )
+            else
+              pw.TableHelper.fromTextArray(
+                headers: ['Date', 'Transaction ID', 'Status', 'Amount'],
+                data: transactions.map((transaction) {
+                  final status = transaction['status'] as String;
+                  final transactionId = transaction['id'] as String;
+
+                  return [
+                    formatDate(transaction['date'] as DateTime?),
+                    transactionId.length > 18
+                        ? '${transactionId.substring(0, 18)}...'
+                        : transactionId,
+                    status.toUpperCase(),
+                    money(transaction['amount'] as double),
+                  ];
+                }).toList(),
+                headerDecoration: pw.BoxDecoration(
+                  color: dark,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                headerStyle: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: pw.TextStyle(color: dark, fontSize: 8),
+                cellPadding: const pw.EdgeInsets.all(8),
+                border: pw.TableBorder(
+                  horizontalInside: pw.BorderSide(
+                    color: PdfColors.grey300,
+                    width: 0.5,
+                  ),
+                ),
+                oddRowDecoration: pw.BoxDecoration(color: PdfColors.grey100),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.1),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(1.3),
+                  3: const pw.FlexColumnWidth(1.5),
+                },
+              ),
+            pw.SizedBox(height: 24),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(14),
+              decoration: pw.BoxDecoration(
+                color: lightBlue,
+                borderRadius: pw.BorderRadius.circular(10),
+              ),
+              child: pw.Text(
+                'Thank you for using SkillBridge. '
+                'This statement summarizes the project payment records '
+                'available in the system at the time of generation.',
+                style: pw.TextStyle(color: dark, fontSize: 9),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: 'SkillBridge_Payment_Statement_$projectId.pdf',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to generate payment statement: $e')),
+      );
+    }
   }
 
   void _openEstimate(
@@ -898,7 +1372,12 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
               final title = data['title']?.toString() ?? l10n.project;
 
-              final category = data['category']?.toString() ?? '';
+              // Support both singular category and legacy categories lists.
+              final categories = _stringList(data['categories']);
+              final category = _firstValidValue([
+                data['category'],
+                if (categories.isNotEmpty) categories.join(', '),
+              ]);
 
               final description = _cleanDescription(
                 data['description']?.toString() ?? '',
@@ -910,11 +1389,13 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                   ? Map<String, dynamic>.from(data['plan'] as Map)
                   : <String, dynamic>{};
 
-              final estimate = data['estimate'] is Map
-                  ? Map<String, dynamic>.from(data['estimate'] as Map)
-                  : (plan['estimate'] is Map
-                        ? Map<String, dynamic>.from(plan['estimate'] as Map)
-                        : <String, dynamic>{});
+              // Prefer the top-level estimate, but fall back to the saved
+              // plan estimate if the top-level map is absent or empty.
+              final directEstimate = _mapValue(data['estimate']);
+              final planEstimate = _mapValue(plan['estimate']);
+              final estimate = directEstimate.isNotEmpty
+                  ? directEstimate
+                  : planEstimate;
 
               String firstValidValue(List<dynamic> values) {
                 for (final value in values) {
@@ -933,12 +1414,24 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
               final budget = firstValidValue([
                 data['budget'],
                 data['amount'],
+                data['projectAmount'],
                 estimate['totalCost'],
                 estimate['totalBudget'],
                 estimate['budget'],
                 estimate['estimatedCost'],
                 estimate['amount'],
               ]);
+
+              final projectTotal = _parseProjectAmount(_firstValidValue([
+                data['budget'],
+                data['amount'],
+                data['projectAmount'],
+                estimate['totalCost'],
+                estimate['totalBudget'],
+                estimate['budget'],
+                estimate['estimatedCost'],
+                estimate['amount'],
+              ]));
 
               final timeline = firstValidValue([
                 data['timeline'],
@@ -973,24 +1466,18 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                   .where((key) => milestones[key] == true).length;
               final calculatedProgress =
                   (completedMilestones / milestoneKeys.length * 100).round();
-              final acceptedScope = data['acceptedScope'] is List
-                  ? (data['acceptedScope'] as List)
-                      .where((item) => item != null)
-                      .map((item) => item.toString())
-                      .where((item) => item.trim().isNotEmpty)
-                      .toList()
-                  : <String>[];
+              final isCompleted =
+                  calculatedProgress == 100 ||
+                  status.trim().toLowerCase() == 'completed';
+              final acceptedScope = _stringList(data['acceptedScope']);
               final acceptedCost = data['acceptedCost'] == true;
               final acceptedTimeline = data['acceptedTimeline'] == true;
               final acceptedTerms = data['acceptedTerms'] == true;
 
               final statusColor = _statusColor(status);
-              final designImages = data['designImageUrls'] is List
-                  ? (data['designImageUrls'] as List)
-                        .whereType<String>()
-                        .where((url) => url.startsWith('https://'))
-                        .toList()
-                  : <String>[];
+              final designImages = _stringList(data['designImageUrls'])
+                  .where((url) => url.startsWith('https://'))
+                  .toList();
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -1020,6 +1507,37 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                               statusIcon: _statusIcon(status),
                               statusText: _formatStatus(context, status),
                             ),
+                            if (isCompleted) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Project Completed',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             if (designImages.isNotEmpty) ...[
                               const SizedBox(height: 16),
                               _DetailsCard(
@@ -1168,6 +1686,40 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                   ],
                                 );
                               },
+                            ),
+
+                            // Keep the existing live payment summary and PDF statement.
+                            ProjectPaymentCard(
+                              projectId: widget.projectId,
+                              projectTotal: projectTotal,
+                              currency: currency,
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _downloadPaymentReceipt(
+                                  context: context,
+                                  projectTitle: title,
+                                  projectTotal: projectTotal,
+                                  currency: currency,
+                                ),
+                                icon: const Icon(Icons.picture_as_pdf_rounded),
+                                label: const Text('Share Payment Statement'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  elevation: 2,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                              ),
                             ),
 
                             const SizedBox(height: 18),
@@ -1342,8 +1894,12 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 ),
                               ),
                             ],
-                            if (acceptedCost || acceptedTimeline || acceptedTerms ||
-                                acceptedScope.isNotEmpty) ...[
+                            if (acceptedCost ||
+                                acceptedTimeline ||
+                                acceptedTerms ||
+                                acceptedScope.isNotEmpty ||
+                                plan.isNotEmpty ||
+                                estimate.isNotEmpty) ...[
                               const SizedBox(height: 14),
                               _DetailsCard(
                                 title: 'Final Accepted Plan & Estimate',
@@ -1351,8 +1907,22 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    if ((plan['projectSummary']?.toString() ?? '')
+                                        .trim()
+                                        .isNotEmpty) ...[
+                                      const Text(
+                                        'Project Summary',
+                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(plan['projectSummary'].toString()),
+                                      const SizedBox(height: 14),
+                                    ],
                                     if (acceptedScope.isNotEmpty) ...[
-                                      const Text('Accepted Scope', style: TextStyle(fontWeight: FontWeight.w700)),
+                                      const Text(
+                                        'Accepted Scope',
+                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                      ),
                                       const SizedBox(height: 8),
                                       for (final item in acceptedScope)
                                         Padding(
@@ -1360,16 +1930,91 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                           child: Row(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF16A34A)),
+                                              const Icon(
+                                                Icons.check_circle_outline,
+                                                size: 18,
+                                                color: Color(0xFF16A34A),
+                                              ),
                                               const SizedBox(width: 8),
                                               Expanded(child: Text(item)),
                                             ],
                                           ),
                                         ),
+                                      const SizedBox(height: 14),
                                     ],
-                                    if (acceptedCost) const _AcceptedBadge(label: 'Budget Accepted'),
-                                    if (acceptedTimeline) const _AcceptedBadge(label: 'Timeline Accepted'),
-                                    if (acceptedTerms) const _AcceptedBadge(label: 'Terms Accepted'),
+                                    if (estimate.isNotEmpty) ...[
+                                      const Text(
+                                        'Estimate Details',
+                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (final entry in estimate.entries)
+                                        if (entry.value != null &&
+                                            entry.value is! Map &&
+                                            entry.value is! List)
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 6),
+                                            child: Row(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    _formatPlanLabel(entry.key),
+                                                    style: const TextStyle(
+                                                      color: Color(0xFF667085),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  flex: 3,
+                                                  child: Text(entry.value.toString()),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                    ],
+                                    if (plan['deliveryPhases'] is List &&
+                                        (plan['deliveryPhases'] as List).isNotEmpty) ...[
+                                      const SizedBox(height: 14),
+                                      const Text(
+                                        'Delivery Phases',
+                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (final phase in plan['deliveryPhases'] as List)
+                                        if (phase is Map)
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 10),
+                                            child: Text(
+                                              (phase['name'] ??
+                                                      phase['title'] ??
+                                                      phase.toString())
+                                                  .toString(),
+                                            ),
+                                          )
+                                        else
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 6),
+                                            child: Text(phase.toString()),
+                                          ),
+                                    ],
+                                    if (acceptedCost || acceptedTimeline || acceptedTerms) ...[
+                                      const SizedBox(height: 12),
+                                      const Divider(),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Acceptance Status',
+                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      if (acceptedCost)
+                                        const _AcceptedBadge(label: 'Budget Accepted'),
+                                      if (acceptedTimeline)
+                                        const _AcceptedBadge(label: 'Timeline Accepted'),
+                                      if (acceptedTerms)
+                                        const _AcceptedBadge(label: 'Terms Accepted'),
+                                    ],
                                   ],
                                 ),
                               ),

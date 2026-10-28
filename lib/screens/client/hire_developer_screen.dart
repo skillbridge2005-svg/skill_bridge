@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/skillbridge_avatar.dart';
+
 class HireDeveloperScreen extends StatelessWidget {
   const HireDeveloperScreen({super.key});
 
@@ -822,18 +824,13 @@ class _FindDevelopersScreenState extends State<FindDevelopersScreen> {
                 const SizedBox(height: 24),
                 Row(
                   children: [
-                    Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEEF2FF),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        color: Color(0xFF4F46E5),
-                        size: 30,
-                      ),
+                    SkillBridgeAvatar(
+                      profileImageUrl: data['profileImageUrl']?.toString(),
+                      name: name,
+                      size: 58,
+                      borderRadius: BorderRadius.circular(18),
+                      backgroundColor: const Color(0xFFEEF2FF),
+                      foregroundColor: const Color(0xFF4F46E5),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -1294,6 +1291,8 @@ class _DeveloperCard extends StatelessWidget {
       title: name,
       subtitle: bio,
       chips: skillList,
+      avatarImageUrl: data['profileImageUrl']?.toString(),
+      avatarName: name,
       buttonText: 'View Profile',
       onTap: onTap,
     );
@@ -1336,6 +1335,8 @@ class _BaseCard extends StatelessWidget {
   final List<String> chips;
   final String buttonText;
   final VoidCallback onTap;
+  final String? avatarImageUrl;
+  final String? avatarName;
 
   const _BaseCard({
     required this.icon,
@@ -1344,6 +1345,8 @@ class _BaseCard extends StatelessWidget {
     required this.chips,
     required this.buttonText,
     required this.onTap,
+    this.avatarImageUrl,
+    this.avatarName,
   });
 
   @override
@@ -1367,15 +1370,24 @@ class _BaseCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEEF2FF),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: const Color(0xFF4F46E5)),
-              ),
+              avatarName == null
+                  ? Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Icon(icon, color: const Color(0xFF4F46E5)),
+                    )
+                  : SkillBridgeAvatar(
+                      profileImageUrl: avatarImageUrl,
+                      name: avatarName,
+                      size: 52,
+                      borderRadius: BorderRadius.circular(16),
+                      backgroundColor: const Color(0xFFEEF2FF),
+                      foregroundColor: const Color(0xFF4F46E5),
+                    ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
