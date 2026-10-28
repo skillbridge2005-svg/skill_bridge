@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
-import 'email_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, this.role = 'developer'});
@@ -28,10 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool get _usingLocalAuthEmulator =>
       kDebugMode &&
-      const bool.fromEnvironment(
-        'USE_FUNCTIONS_EMULATOR',
-        defaultValue: false,
-      );
+      const bool.fromEnvironment('USE_FUNCTIONS_EMULATOR', defaultValue: false);
 
   // ------------------------------------------------------------
   // COLORS
@@ -76,6 +72,24 @@ class _LoginScreenState extends State<LoginScreen> {
           .signInWithEmailAndPassword(email: email, password: password);
 
       final currentUser = userCredential.user;
+
+      if (currentUser != null && !currentUser.emailVerified) {
+        await FirebaseAuth.instance.signOut();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Please verify your email before logging in.'),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        );
+        return;
+      }
 
       if (!mounted) return;
 
@@ -164,51 +178,33 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      debugPrint('[GoogleAuth] Step 1: Starting sign-in');
-
       UserCredential userCredential;
       String? googleDisplayName;
       String? googleEmail;
 
       if (kIsWeb) {
-        debugPrint('[GoogleAuth] Step 2: Web popup');
-
         final GoogleAuthProvider provider = GoogleAuthProvider();
+
         userCredential = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
-        debugPrint('[GoogleAuth] Step 2: Initializing Google Sign-In');
-
         final GoogleSignIn googleSignIn = GoogleSignIn.instance;
 
         await googleSignIn.initialize(
           serverClientId: '980367306545-02ltousaqnvthur87kir8i2hm9l2qpmr.apps.googleusercontent.com',
         );
 
-        debugPrint('[GoogleAuth] Step 3: Opening account selection');
-
         final GoogleSignInAccount googleUser = await googleSignIn
             .authenticate();
 
-        debugPrint('[GoogleAuth] Step 4: Account selected');
-
         final GoogleSignInAuthentication googleAuth = googleUser.authentication;
-
-        debugPrint(
-          '[GoogleAuth] Step 5: ID token available = '
-          '${googleAuth.idToken != null}',
-        );
 
         final credential = GoogleAuthProvider.credential(
           idToken: googleAuth.idToken,
         );
 
-        debugPrint('[GoogleAuth] Step 6: Firebase sign-in');
-
         userCredential = await FirebaseAuth.instance.signInWithCredential(
           credential,
         );
-
-        debugPrint('[GoogleAuth] Step 7: Firebase sign-in successful');
 
         googleDisplayName = googleUser.displayName;
         googleEmail = googleUser.email;
@@ -219,8 +215,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (user == null) {
         throw Exception('Unable to get Google user.');
       }
-
-      debugPrint('[GoogleAuth] Step 8: Checking Firestore user');
 
       final userDoc = FirebaseFirestore.instance
           .collection('users')
@@ -239,17 +233,10 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
 
-      debugPrint('[GoogleAuth] Step 9: Sign-in flow completed');
-
       if (!mounted) return;
 
       Navigator.popUntil(context, (route) => route.isFirst);
     } on GoogleSignInException catch (e) {
-      debugPrint(
-        '[GoogleAuth] GoogleSignInException: code=${e.code}, '
-        'description=${e.description}',
-      );
-
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -263,11 +250,6 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '[GoogleAuth] FirebaseAuthException: code=${e.code}, '
-        'message=${e.message}',
-      );
-
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -280,10 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       );
-    } catch (e, stackTrace) {
-      debugPrint('[GoogleAuth] Unexpected error: $e');
-      debugPrintStack(stackTrace: stackTrace);
-
+    } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(

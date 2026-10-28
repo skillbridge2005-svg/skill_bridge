@@ -1422,16 +1422,18 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                 estimate['amount'],
               ]);
 
-              final projectTotal = _parseProjectAmount(_firstValidValue([
-                data['budget'],
-                data['amount'],
-                data['projectAmount'],
-                estimate['totalCost'],
-                estimate['totalBudget'],
-                estimate['budget'],
-                estimate['estimatedCost'],
-                estimate['amount'],
-              ]));
+              final projectTotal = _parseProjectAmount(
+                _firstValidValue([
+                  data['budget'],
+                  data['amount'],
+                  data['projectAmount'],
+                  estimate['totalCost'],
+                  estimate['totalBudget'],
+                  estimate['budget'],
+                  estimate['estimatedCost'],
+                  estimate['amount'],
+                ]),
+              );
 
               final timeline = firstValidValue([
                 data['timeline'],
@@ -1447,8 +1449,8 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
               final deadline = data['deadline'];
               final deadlineText = deadline is Timestamp
                   ? '${deadline.toDate().day.toString().padLeft(2, '0')}/'
-                    '${deadline.toDate().month.toString().padLeft(2, '0')}/'
-                    '${deadline.toDate().year}'
+                        '${deadline.toDate().month.toString().padLeft(2, '0')}/'
+                        '${deadline.toDate().year}'
                   : '';
               final experienceLevel = data['experienceLevel']?.toString() ?? '';
               final workMode = data['workMode']?.toString() ?? '';
@@ -1459,11 +1461,16 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                   ? Map<String, dynamic>.from(data['milestones'] as Map)
                   : <String, dynamic>{};
               const milestoneKeys = [
-                'requirements', 'architecture', 'design',
-                'development', 'testing', 'deployment',
+                'requirements',
+                'architecture',
+                'design',
+                'development',
+                'testing',
+                'deployment',
               ];
               final completedMilestones = milestoneKeys
-                  .where((key) => milestones[key] == true).length;
+                  .where((key) => milestones[key] == true)
+                  .length;
               final calculatedProgress =
                   (completedMilestones / milestoneKeys.length * 100).round();
               final isCompleted =
@@ -1863,15 +1870,20 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                             DeveloperReviewWidget(
                               projectId: widget.projectId,
                               projectTitle: title,
-                              developerId: (data['developerId'] ??
-                                      data['assignedDeveloperId'] ?? '')
-                                  .toString(),
+                              developerId:
+                                  (data['developerId'] ??
+                                          data['assignedDeveloperId'] ??
+                                          '')
+                                      .toString(),
                               projectStatus: status,
                               progress: calculatedProgress,
                             ),
-                            if (budgetType.isNotEmpty || deadlineText.isNotEmpty ||
-                                experienceLevel.isNotEmpty || workMode.isNotEmpty ||
-                                priority.isNotEmpty || additionalInfo.isNotEmpty) ...[
+                            if (budgetType.isNotEmpty ||
+                                deadlineText.isNotEmpty ||
+                                experienceLevel.isNotEmpty ||
+                                workMode.isNotEmpty ||
+                                priority.isNotEmpty ||
+                                additionalInfo.isNotEmpty) ...[
                               const SizedBox(height: 14),
                               _DetailsCard(
                                 title: 'Additional Project Details',
@@ -1879,17 +1891,35 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 child: Column(
                                   children: [
                                     if (budgetType.isNotEmpty)
-                                      _DetailRow(label: 'Payment Type', value: budgetType),
+                                      _DetailRow(
+                                        label: 'Payment Type',
+                                        value: budgetType,
+                                      ),
                                     if (deadlineText.isNotEmpty)
-                                      _DetailRow(label: 'Deadline', value: deadlineText),
+                                      _DetailRow(
+                                        label: 'Deadline',
+                                        value: deadlineText,
+                                      ),
                                     if (experienceLevel.isNotEmpty)
-                                      _DetailRow(label: 'Experience Level', value: experienceLevel),
+                                      _DetailRow(
+                                        label: 'Experience Level',
+                                        value: experienceLevel,
+                                      ),
                                     if (workMode.isNotEmpty)
-                                      _DetailRow(label: 'Work Arrangement', value: workMode),
+                                      _DetailRow(
+                                        label: 'Work Arrangement',
+                                        value: workMode,
+                                      ),
                                     if (priority.isNotEmpty)
-                                      _DetailRow(label: 'Priority', value: priority),
+                                      _DetailRow(
+                                        label: 'Priority',
+                                        value: priority,
+                                      ),
                                     if (additionalInfo.isNotEmpty)
-                                      _DetailRow(label: 'Additional Instructions', value: additionalInfo),
+                                      _DetailRow(
+                                        label: 'Additional Instructions',
+                                        value: additionalInfo,
+                                      ),
                                   ],
                                 ),
                               ),
@@ -1907,12 +1937,15 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if ((plan['projectSummary']?.toString() ?? '')
+                                    if ((plan['projectSummary']?.toString() ??
+                                            '')
                                         .trim()
                                         .isNotEmpty) ...[
                                       const Text(
                                         'Project Summary',
-                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(plan['projectSummary'].toString()),
@@ -1921,14 +1954,19 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                     if (acceptedScope.isNotEmpty) ...[
                                       const Text(
                                         'Accepted Scope',
-                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 8),
                                       for (final item in acceptedScope)
                                         Padding(
-                                          padding: const EdgeInsets.only(bottom: 6),
+                                          padding: const EdgeInsets.only(
+                                            bottom: 6,
+                                          ),
                                           child: Row(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               const Icon(
                                                 Icons.check_circle_outline,
@@ -1945,7 +1983,9 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                     if (estimate.isNotEmpty) ...[
                                       const Text(
                                         'Estimate Details',
-                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 6),
                                       for (final entry in estimate.entries)
@@ -1953,9 +1993,12 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                             entry.value is! Map &&
                                             entry.value is! List)
                                           Padding(
-                                            padding: const EdgeInsets.only(bottom: 6),
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
                                             child: Row(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 Expanded(
                                                   flex: 2,
@@ -1968,24 +2011,32 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                                 ),
                                                 Expanded(
                                                   flex: 3,
-                                                  child: Text(entry.value.toString()),
+                                                  child: Text(
+                                                    entry.value.toString(),
+                                                  ),
                                                 ),
                                               ],
                                             ),
                                           ),
                                     ],
                                     if (plan['deliveryPhases'] is List &&
-                                        (plan['deliveryPhases'] as List).isNotEmpty) ...[
+                                        (plan['deliveryPhases'] as List)
+                                            .isNotEmpty) ...[
                                       const SizedBox(height: 14),
                                       const Text(
                                         'Delivery Phases',
-                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 6),
-                                      for (final phase in plan['deliveryPhases'] as List)
+                                      for (final phase
+                                          in plan['deliveryPhases'] as List)
                                         if (phase is Map)
                                           Padding(
-                                            padding: const EdgeInsets.only(bottom: 10),
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
+                                            ),
                                             child: Text(
                                               (phase['name'] ??
                                                       phase['title'] ??
@@ -1995,25 +2046,37 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                           )
                                         else
                                           Padding(
-                                            padding: const EdgeInsets.only(bottom: 6),
+                                            padding: const EdgeInsets.only(
+                                              bottom: 6,
+                                            ),
                                             child: Text(phase.toString()),
                                           ),
                                     ],
-                                    if (acceptedCost || acceptedTimeline || acceptedTerms) ...[
+                                    if (acceptedCost ||
+                                        acceptedTimeline ||
+                                        acceptedTerms) ...[
                                       const SizedBox(height: 12),
                                       const Divider(),
                                       const SizedBox(height: 8),
                                       const Text(
                                         'Acceptance Status',
-                                        style: TextStyle(fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 8),
                                       if (acceptedCost)
-                                        const _AcceptedBadge(label: 'Budget Accepted'),
+                                        const _AcceptedBadge(
+                                          label: 'Budget Accepted',
+                                        ),
                                       if (acceptedTimeline)
-                                        const _AcceptedBadge(label: 'Timeline Accepted'),
+                                        const _AcceptedBadge(
+                                          label: 'Timeline Accepted',
+                                        ),
                                       if (acceptedTerms)
-                                        const _AcceptedBadge(label: 'Terms Accepted'),
+                                        const _AcceptedBadge(
+                                          label: 'Terms Accepted',
+                                        ),
                                     ],
                                   ],
                                 ),

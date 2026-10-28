@@ -19,7 +19,7 @@ const {
   onCall,
   HttpsError,
 } = require("firebase-functions/v2/https");
-const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+
 const {getMessaging} = require("firebase-admin/messaging");
 
 const logger = require("firebase-functions/logger");
@@ -422,8 +422,8 @@ function getProjectAmountInPaise(projectData) {
 }
 
 async function initializeProjectPaymentState(
-  projectId,
-  clientId,
+    projectId,
+    clientId,
 ) {
   const projectRef = db.collection("projects").doc(projectId);
 
@@ -448,8 +448,8 @@ async function initializeProjectPaymentState(
 
     if (!projectSnapshot.exists) {
       throw new HttpsError(
-        "not-found",
-        "Project not found.",
+          "not-found",
+          "Project not found.",
       );
     }
 
@@ -457,8 +457,8 @@ async function initializeProjectPaymentState(
 
     if (projectData.clientId !== clientId) {
       throw new HttpsError(
-        "permission-denied",
-        "You cannot access this project's payment state.",
+          "permission-denied",
+          "You cannot access this project's payment state.",
       );
     }
 
@@ -467,8 +467,8 @@ async function initializeProjectPaymentState(
 
     if (projectTotalInPaise === null) {
       throw new HttpsError(
-        "failed-precondition",
-        "The project budget is invalid.",
+          "failed-precondition",
+          "The project budget is invalid.",
       );
     }
 
@@ -476,9 +476,9 @@ async function initializeProjectPaymentState(
       paymentCount,
       totalPaidInPaise,
     } = validateVerifiedPayments(
-      paymentsSnapshot,
-      clientId,
-      projectId,
+        paymentsSnapshot,
+        clientId,
+        projectId,
     );
 
     if (
@@ -486,8 +486,8 @@ async function initializeProjectPaymentState(
       paymentCount > 3
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "Verified payment records exceed the project payment limits.",
+          "failed-precondition",
+          "Verified payment records exceed the project payment limits.",
       );
     }
 
@@ -503,8 +503,8 @@ async function initializeProjectPaymentState(
         existingState.successfulPaymentCount !== paymentCount
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "Project payment state does not match verified payment records and requires reconciliation.",
+            "failed-precondition",
+            "Project payment state does not match verified payment records and requires reconciliation.",
         );
       }
 
@@ -532,9 +532,9 @@ async function initializeProjectPaymentState(
 }
 
 function validateVerifiedPayments(
-  paymentsSnapshot,
-  clientId,
-  projectId,
+    paymentsSnapshot,
+    clientId,
+    projectId,
 ) {
   let totalPaidInPaise = 0;
 
@@ -550,8 +550,8 @@ function validateVerifiedPayments(
       payment.amountInPaise <= 0
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "An existing payment record is invalid.",
+          "failed-precondition",
+          "An existing payment record is invalid.",
       );
     }
 
@@ -559,8 +559,8 @@ function validateVerifiedPayments(
 
     if (!Number.isSafeInteger(totalPaidInPaise)) {
       throw new HttpsError(
-        "failed-precondition",
-        "The total paid amount is invalid.",
+          "failed-precondition",
+          "The total paid amount is invalid.",
       );
     }
   }
@@ -580,12 +580,12 @@ function validateVerifiedPayments(
 exports.createRazorpayOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to create a payment order.",
+        "unauthenticated",
+        "You must be logged in to create a payment order.",
     );
   }
 
-  const { projectId, amount } = request.data || {};
+  const {projectId, amount} = request.data || {};
   const clientId = request.auth.uid;
 
   if (
@@ -593,8 +593,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     !projectId.trim()
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "A valid project ID is required.",
+        "invalid-argument",
+        "A valid project ID is required.",
     );
   }
 
@@ -604,8 +604,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     amount <= 0
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "Enter a valid payment amount.",
+        "invalid-argument",
+        "Enter a valid payment amount.",
     );
   }
 
@@ -616,8 +616,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     requestedAmountInPaise <= 0
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "The payment amount is invalid.",
+        "invalid-argument",
+        "The payment amount is invalid.",
     );
   }
 
@@ -637,8 +637,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
       !process.env.RAZORPAY_KEY_SECRET
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "Razorpay credentials are not configured for Cloud Functions.",
+          "failed-precondition",
+          "Razorpay credentials are not configured for Cloud Functions.",
       );
     }
 
@@ -652,8 +652,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
       if (!projectSnapshot.exists || !stateSnapshot.exists) {
         throw new HttpsError(
-          "failed-precondition",
-          "Project payment state is unavailable.",
+            "failed-precondition",
+            "Project payment state is unavailable.",
         );
       }
 
@@ -665,8 +665,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
         state.clientId !== clientId
       ) {
         throw new HttpsError(
-          "permission-denied",
-          "You are not authorized to pay for this project.",
+            "permission-denied",
+            "You are not authorized to pay for this project.",
         );
       }
 
@@ -678,15 +678,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
         currentProjectTotalInPaise !== state.projectTotalInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project budget has changed. Payment state requires reconciliation.",
+            "failed-precondition",
+            "The project budget has changed. Payment state requires reconciliation.",
         );
       }
 
       if (state.successfulPaymentCount >= 3) {
         throw new HttpsError(
-          "failed-precondition",
-          "The maximum of three successful payments has been reached.",
+            "failed-precondition",
+            "The maximum of three successful payments has been reached.",
         );
       }
 
@@ -696,8 +696,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
           state.activeOrderAmountInPaise <= 0
         ) {
           throw new HttpsError(
-            "failed-precondition",
-            "The active payment reservation is invalid and requires reconciliation.",
+              "failed-precondition",
+              "The active payment reservation is invalid and requires reconciliation.",
           );
         }
 
@@ -722,15 +722,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
         remainingInPaise !== state.remainingInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The remaining project balance is invalid or fully paid.",
+            "failed-precondition",
+            "The remaining project balance is invalid or fully paid.",
         );
       }
 
       if (requestedAmountInPaise > remainingInPaise) {
         throw new HttpsError(
-          "invalid-argument",
-          `Payment cannot exceed the remaining balance of ${(remainingInPaise / 100).toFixed(2)} INR.`,
+            "invalid-argument",
+            `Payment cannot exceed the remaining balance of ${(remainingInPaise / 100).toFixed(2)} INR.`,
         );
       }
 
@@ -739,8 +739,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
         requestedAmountInPaise !== remainingInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The third payment must cover the entire remaining balance.",
+            "failed-precondition",
+            "The third payment must cover the entire remaining balance.",
         );
       }
 
@@ -786,8 +786,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
             if (!stateSnapshot.exists) {
               throw new HttpsError(
-                "failed-precondition",
-                "Project payment state was not found.",
+                  "failed-precondition",
+                  "Project payment state was not found.",
               );
             }
 
@@ -800,8 +800,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
                 reservation.amountInPaise
             ) {
               throw new HttpsError(
-                "aborted",
-                "The payment reservation changed during order recovery.",
+                  "aborted",
+                  "The payment reservation changed during order recovery.",
               );
             }
 
@@ -815,8 +815,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
       if (!existingOrder) {
         throw new HttpsError(
-          "failed-precondition",
-          "The reserved Razorpay order is still being reconciled. Do not create another payment; retry this request shortly.",
+            "failed-precondition",
+            "The reserved Razorpay order is still being reconciled. Do not create another payment; retry this request shortly.",
         );
       }
 
@@ -833,8 +833,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
         existingOrder.currency !== "INR"
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The existing Razorpay order does not match its payment reservation.",
+            "failed-precondition",
+            "The existing Razorpay order does not match its payment reservation.",
         );
       }
 
@@ -870,15 +870,15 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
       if (existingOrder.status === "paid" || unsettledAttempt) {
         throw new HttpsError(
-          "failed-precondition",
-          "This Razorpay order has a pending or successful payment attempt. Payment status must be reconciled before another checkout can start.",
+            "failed-precondition",
+            "This Razorpay order has a pending or successful payment attempt. Payment status must be reconciled before another checkout can start.",
         );
       }
 
       if (reservation.amountInPaise !== requestedAmountInPaise) {
         throw new HttpsError(
-          "failed-precondition",
-          `A payment order for ${(reservation.amountInPaise / 100).toFixed(2)} INR is already reserved. Enter that amount to continue the existing order, or contact support to reconcile it.`,
+            "failed-precondition",
+            `A payment order for ${(reservation.amountInPaise / 100).toFixed(2)} INR is already reserved. Enter that amount to continue the existing order, or contact support to reconcile it.`,
         );
       }
 
@@ -918,8 +918,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 
       if (!stateSnapshot.exists) {
         throw new HttpsError(
-          "failed-precondition",
-          "Project payment state was not found.",
+            "failed-precondition",
+            "Project payment state was not found.",
         );
       }
 
@@ -930,8 +930,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
         state.activeOrderAmountInPaise !== reservation.amountInPaise
       ) {
         throw new HttpsError(
-          "aborted",
-          "The payment reservation changed unexpectedly.",
+            "aborted",
+            "The payment reservation changed unexpectedly.",
         );
       }
 
@@ -1019,8 +1019,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      error?.error?.description ||
+        "internal",
+        error?.error?.description ||
       error?.message ||
       "Unable to create Razorpay order.",
     );
@@ -1036,8 +1036,8 @@ exports.createRazorpayOrder = onCall(async (request) => {
 exports.verifyRazorpayPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to verify a payment.",
+        "unauthenticated",
+        "You must be logged in to verify a payment.",
     );
   }
 
@@ -1066,8 +1066,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         !/^[a-fA-F0-9]{64}$/.test(razorpaySignature)))
   ) {
     throw new HttpsError(
-      "invalid-argument",
-      "Payment verification data is incomplete.",
+        "invalid-argument",
+        "Payment verification data is incomplete.",
     );
   }
 
@@ -1079,8 +1079,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
     if (!keySecret) {
       throw new HttpsError(
-        "internal",
-        "Payment verification is not configured.",
+          "internal",
+          "Payment verification is not configured.",
       );
     }
 
@@ -1095,8 +1095,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         reconciliationOrder.notes.clientId !== clientId
       ) {
         throw new HttpsError(
-          "permission-denied",
-          "This payment order does not belong to you.",
+            "permission-denied",
+            "This payment order does not belong to you.",
         );
       }
 
@@ -1108,8 +1108,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
       if (capturedPayments.length !== 1) {
         throw new HttpsError(
-          "failed-precondition",
-          "The order does not have exactly one captured payment to reconcile.",
+            "failed-precondition",
+            "The order does not have exactly one captured payment to reconcile.",
         );
       }
 
@@ -1128,8 +1128,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       typeof razorpaySignature !== "string"
     ) {
       throw new HttpsError(
-        "invalid-argument",
-        "Payment verification data is incomplete.",
+          "invalid-argument",
+          "Payment verification data is incomplete.",
       );
     }
 
@@ -1153,8 +1153,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       !crypto.timingSafeEqual(generatedBuffer, suppliedBuffer)
     ) {
       throw new HttpsError(
-        "permission-denied",
-        "Payment signature verification failed.",
+          "permission-denied",
+          "Payment signature verification failed.",
       );
     }
 
@@ -1169,8 +1169,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       order.notes.clientId !== clientId
     ) {
       throw new HttpsError(
-        "permission-denied",
-        "This payment order does not belong to you.",
+          "permission-denied",
+          "This payment order does not belong to you.",
       );
     }
 
@@ -1184,8 +1184,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       !reservationToken
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "Project or reservation information is missing.",
+          "failed-precondition",
+          "Project or reservation information is missing.",
       );
     }
 
@@ -1195,8 +1195,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       order.currency !== "INR"
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The Razorpay order amount or currency is invalid.",
+          "failed-precondition",
+          "The Razorpay order amount or currency is invalid.",
       );
     }
 
@@ -1206,15 +1206,15 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
 
     if (payment.order_id !== razorpayOrderId) {
       throw new HttpsError(
-        "failed-precondition",
-        "Payment does not belong to this order.",
+          "failed-precondition",
+          "Payment does not belong to this order.",
       );
     }
 
     if (payment.status !== "captured") {
       throw new HttpsError(
-        "failed-precondition",
-        "The payment has not been captured.",
+          "failed-precondition",
+          "The payment has not been captured.",
       );
     }
 
@@ -1223,8 +1223,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
       payment.currency !== order.currency
     ) {
       throw new HttpsError(
-        "failed-precondition",
-        "The captured payment does not match the order.",
+          "failed-precondition",
+          "The captured payment does not match the order.",
       );
     }
 
@@ -1285,15 +1285,15 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         }
 
         throw new HttpsError(
-          "already-exists",
-          "A conflicting payment record already exists.",
+            "already-exists",
+            "A conflicting payment record already exists.",
         );
       }
 
       if (!projectSnapshot.exists || !stateSnapshot.exists) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project payment state is unavailable.",
+            "failed-precondition",
+            "The project payment state is unavailable.",
         );
       }
 
@@ -1305,8 +1305,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         state.clientId !== clientId
       ) {
         throw new HttpsError(
-          "permission-denied",
-          "You are not authorized to pay for this project.",
+            "permission-denied",
+            "You are not authorized to pay for this project.",
         );
       }
 
@@ -1318,8 +1318,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         currentProjectTotalInPaise !== state.projectTotalInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project budget has changed.",
+            "failed-precondition",
+            "The project budget has changed.",
         );
       }
 
@@ -1328,8 +1328,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         state.activeOrderId !== reservationToken
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "This payment order no longer has an active reservation.",
+            "failed-precondition",
+            "This payment order no longer has an active reservation.",
         );
       }
 
@@ -1337,8 +1337,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         state.activeOrderAmountInPaise !== verifiedAmountInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The payment amount does not match the reserved amount.",
+            "failed-precondition",
+            "The payment amount does not match the reserved amount.",
         );
       }
 
@@ -1350,15 +1350,15 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         state.successfulPaymentCount < 0
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The project payment state is invalid.",
+            "failed-precondition",
+            "The project payment state is invalid.",
         );
       }
 
       if (state.successfulPaymentCount >= 3) {
         throw new HttpsError(
-          "failed-precondition",
-          "The maximum of three successful payments has been reached.",
+            "failed-precondition",
+            "The maximum of three successful payments has been reached.",
         );
       }
 
@@ -1370,15 +1370,15 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         expectedRemainingInPaise !== state.remainingInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The remaining project balance is invalid.",
+            "failed-precondition",
+            "The remaining project balance is invalid.",
         );
       }
 
       if (verifiedAmountInPaise > expectedRemainingInPaise) {
         throw new HttpsError(
-          "failed-precondition",
-          "The payment exceeds the remaining balance.",
+            "failed-precondition",
+            "The payment exceeds the remaining balance.",
         );
       }
 
@@ -1387,8 +1387,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         verifiedAmountInPaise !== expectedRemainingInPaise
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The third payment must cover the entire remaining balance.",
+            "failed-precondition",
+            "The third payment must cover the entire remaining balance.",
         );
       }
 
@@ -1406,8 +1406,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
         newRemainingInPaise !== 0
       ) {
         throw new HttpsError(
-          "failed-precondition",
-          "The third payment must complete the project payment.",
+            "failed-precondition",
+            "The third payment must complete the project payment.",
         );
       }
 
@@ -1499,8 +1499,8 @@ exports.verifyRazorpayPayment = onCall(async (request) => {
     }
 
     throw new HttpsError(
-      "internal",
-      "Unable to verify and save payment.",
+        "internal",
+        "Unable to verify and save payment.",
     );
   }
 });
@@ -4361,111 +4361,111 @@ exports.notifyDevelopersOnProjectCreated = onDocumentCreated(
  * Send a push notification when a SkillBridge notification is created.
  */
 exports.sendNotificationPush = onDocumentCreated(
-  {
-    document: "notifications/{notificationId}",
-    region: "us-central1",
-  },
-  async (event) => {
-    const snapshot = event.data;
+    {
+      document: "notifications/{notificationId}",
+      region: "us-central1",
+    },
+    async (event) => {
+      const snapshot = event.data;
 
-    if (!snapshot) {
-      return;
-    }
+      if (!snapshot) {
+        return;
+      }
 
-    const notification = snapshot.data();
-    const developerId = notification.developerId;
-    const title = notification.title;
-    const body = notification.body;
+      const notification = snapshot.data();
+      const developerId = notification.developerId;
+      const title = notification.title;
+      const body = notification.body;
 
-    if (!developerId || !title || !body) {
-      logger.warn("Notification is missing required fields.", {
-        notificationId: event.params.notificationId,
-      });
-      return;
-    }
-
-    try {
-      const userSnapshot = await db
-          .collection("users")
-          .doc(developerId)
-          .get();
-
-      if (!userSnapshot.exists) {
-        logger.warn("Notification recipient does not exist.", {
-          developerId,
+      if (!developerId || !title || !body) {
+        logger.warn("Notification is missing required fields.", {
+          notificationId: event.params.notificationId,
         });
         return;
       }
 
-      const userData = userSnapshot.data();
-      const tokens = Array.isArray(userData.fcmTokens) ?
+      try {
+        const userSnapshot = await db
+            .collection("users")
+            .doc(developerId)
+            .get();
+
+        if (!userSnapshot.exists) {
+          logger.warn("Notification recipient does not exist.", {
+            developerId,
+          });
+          return;
+        }
+
+        const userData = userSnapshot.data();
+        const tokens = Array.isArray(userData.fcmTokens) ?
         userData.fcmTokens.filter(
             (token) => typeof token === "string" && token.length > 0,
         ) :
         [];
 
-      if (tokens.length === 0) {
-        logger.info("No FCM tokens registered for recipient.", {
-          developerId,
-        });
-        return;
-      }
+        if (tokens.length === 0) {
+          logger.info("No FCM tokens registered for recipient.", {
+            developerId,
+          });
+          return;
+        }
 
-      const response = await getMessaging().sendEachForMulticast({
-        tokens,
-        notification: {
-          title,
-          body,
-        },
-        data: {
-          notificationId: event.params.notificationId,
-          type: String(notification.type || ""),
-          projectId: String(notification.projectId || ""),
-          applicationId: String(notification.applicationId || ""),
-          meetingId: String(notification.meetingId || ""),
-        },
-        android: {
-          priority: "high",
+        const response = await getMessaging().sendEachForMulticast({
+          tokens,
           notification: {
-            channelId: "skillbridge_notifications",
+            title,
+            body,
           },
-        },
-      });
+          data: {
+            notificationId: event.params.notificationId,
+            type: String(notification.type || ""),
+            projectId: String(notification.projectId || ""),
+            applicationId: String(notification.applicationId || ""),
+            meetingId: String(notification.meetingId || ""),
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "skillbridge_notifications",
+            },
+          },
+        });
 
-      logger.info("FCM notification delivery attempted.", {
-        developerId,
-        successCount: response.successCount,
-        failureCount: response.failureCount,
-      });
+        logger.info("FCM notification delivery attempted.", {
+          developerId,
+          successCount: response.successCount,
+          failureCount: response.failureCount,
+        });
 
-      const invalidTokens = [];
+        const invalidTokens = [];
 
-      response.responses.forEach((result, index) => {
-        if (
-          !result.success &&
+        response.responses.forEach((result, index) => {
+          if (
+            !result.success &&
           (
             result.error?.code ===
               "messaging/registration-token-not-registered" ||
             result.error?.code ===
               "messaging/invalid-registration-token"
           )
-        ) {
-          invalidTokens.push(tokens[index]);
-        }
-      });
-
-      if (invalidTokens.length > 0) {
-        await db.collection("users").doc(developerId).update({
-          fcmTokens: FieldValue.arrayRemove(...invalidTokens),
+          ) {
+            invalidTokens.push(tokens[index]);
+          }
         });
-      }
-    } catch (error) {
-      logger.error("Failed to send SkillBridge push notification.", {
-        notificationId: event.params.notificationId,
-        error: error.message,
-      });
 
-      throw error;
-    }
-  },
+        if (invalidTokens.length > 0) {
+          await db.collection("users").doc(developerId).update({
+            fcmTokens: FieldValue.arrayRemove(...invalidTokens),
+          });
+        }
+      } catch (error) {
+        logger.error("Failed to send SkillBridge push notification.", {
+          notificationId: event.params.notificationId,
+          error: error.message,
+        });
+
+        throw error;
+      }
+    },
 );

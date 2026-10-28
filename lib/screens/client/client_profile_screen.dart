@@ -657,6 +657,22 @@ class ClientProfileScreen extends StatelessWidget {
                           },
                         ),
 
+                        const SizedBox(height: 10),
+
+                        _ProfileLinkCard(
+                          icon: Icons.ondemand_video_rounded,
+                          title: 'How to Use SkillBridge',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const HowToUseSkillBridgeScreen(),
+                              ),
+                            );
+                          },
+                        ),
+
                         const SizedBox(height: 30),
 
                         const _ProfileSectionTitle(title: 'FOLLOW US'),

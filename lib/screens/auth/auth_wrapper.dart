@@ -63,13 +63,16 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
   }
 
   Future<void> _configureSupabaseRole() async {
-    debugPrint('AUTH DEBUG: Skipping ensureSupabaseRole Cloud Function.');
+    debugPrint('AUTH DEBUG: Role setup started');
 
-    // Firebase authentication is already handled by AuthWrapper.
-    // Refresh the token without requiring a Cloud Function.
-    await widget.user.getIdToken(true);
-
-    debugPrint('AUTH DEBUG: Firebase ID token refreshed.');
+    try {
+      await widget.user.getIdToken(true);
+      debugPrint('AUTH DEBUG: Firebase ID token refreshed');
+    } catch (e, st) {
+      debugPrint('AUTH DEBUG: Token refresh failed: $e');
+      debugPrintStack(stackTrace: st);
+      rethrow;
+    }
   }
 
   @override
@@ -123,6 +126,10 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
 
             final role = data['role']?.toString().trim().toLowerCase();
 
+            debugPrint('AUTH DEBUG: UID = ${widget.user.uid}');
+            debugPrint('AUTH DEBUG: Firestore profile = $data');
+            debugPrint('AUTH DEBUG: Role = "$role"');
+
             if (role == 'client') {
               return const ClientHome();
             }
@@ -131,7 +138,9 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
               return const DeveloperHome();
             }
 
-            return const _ErrorScreen(message: 'Invalid user role.');
+            debugPrint('AUTH DEBUG: Invalid or missing role: "$role"');
+
+            return _ErrorScreen(message: 'Invalid user role: "$role"');
           },
         );
       },
