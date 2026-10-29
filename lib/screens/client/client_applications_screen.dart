@@ -1,8 +1,28 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:skill_bridge/models/project_model.dart';
 
 import '../../widgets/skillbridge_avatar.dart';
+import '../developer/developer_public_profile_screen.dart';
+
+class _RecommendedApplicant {
+  final String applicationId;
+  final String developerId;
+  final String name;
+  final String photoUrl;
+  final int matchPercentage;
+  final String status;
+
+  const _RecommendedApplicant({
+    required this.applicationId,
+    required this.developerId,
+    required this.name,
+    required this.photoUrl,
+    required this.matchPercentage,
+    required this.status,
+  });
+}
 
 class ClientApplicationsScreen extends StatelessWidget {
   final String projectId;
@@ -241,6 +261,321 @@ class ClientApplicationsScreen extends StatelessWidget {
     if (confirmed == true && context.mounted) {
       await _updateStatus(context, applicationId, status);
     }
+  }
+
+  Future<List<_RecommendedApplicant>> _loadTopApplicants(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) async {
+    final eligibleApplications = applications.where((doc) {
+      final data = doc.data();
+      final status = (data['status'] ?? 'pending')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      final developerId = (data['developerId'] ?? '').toString().trim();
+
+      return developerId.isNotEmpty &&
+          status != 'rejected' &&
+          status != 'withdrawn';
+    }).toList();
+
+    if (eligibleApplications.isEmpty) return [];
+
+    final projectSnapshot = await _firestore
+        .collection('projects')
+        .doc(projectId)
+        .get();
+
+    if (!projectSnapshot.exists) return [];
+
+    final project = ProjectModel.fromFirestore(projectSnapshot);
+
+    final results = await Future.wait(
+      eligibleApplications.map((application) async {
+        final developerId = application.data()['developerId'].toString().trim();
+
+        final profileFuture = _firestore
+            .collection('developerProfiles')
+            .doc(developerId)
+            .get();
+
+        final userFuture = _firestore
+            .collection('users')
+            .doc(developerId)
+            .get();
+
+        final snapshots = await Future.wait([profileFuture, userFuture]);
+
+        final profileData = snapshots[0].data() ?? <String, dynamic>{};
+        final userData = snapshots[1].data() ?? <String, dynamic>{};
+
+        List<String> readList(dynamic value) {
+          if (value is! List) return [];
+
+          return value
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList();
+        }
+
+        String? readString(dynamic value) {
+          final result = value?.toString().trim();
+          return result == null || result.isEmpty ? null : result;
+        }
+
+        final score = project.getMatchPercentage(
+          developerSkills: readList(profileData['skills']),
+          developerTechnologies: readList(profileData['technologies']),
+          developerProjectType:
+              readString(profileData['projectType']) ??
+              readString(userData['projectType']),
+          developerWorkMode:
+              readString(profileData['workMode']) ??
+              readString(userData['workMode']),
+          developerDuration:
+              readString(profileData['projectDuration']) ??
+              readString(profileData['duration']) ??
+              readString(userData['duration']),
+        );
+
+        final name =
+            readString(userData['name']) ??
+            readString(userData['fullName']) ??
+            readString(userData['displayName']) ??
+            readString(profileData['name']) ??
+            'Developer';
+
+        final photoUrl =
+            readString(userData['profileImageUrl']) ??
+            readString(profileData['photoUrl']) ??
+            '';
+
+        return _RecommendedApplicant(
+          applicationId: application.id,
+          developerId: developerId,
+          name: name,
+          photoUrl: photoUrl,
+          matchPercentage: score,
+          status: (application.data()['status'] ?? 'pending').toString(),
+        );
+      }),
+    );
+
+    results.sort((a, b) => b.matchPercentage.compareTo(a.matchPercentage));
+
+    return results.take(3).toList();
+  }
+
+  Future<Map<String, int>> _loadAllApplicantScores(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) async {
+    final projectSnapshot = await _firestore
+        .collection('projects')
+        .doc(projectId)
+        .get();
+
+    if (!projectSnapshot.exists) return {};
+
+    final project = ProjectModel.fromFirestore(projectSnapshot);
+
+    final scores = <String, int>{};
+
+    for (final application in applications) {
+      final developerId = (application.data()['developerId'] ?? '')
+          .toString()
+          .trim();
+
+      if (developerId.isEmpty) continue;
+
+      final profileSnapshot = await _firestore
+          .collection('developerProfiles')
+          .doc(developerId)
+          .get();
+
+      final userSnapshot = await _firestore
+          .collection('users')
+          .doc(developerId)
+          .get();
+
+      final profile = profileSnapshot.data() ?? <String, dynamic>{};
+      final user = userSnapshot.data() ?? <String, dynamic>{};
+
+      List<String> readList(dynamic value) {
+        if (value is! List) return [];
+        return value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+      }
+
+      String? readString(dynamic value) {
+        final result = value?.toString().trim();
+        return result == null || result.isEmpty ? null : result;
+      }
+
+      scores[application.id] = project.getMatchPercentage(
+        developerSkills: readList(profile['skills']),
+        developerTechnologies: readList(profile['technologies']),
+        developerProjectType:
+            readString(profile['projectType']) ??
+            readString(user['projectType']),
+        developerWorkMode:
+            readString(profile['workMode']) ?? readString(user['workMode']),
+        developerDuration:
+            readString(profile['projectDuration']) ??
+            readString(profile['duration']) ??
+            readString(user['duration']),
+      );
+    }
+
+    return scores;
+  }
+
+  Widget _buildTopRecommendations(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return FutureBuilder<List<_RecommendedApplicant>>(
+      future: _loadTopApplicants(applications),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Unable to calculate applicant matches.'),
+          );
+        }
+
+        final recommendations = snapshot.data ?? [];
+
+        if (recommendations.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFE5EAF2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome_rounded, color: colors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Top 3 Recommended Applicants',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Ranked by skills, technologies and project preferences.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ...recommendations.asMap().entries.map((entry) {
+                final rank = entry.key + 1;
+                final applicant = entry.value;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F7FB),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: colors.primaryContainer,
+                          child: Text(
+                            '$rank',
+                            style: TextStyle(
+                              color: colors.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        SkillBridgeAvatar(
+                          profileImageUrl: applicant.photoUrl,
+                          name: applicant.name,
+                          size: 42,
+                          backgroundColor: colors.primaryContainer,
+                          foregroundColor: colors.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                applicant.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                applicant.status.toUpperCase(),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${applicant.matchPercentage}%',
+                              style: TextStyle(
+                                color: colors.primary,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            Text('match', style: theme.textTheme.labelSmall),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -529,27 +864,64 @@ class ClientApplicationsScreen extends StatelessWidget {
                           ),
                         ),
                         Expanded(
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                            itemCount: applications.length,
-                            itemBuilder: (context, index) {
-                              final doc = applications[index];
-                              final data = doc.data();
+                          child: ListView(
+                            padding: const EdgeInsets.only(bottom: 24),
+                            children: [
+                              _buildTopRecommendations(context, applications),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  8,
+                                  20,
+                                  4,
+                                ),
+                                child: Text(
+                                  'All Applications',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
 
-                              return _ApplicationCard(
-                                applicationId: doc.id,
-                                data: data,
-                                statusColor: _statusColor(
-                                  (data['status'] ?? 'pending').toString(),
-                                  colors,
-                                ),
-                                statusLabel: _statusLabel(
-                                  (data['status'] ?? 'pending').toString(),
-                                ),
-                                onStatusChange: (status) =>
-                                    _confirmAction(context, doc.id, status),
-                              );
-                            },
+                              FutureBuilder<Map<String, int>>(
+                                future: _loadAllApplicantScores(applications),
+                                builder: (context, scoreSnapshot) {
+                                  final scores = scoreSnapshot.data ?? {};
+
+                                  return Column(
+                                    children: applications.map((doc) {
+                                      final data = doc.data();
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                        ),
+                                        child: _ApplicationCard(
+                                          applicationId: doc.id,
+                                          data: data,
+                                          matchPercentage: scores[doc.id],
+                                          statusColor: _statusColor(
+                                            (data['status'] ?? 'pending')
+                                                .toString(),
+                                            colors,
+                                          ),
+                                          statusLabel: _statusLabel(
+                                            (data['status'] ?? 'pending')
+                                                .toString(),
+                                          ),
+                                          onStatusChange: (status) =>
+                                              _confirmAction(
+                                                context,
+                                                doc.id,
+                                                status,
+                                              ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -566,6 +938,7 @@ class ClientApplicationsScreen extends StatelessWidget {
 }
 
 class _ApplicationCard extends StatelessWidget {
+  final int? matchPercentage;
   final String applicationId;
   final Map<String, dynamic> data;
   final Color statusColor;
@@ -573,6 +946,7 @@ class _ApplicationCard extends StatelessWidget {
   final ValueChanged<String> onStatusChange;
 
   const _ApplicationCard({
+    this.matchPercentage,
     required this.applicationId,
     required this.data,
     required this.statusColor,
@@ -660,6 +1034,27 @@ class _ApplicationCard extends StatelessWidget {
                 ),
               ],
             ),
+
+            if (developerId.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DeveloperPublicProfileScreen(
+                          developerId: developerId.trim(),
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.person_outline_rounded),
+                  label: const Text('View Developer Profile'),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 18),
             Row(
               children: [
@@ -790,6 +1185,27 @@ class _ApplicationCard extends StatelessWidget {
                   color: colors.onSurfaceVariant,
                 ),
               ),
+              if (matchPercentage != null) ...[
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.auto_awesome_rounded,
+                      size: 14,
+                      color: Color(0xFF2563EB),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$matchPercentage% match',
+                      style: const TextStyle(
+                        color: Color(0xFF2563EB),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

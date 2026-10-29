@@ -11,17 +11,15 @@ class ApplicationService {
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
     NotificationService? notificationService,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance,
-        _notificationService =
-            notificationService ?? NotificationService();
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _auth = auth ?? FirebaseAuth.instance,
+       _notificationService = notificationService ?? NotificationService();
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
   final NotificationService _notificationService;
 
-  CollectionReference<Map<String, dynamic>>
-      get _applicationsCollection {
+  CollectionReference<Map<String, dynamic>> get _applicationsCollection {
     return _firestore.collection('applications');
   }
 
@@ -38,36 +36,26 @@ class ApplicationService {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
-      return Stream<List<ApplicationModel>>.value(
-        <ApplicationModel>[],
-      );
+      return Stream<List<ApplicationModel>>.value(<ApplicationModel>[]);
     }
 
     return _applicationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
+        .where('developerId', isEqualTo: developerId)
         .snapshots()
         .map(_documentsToApplications);
   }
 
   /// Streams a single application.
-  Stream<ApplicationModel?> watchApplication(
-    String applicationId,
-  ) {
-    return _applicationsCollection
-        .doc(applicationId)
-        .snapshots()
-        .map(
-      (snapshot) {
-        if (!snapshot.exists) {
-          return null;
-        }
+  Stream<ApplicationModel?> watchApplication(String applicationId) {
+    return _applicationsCollection.doc(applicationId).snapshots().map((
+      snapshot,
+    ) {
+      if (!snapshot.exists) {
+        return null;
+      }
 
-        return ApplicationModel.fromFirestore(snapshot);
-      },
-    );
+      return ApplicationModel.fromFirestore(snapshot);
+    });
   }
 
   // ===========================================================================
@@ -79,26 +67,19 @@ class ApplicationService {
     final developerId = _requireDeveloper();
 
     final snapshot = await _applicationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
+        .where('developerId', isEqualTo: developerId)
         .get();
 
     return _documentsToApplications(snapshot);
   }
 
   /// Fetches one application by ID.
-  Future<ApplicationModel?> getApplication(
-    String applicationId,
-  ) async {
+  Future<ApplicationModel?> getApplication(String applicationId) async {
     if (applicationId.trim().isEmpty) {
       return null;
     }
 
-    final snapshot = await _applicationsCollection
-        .doc(applicationId)
-        .get();
+    final snapshot = await _applicationsCollection.doc(applicationId).get();
 
     if (!snapshot.exists) {
       return null;
@@ -118,10 +99,7 @@ class ApplicationService {
     }
 
     final snapshot = await _applicationsCollection
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('projectId', isEqualTo: projectId)
         .get();
 
     return _documentsToApplications(snapshot);
@@ -133,9 +111,7 @@ class ApplicationService {
 
   /// Checks whether the current developer has already applied
   /// to a specific project.
-  Future<bool> hasAppliedToProject(
-    String projectId,
-  ) async {
+  Future<bool> hasAppliedToProject(String projectId) async {
     final developerId = currentDeveloperId;
 
     if (developerId == null) {
@@ -144,14 +120,8 @@ class ApplicationService {
 
     final snapshot = await _firestore
         .collection('applications')
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('developerId', isEqualTo: developerId)
+        .where('projectId', isEqualTo: projectId)
         .limit(10)
         .get();
 
@@ -164,10 +134,7 @@ class ApplicationService {
     for (final doc in snapshot.docs) {
       final data = doc.data();
 
-      final status = (data['status'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
+      final status = (data['status'] ?? '').toString().trim().toLowerCase();
 
       if (status != 'withdrawn') {
         return true;
@@ -179,9 +146,7 @@ class ApplicationService {
 
   /// Returns an existing application for the current developer
   /// and project.
-  Future<ApplicationModel?> getMyApplicationForProject(
-    String projectId,
-  ) async {
+  Future<ApplicationModel?> getMyApplicationForProject(String projectId) async {
     final developerId = currentDeveloperId;
 
     if (developerId == null || projectId.trim().isEmpty) {
@@ -189,14 +154,8 @@ class ApplicationService {
     }
 
     final snapshot = await _applicationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('developerId', isEqualTo: developerId)
+        .where('projectId', isEqualTo: projectId)
         .limit(1)
         .get();
 
@@ -204,9 +163,7 @@ class ApplicationService {
       return null;
     }
 
-    return ApplicationModel.fromFirestore(
-      snapshot.docs.first,
-    );
+    return ApplicationModel.fromFirestore(snapshot.docs.first);
   }
 
   // ===========================================================================
@@ -226,21 +183,15 @@ class ApplicationService {
     final developerId = _requireDeveloper();
 
     if (projectId.trim().isEmpty) {
-      throw const ApplicationServiceException(
-        'Project ID cannot be empty.',
-      );
+      throw const ApplicationServiceException('Project ID cannot be empty.');
     }
 
     if (clientId.trim().isEmpty) {
-      throw const ApplicationServiceException(
-        'Client ID cannot be empty.',
-      );
+      throw const ApplicationServiceException('Client ID cannot be empty.');
     }
 
     if (coverLetter.trim().isEmpty) {
-      throw const ApplicationServiceException(
-        'Cover letter cannot be empty.',
-      );
+      throw const ApplicationServiceException('Cover letter cannot be empty.');
     }
 
     if (estimatedDuration.trim().isEmpty) {
@@ -256,9 +207,7 @@ class ApplicationService {
     }
 
     // Prevent duplicate applications.
-    final alreadyApplied = await hasAppliedToProject(
-      projectId,
-    );
+    final alreadyApplied = await hasAppliedToProject(projectId);
 
     if (alreadyApplied) {
       throw const ApplicationServiceException(
@@ -288,8 +237,7 @@ class ApplicationService {
       await _notificationService.createNotification(
         developerId: developerId,
         title: 'Application submitted',
-        body:
-            'Your application has been submitted successfully.',
+        body: 'Your application has been submitted successfully.',
         type: 'application',
         projectId: projectId.trim(),
         applicationId: document.id,
@@ -326,14 +274,10 @@ class ApplicationService {
       return;
     }
 
-    final application = await getApplication(
-      applicationId,
-    );
+    final application = await getApplication(applicationId);
 
     if (application == null) {
-      throw const ApplicationServiceException(
-        'Application not found.',
-      );
+      throw const ApplicationServiceException('Application not found.');
     }
 
     if (application.developerId != developerId) {
@@ -342,9 +286,7 @@ class ApplicationService {
       );
     }
 
-    final safeUpdates = Map<String, dynamic>.from(
-      updates,
-    );
+    final safeUpdates = Map<String, dynamic>.from(updates);
 
     // Do not allow the developer to change ownership
     // or the project/client relationship.
@@ -352,12 +294,9 @@ class ApplicationService {
     safeUpdates.remove('projectId');
     safeUpdates.remove('clientId');
 
-    safeUpdates['updatedAt'] =
-        FieldValue.serverTimestamp();
+    safeUpdates['updatedAt'] = FieldValue.serverTimestamp();
 
-    await _applicationsCollection
-        .doc(applicationId)
-        .update(safeUpdates);
+    await _applicationsCollection.doc(applicationId).update(safeUpdates);
   }
 
   // ===========================================================================
@@ -365,9 +304,7 @@ class ApplicationService {
   // ===========================================================================
 
   /// Withdraws an application submitted by the current developer.
-  Future<void> withdrawApplication(
-    String applicationId,
-  ) async {
+  Future<void> withdrawApplication(String applicationId) async {
     final developerId = _requireDeveloper();
 
     if (applicationId.trim().isEmpty) {
@@ -376,14 +313,10 @@ class ApplicationService {
       );
     }
 
-    final application = await getApplication(
-      applicationId,
-    );
+    final application = await getApplication(applicationId);
 
     if (application == null) {
-      throw const ApplicationServiceException(
-        'Application not found.',
-      );
+      throw const ApplicationServiceException('Application not found.');
     }
 
     if (application.developerId != developerId) {
@@ -398,9 +331,7 @@ class ApplicationService {
       );
     }
 
-    await _applicationsCollection
-        .doc(applicationId)
-        .update({
+    await _applicationsCollection.doc(applicationId).update({
       'status': 'withdrawn',
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -424,8 +355,7 @@ class ApplicationService {
       );
     }
 
-    final normalizedStatus =
-        status.trim().toLowerCase();
+    final normalizedStatus = status.trim().toLowerCase();
 
     const validStatuses = {
       'pending',
@@ -436,14 +366,10 @@ class ApplicationService {
     };
 
     if (!validStatuses.contains(normalizedStatus)) {
-      throw ApplicationServiceException(
-        'Invalid application status: $status',
-      );
+      throw ApplicationServiceException('Invalid application status: $status');
     }
 
-    await _applicationsCollection
-        .doc(applicationId)
-        .update({
+    await _applicationsCollection.doc(applicationId).update({
       'status': normalizedStatus,
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -463,10 +389,7 @@ class ApplicationService {
     }
 
     final snapshot = await _applicationsCollection
-        .where(
-          'developerId',
-          isEqualTo: developerId,
-        )
+        .where('developerId', isEqualTo: developerId)
         .count()
         .get();
 
@@ -474,18 +397,13 @@ class ApplicationService {
   }
 
   /// Returns the number of applications for a project.
-  Future<int> getProjectApplicationCount(
-    String projectId,
-  ) async {
+  Future<int> getProjectApplicationCount(String projectId) async {
     if (projectId.trim().isEmpty) {
       return 0;
     }
 
     final snapshot = await _applicationsCollection
-        .where(
-          'projectId',
-          isEqualTo: projectId,
-        )
+        .where('projectId', isEqualTo: projectId)
         .count()
         .get();
 
@@ -499,8 +417,7 @@ class ApplicationService {
   String _requireDeveloper() {
     final developerId = currentDeveloperId;
 
-    if (developerId == null ||
-        developerId.trim().isEmpty) {
+    if (developerId == null || developerId.trim().isEmpty) {
       throw const ApplicationServiceException(
         'No authenticated developer account was found.',
       );
@@ -512,9 +429,7 @@ class ApplicationService {
   List<ApplicationModel> _documentsToApplications(
     QuerySnapshot<Map<String, dynamic>> snapshot,
   ) {
-    return snapshot.docs
-        .map(ApplicationModel.fromFirestore)
-        .toList();
+    return snapshot.docs.map(ApplicationModel.fromFirestore).toList();
   }
 }
 

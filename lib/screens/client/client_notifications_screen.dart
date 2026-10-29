@@ -2,7 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'client_applications_screen.dart';
+import 'client_messages_screen.dart' show ClientProjectChat;
+import 'client_payments_screen.dart';
+import 'client_team_screen.dart';
+import 'project_details_screen.dart';
 import '../../localization/app_localizations.dart';
+import '../../services/notification_service.dart';
 
 class ClientNotificationsScreen extends StatelessWidget {
   const ClientNotificationsScreen({super.key});
@@ -24,6 +30,8 @@ class ClientNotificationsScreen extends StatelessWidget {
       );
     }
 
+    final notificationService = NotificationService();
+
     return Container(
       color: const Color(0xFFF6F8FC),
       child: Stack(
@@ -33,13 +41,8 @@ class ClientNotificationsScreen extends StatelessWidget {
               child: CustomPaint(painter: _NotificationAmbientPainter()),
             ),
           ),
-          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .collection('notifications')
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
+          StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+            stream: notificationService.watchMyClientNotifications(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: _NotificationLoader());
@@ -57,7 +60,9 @@ class ClientNotificationsScreen extends StatelessWidget {
                 );
               }
 
-              final notifications = snapshot.data?.docs ?? [];
+              final notifications = (snapshot.data ?? [])
+                  .where((document) => document.data()['isDismissed'] != true)
+                  .toList();
 
               if (notifications.isEmpty) {
                 return const _EmptyNotifications();
@@ -75,18 +80,51 @@ class ClientNotificationsScreen extends StatelessWidget {
                         const _NotificationSectionHeading(),
                         const SizedBox(height: 18),
                         Column(
-                          children: notifications
-                              .map(
-                                (document) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _NotificationCard(
-                                    notificationId: document.id,
-                                    data: document.data(),
-                                    userId: user.uid,
+                          children: notifications.map((document) {
+                            return Dismissible(
+                              key: ValueKey('notification_${document.id}'),
+                              direction: DismissDirection.horizontal,
+
+                              background: _notificationDismissBackground(
+                                Alignment.centerLeft,
+                              ),
+
+                              secondaryBackground:
+                                  _notificationDismissBackground(
+                                    Alignment.centerRight,
                                   ),
+
+                              confirmDismiss: (_) async {
+                                try {
+                                  await notificationService
+                                      .dismissMyClientNotification(document.id);
+
+                                  return true;
+                                } catch (error) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Could not dismiss notification: $error',
+                                        ),
+                                      ),
+                                    );
+                                  }
+
+                                  return false;
+                                }
+                              },
+
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _NotificationCard(
+                                  notificationId: document.id,
+                                  data: document.data(),
+                                  userId: user.uid,
                                 ),
-                              )
-                              .toList(),
+                              ),
+                            );
+                          }).toList(),
                         ),
                       ],
                     ),
@@ -99,6 +137,28 @@ class ClientNotificationsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _notificationDismissBackground(Alignment alignment) {
+  return Container(
+    alignment: alignment,
+    padding: const EdgeInsets.symmetric(horizontal: 24),
+    decoration: BoxDecoration(
+      color: const Color(0xFFDC2626),
+      borderRadius: BorderRadius.circular(21),
+    ),
+    child: const Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 25),
+        SizedBox(width: 8),
+        Text(
+          'Dismiss',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+      ],
+    ),
+  );
 }
 
 class _NotificationSectionHeading extends StatelessWidget {
@@ -155,17 +215,193 @@ class _NotificationCard extends StatelessWidget {
     required this.userId,
   });
 
-  Future<void> _markAsRead() async {
-    await FirebaseFirestore.instance
+  Future<void> _openNotification(BuildContext context) async {
+    final notificationRef = FirebaseFirestore.instance
         .collection('users')
         .doc(userId)
         .collection('notifications')
-        .doc(notificationId)
-        .update({'isRead': true});
+        .doc(notificationId);
+
+    try {
+      // Mark as read through NotificationService.
+      // Keep the direct Firestore update as a fallback for compatibility.
+      if (data['isRead'] != true) {
+        try {
+          await NotificationService().markMyClientNotificationAsRead(
+            notificationId,
+          );
+        } catch (error) {
+          debugPrint(
+            'NotificationService could not mark notification as read: $error',
+          );
+
+          // Existing behavior retained as a fallback.
+          try {
+            await notificationRef.update({'isRead': true});
+          } catch (fallbackError) {
+            debugPrint('Could not mark notification as read: $fallbackError');
+          }
+        }
+      }
+
+      final type = (data['type'] ?? 'system').toString().trim().toLowerCase();
+
+      var projectId = (data['projectId'] ?? '').toString().trim();
+
+      final applicationId = (data['applicationId'] ?? '').toString().trim();
+
+      var projectTitle = (data['projectTitle'] ?? '').toString().trim();
+
+      // Some application notifications may contain only applicationId.
+      if (projectId.isEmpty && applicationId.isNotEmpty) {
+        final applicationSnapshot = await FirebaseFirestore.instance
+            .collection('applications')
+            .doc(applicationId)
+            .get();
+
+        projectId = (applicationSnapshot.data()?['projectId'] ?? '')
+            .toString()
+            .trim();
+      }
+
+      // Fetch the project title if the notification doesn't contain it.
+      if (projectId.isNotEmpty && projectTitle.isEmpty) {
+        final projectSnapshot = await FirebaseFirestore.instance
+            .collection('projects')
+            .doc(projectId)
+            .get();
+
+        projectTitle = (projectSnapshot.data()?['title'] ?? 'Project')
+            .toString()
+            .trim();
+      }
+
+      if (!context.mounted) return;
+
+      switch (type) {
+        case 'message':
+        case 'chat':
+        case 'project_message':
+          if (projectId.isNotEmpty) {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ClientProjectChat(
+                  projectId: projectId,
+                  projectTitle: projectTitle.isEmpty
+                      ? 'Project Chat'
+                      : projectTitle,
+                ),
+              ),
+            );
+            return;
+          }
+          break;
+
+        case 'application':
+        case 'new_application':
+          if (projectId.isNotEmpty) {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ClientApplicationsScreen(
+                  projectId: projectId,
+                  projectTitle: projectTitle.isEmpty ? 'Project' : projectTitle,
+                ),
+              ),
+            );
+            return;
+          }
+          break;
+
+        case 'team':
+        case 'team_invitation':
+        case 'team_update':
+        case 'project_team':
+          if (projectId.isNotEmpty) {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ClientTeamScreen(projectId: projectId),
+              ),
+            );
+            return;
+          }
+          break;
+
+        case 'payment':
+        case 'payments':
+        case 'payment_update':
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const ClientPaymentsScreen(),
+            ),
+          );
+          return;
+
+        case 'project':
+        case 'status':
+        case 'project_status':
+        case 'project_update':
+        case 'meeting':
+        case 'meeting_invitation':
+          if (projectId.isNotEmpty) {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ProjectDetailsScreen(projectId: projectId),
+              ),
+            );
+            return;
+          }
+          break;
+      }
+
+      // Fallback for any other project-related notification.
+      if (!context.mounted) return;
+
+      if (projectId.isNotEmpty) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ProjectDetailsScreen(projectId: projectId),
+          ),
+        );
+        return;
+      }
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This notification does not have a destination configured yet.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open notification: $error')),
+        );
+      }
+    }
   }
 
   IconData _getIcon(String type) {
     switch (type) {
+      case 'application':
+      case 'new_application':
+        return Icons.assignment_outlined;
+
+      case 'team_invitation':
+      case 'team_update':
+        return Icons.groups_outlined;
+
+      case 'meeting':
+      case 'meeting_invitation':
+        return Icons.event_available_rounded;
+
+      case 'project_status':
+      case 'project_update':
+        return Icons.update_rounded;
+
+      case 'payment_update':
+        return Icons.currency_rupee_rounded;
       case 'project':
         return Icons.work_outline_rounded;
       case 'message':
@@ -221,6 +457,24 @@ class _NotificationCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
 
     switch (type) {
+      case 'application':
+      case 'new_application':
+        return 'Application';
+
+      case 'team_invitation':
+      case 'team_update':
+        return 'Team';
+
+      case 'meeting':
+      case 'meeting_invitation':
+        return 'Meeting';
+
+      case 'project_status':
+      case 'project_update':
+        return l10n.status;
+
+      case 'payment_update':
+        return l10n.payments;
       case 'project':
         return l10n.project;
       case 'message':
@@ -242,9 +496,9 @@ class _NotificationCard extends StatelessWidget {
 
     final title = data['title']?.toString() ?? l10n.notifications;
 
-    final message = data['message']?.toString() ?? '';
+    final message = (data['message'] ?? data['body'])?.toString() ?? '';
 
-    final type = data['type']?.toString() ?? 'system';
+    final type = (data['type']?.toString() ?? 'system').trim().toLowerCase();
 
     final isRead = data['isRead'] == true;
 
@@ -253,7 +507,7 @@ class _NotificationCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: isRead ? null : _markAsRead,
+        onTap: () => _openNotification(context),
         borderRadius: BorderRadius.circular(21),
         child: Ink(
           width: double.infinity,

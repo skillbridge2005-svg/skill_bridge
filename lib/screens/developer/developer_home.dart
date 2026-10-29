@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -15,11 +16,12 @@ import '../../widgets/skillbridge_avatar.dart';
 import '../settings/settings_screen.dart';
 import 'notifications_screen.dart';
 import 'team_invitations_screen.dart';
-import 'team_messages_screen.dart';
+import 'developer_messages_hub_screen.dart';
 import '../../models/project_model.dart';
 import '../../services/project_service.dart';
 import '../../services/application_service.dart';
 import '../../services/team_invitation_service.dart';
+import '../../services/team_chat_service.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -55,6 +57,20 @@ class _DeveloperHomeState extends State<DeveloperHome>
   final ProjectService _projectService = ProjectService();
   final ApplicationService _applicationService = ApplicationService();
   final TeamInvitationService _teamInvitationService = TeamInvitationService();
+  final TeamChatService _teamChatService = TeamChatService();
+
+  final Map<String, Stream<int>> _teamUnreadStreams = {};
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+  _individualChatsSubscriptions = {};
+
+  final Map<
+    String,
+    Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+  >
+  _individualMessageSubscriptions = {};
+
+  final Map<String, StreamController<int>> _individualUnreadControllers = {};
+  final Map<String, Stream<int>> _individualUnreadStreams = {};
   late final AnimationController _pageController;
   late final AnimationController _ambientController;
 
@@ -71,6 +87,20 @@ class _DeveloperHomeState extends State<DeveloperHome>
     Navigator.push(
       context,
       MaterialPageRoute<void>(builder: (_) => const TeamInvitationsScreen()),
+    );
+  }
+
+  void _openMessagesHub() {
+    setState(() {
+      _messagesOpen = false;
+      _notificationsOpen = false;
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const DeveloperMessagesHubScreen(),
+      ),
     );
   }
 
@@ -91,7 +121,35 @@ class _DeveloperHomeState extends State<DeveloperHome>
   void dispose() {
     _pageController.dispose();
     _ambientController.dispose();
+
+    unawaited(_cleanupUnreadStreams());
+
     super.dispose();
+  }
+
+  Future<void> _cleanupUnreadStreams() async {
+    // First cancel the individual chat listeners.
+    await Future.wait(
+      _individualChatsSubscriptions.values.map(
+        (subscription) => subscription.cancel(),
+      ),
+    );
+
+    // Then cancel all message listeners.
+    final messageSubscriptions = _individualMessageSubscriptions.values
+        .expand((subscriptions) => subscriptions.values)
+        .toList();
+
+    await Future.wait(
+      messageSubscriptions.map((subscription) => subscription.cancel()),
+    );
+
+    // Finally close the unread-count stream controllers.
+    await Future.wait(
+      _individualUnreadControllers.values.map(
+        (controller) => controller.close(),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -666,12 +724,125 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
+  Stream<int> _individualUnreadCountStream(String uid) {
+    return _individualUnreadStreams.putIfAbsent(
+      uid,
+      () => _createIndividualUnreadCountStream(uid),
+    );
+  }
+
+  Stream<int> _teamUnreadCountStream(String uid) {
+    return _teamUnreadStreams.putIfAbsent(
+      uid,
+      () => _teamChatService.watchUnreadCount(uid),
+    );
+  }
+
+  Stream<int> _createIndividualUnreadCountStream(String uid) {
+    final firestore = FirebaseFirestore.instance;
+    final controller = StreamController<int>();
+
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? chatsSubscription;
+
+    final messageSubscriptions =
+        <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
+
+    final unreadCountByChat = <String, int>{};
+
+    void emitTotal() {
+      if (controller.isClosed) return;
+
+      final total = unreadCountByChat.values.fold<int>(
+        0,
+        (runningTotal, unreadForChat) => runningTotal + unreadForChat,
+      );
+
+      controller.add(total);
+    }
+
+    chatsSubscription = firestore
+        .collection('individualChats')
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .listen(
+          (chatsSnapshot) {
+            final activeChatIds = chatsSnapshot.docs
+                .map((doc) => doc.id)
+                .toSet();
+
+            for (final chatId in messageSubscriptions.keys.toList()) {
+              if (!activeChatIds.contains(chatId)) {
+                unreadCountByChat.remove(chatId);
+
+                final subscription = messageSubscriptions.remove(chatId);
+
+                if (subscription != null) {
+                  unawaited(subscription.cancel());
+                }
+              }
+            }
+
+            for (final chat in chatsSnapshot.docs) {
+              if (messageSubscriptions.containsKey(chat.id)) {
+                continue;
+              }
+
+              final messageStream = firestore
+                  .collection('individualChats')
+                  .doc(chat.id)
+                  .collection('messages')
+                  .where('isRead', isEqualTo: false)
+                  .snapshots();
+
+              messageSubscriptions[chat.id] = messageStream.listen(
+                (messagesSnapshot) {
+                  final count = messagesSnapshot.docs.where((message) {
+                    final senderId = message.data()['senderId']?.toString();
+
+                    return senderId != uid;
+                  }).length;
+
+                  unreadCountByChat[chat.id] = count;
+                  emitTotal();
+                },
+                onError: (Object error, StackTrace stackTrace) {
+                  if (!controller.isClosed) {
+                    controller.addError(error, stackTrace);
+                  }
+                },
+              );
+            }
+
+            emitTotal();
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!controller.isClosed) {
+              controller.addError(error, stackTrace);
+            }
+          },
+        );
+
+    controller.onCancel = () async {
+      await chatsSubscription?.cancel();
+
+      final subscriptions = messageSubscriptions.values.toList();
+      messageSubscriptions.clear();
+
+      await Future.wait(
+        subscriptions.map((subscription) => subscription.cancel()),
+      );
+    };
+
+    return controller.stream;
+  }
+
   Widget _buildTopBar({
     required bool mobile,
     required String name,
     required String email,
     required String profileImageUrl,
   }) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     return Padding(
       padding: EdgeInsets.fromLTRB(mobile ? 14 : 20, 14, mobile ? 14 : 20, 4),
       child: Container(
@@ -745,24 +916,41 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 );
               },
             ),
-            _HeaderIcon(
-              icon: Icons.chat_bubble_outline_rounded,
-              badge: 2,
-              selected: _messagesOpen,
-              onTap: () {
-                setState(() {
-                  _messagesOpen = false;
-                  _notificationsOpen = false;
-                });
+            if (uid == null)
+              _HeaderIcon(
+                icon: Icons.chat_bubble_outline_rounded,
+                badge: 0,
+                selected: _messagesOpen,
+                onTap: _openMessagesHub,
+              )
+            else
+              StreamBuilder<int>(
+                stream: _individualUnreadCountStream(uid),
+                builder: (context, individualSnapshot) {
+                  final individualUnread = individualSnapshot.data ?? 0;
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const TeamMessagesScreen(),
-                  ),
-                );
-              },
-            ),
+                  return StreamBuilder<int>(
+                    stream: _teamUnreadCountStream(uid),
+                    builder: (context, teamSnapshot) {
+                      if (teamSnapshot.hasError) {
+                        debugPrint(
+                          'Team unread count error: ${teamSnapshot.error}',
+                        );
+                      }
+
+                      final teamUnread = teamSnapshot.data ?? 0;
+                      final totalUnread = individualUnread + teamUnread;
+
+                      return _HeaderIcon(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        badge: totalUnread,
+                        selected: _messagesOpen,
+                        onTap: _openMessagesHub,
+                      );
+                    },
+                  );
+                },
+              ),
             const SizedBox(width: 4),
             PopupMenuButton<String>(
               tooltip: 'Account',
@@ -954,19 +1142,20 @@ class _DeveloperHomeState extends State<DeveloperHome>
       ),
     );
   }
-String _getGreeting() {
-  final hour = DateTime.now().hour;
 
-  if (hour >= 5 && hour < 12) {
-    return 'Good morning';
-  } else if (hour >= 12 && hour < 17) {
-    return 'Good afternoon';
-  } else if (hour >= 17 && hour < 21) {
-    return 'Good evening';
-  } else {
-    return 'Good night';
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+
+    if (hour >= 5 && hour < 12) {
+      return 'Good morning';
+    } else if (hour >= 12 && hour < 17) {
+      return 'Good afternoon';
+    } else if (hour >= 17 && hour < 21) {
+      return 'Good evening';
+    } else {
+      return 'Good night';
+    }
   }
-}
 
   Widget _buildGreeting(bool mobile, String name) {
     return Row(
@@ -1236,11 +1425,12 @@ String _getGreeting() {
         ),
         const SizedBox(height: 13),
         SizedBox(
+          // Keep enough vertical room for the project card on narrow screens.
           height: mobile
-              ? 310
+              ? 330
               : tablet
-              ? 310
-              : 300,
+              ? 330
+              : 310,
           child: uid == null
               ? const Center(child: Text('Please log in to view projects.'))
               : StreamBuilder<List<ProjectModel>>(
@@ -3510,28 +3700,29 @@ class _HeaderIcon extends StatelessWidget {
             ),
           ),
         ),
-        Positioned(
-          top: 7,
-          right: 7,
-          child: Container(
-            width: 16,
-            height: 16,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _AppColors.primary,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: Text(
-              '$badge',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 7,
-                fontWeight: FontWeight.w900,
+        if (badge > 0)
+          Positioned(
+            top: 5,
+            right: 5,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _AppColors.primary,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Text(
+                badge > 9 ? '9+' : '$badge',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -3790,6 +3981,11 @@ class _ProjectCardState extends State<_ProjectCard> {
 
   @override
   Widget build(BuildContext context) {
+    final skills = widget.project.skills
+        .map((skill) => skill.trim())
+        .where((skill) => skill.isNotEmpty)
+        .toList();
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -3871,24 +4067,29 @@ class _ProjectCardState extends State<_ProjectCard> {
               ),
             ),
             const SizedBox(height: 12),
-            // Keep recommendation cards compact even when Firestore contains
-            // long or unexpectedly formatted skill/technology values.
-            Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: [
-                ...widget.project.skills
-                    .where((skill) => skill.trim().isNotEmpty)
-                    .take(4)
-                    .map((skill) => _SkillChip(skill.trim())),
-                if (widget.project.skills
-                        .where((skill) => skill.trim().isNotEmpty)
-                        .length >
-                    4)
-                  _SkillChip(
-                    '+${widget.project.skills.where((skill) => skill.trim().isNotEmpty).length - 4} more',
-                  ),
-              ],
+            // Keep skill chips on one horizontally scrollable row. A Wrap can
+            // create several rows for long project skill lists and push the
+            // View/Apply buttons outside the fixed-height recommendation card.
+            SizedBox(
+              height: 34,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    ...skills
+                        .take(3)
+                        .map(
+                          (skill) => Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: _SkillChip(skill),
+                          ),
+                        ),
+                    if (skills.length > 3)
+                      _SkillChip('+${skills.length - 3} more'),
+                  ],
+                ),
+              ),
             ),
             const Spacer(),
             Row(

@@ -126,9 +126,8 @@ class ClientTeamScreen extends StatelessWidget {
           ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
-                .collection('projects')
-                .doc(projectId)
-                .collection('team')
+                .collection('teams')
+                .where('projectId', isEqualTo: projectId)
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -140,26 +139,37 @@ class ClientTeamScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _TeamErrorCard(
-                      message:
-                          '${l10n.somethingWentWrong}\n'
-                          '${snapshot.error}',
+                      message: '${l10n.somethingWentWrong}\n${snapshot.error}',
                     ),
                   ),
                 );
               }
 
-              final members = snapshot.data?.docs ?? [];
+              final teamDocuments = snapshot.data?.docs ?? [];
+              if (teamDocuments.isEmpty) return const _EmptyTeam();
 
-              if (members.isEmpty) {
-                return const _EmptyTeam();
+              final memberIds = <String>{};
+              for (final teamDocument in teamDocuments) {
+                final teamData = teamDocument.data();
+                final members = teamData['memberIds'];
+                if (members is Iterable) {
+                  for (final member in members) {
+                    final id = member.toString().trim();
+                    if (id.isNotEmpty) memberIds.add(id);
+                  }
+                }
+                final ownerId = teamData['ownerId']?.toString().trim() ?? '';
+                if (ownerId.isNotEmpty) memberIds.add(ownerId);
               }
 
+              if (memberIds.isEmpty) return const _EmptyTeam();
+
+              final members = memberIds.toList();
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final horizontalPadding = constraints.maxWidth > 700
                       ? 28.0
                       : 20.0;
-
                   return ListView.separated(
                     physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.fromLTRB(
@@ -169,25 +179,16 @@ class ClientTeamScreen extends StatelessWidget {
                       30,
                     ),
                     itemCount: members.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    separatorBuilder: (_, _) => const SizedBox(height: 14),
                     itemBuilder: (context, index) {
                       if (index == 0) {
                         return _TeamHeader(memberCount: members.length);
                       }
-
-                      final document = members[index - 1];
-
-                      final data = document.data();
-                      final memberId =
-                          (data['userId'] ??
-                                  data['memberId'] ??
-                                  data['developerId'] ??
-                                  data['uid'] ??
-                                  document.id)
-                              .toString()
-                              .trim();
-
-                      return _TeamMemberCard(data: data, memberId: memberId);
+                      final memberId = members[index - 1];
+                      return _FirestoreTeamMemberCard(
+                        key: ValueKey(memberId),
+                        memberId: memberId,
+                      );
                     },
                   );
                 },
@@ -196,6 +197,193 @@ class ClientTeamScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _FirestoreTeamMemberCard extends StatelessWidget {
+  final String memberId;
+
+  const _FirestoreTeamMemberCard({super.key, required this.memberId});
+
+  Color _roleColor(String role) {
+    switch (role.toLowerCase()) {
+      case 'frontend':
+      case 'frontend developer':
+        return const Color(0xFF4F46E5);
+
+      case 'backend':
+      case 'backend developer':
+        return const Color(0xFF2563EB);
+
+      case 'database':
+      case 'database developer':
+        return const Color(0xFF7C3AED);
+
+      case 'tester':
+      case 'qa':
+        return const Color(0xFFD97706);
+
+      case 'project_manager':
+      case 'team_leader':
+        return const Color(0xFF0F766E);
+
+      default:
+        return const Color(0xFF4F46E5);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(memberId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const SizedBox.shrink();
+        }
+
+        final userData = snapshot.data?.data();
+
+        if (userData == null) {
+          return Container(
+            padding: const EdgeInsets.all(17),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(21),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.person_outline_rounded,
+                  size: 48,
+                  color: Color(0xFF667085),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    'Developer profile unavailable',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF667085),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final name = userData['name']?.toString().trim().isNotEmpty == true
+            ? userData['name'].toString()
+            : 'Developer';
+
+        final email = userData['email']?.toString() ?? '';
+
+        final role =
+            userData['developerRole']?.toString() ??
+            userData['specialization']?.toString() ??
+            userData['role']?.toString() ??
+            'Developer';
+
+        final roleColor = _roleColor(role);
+
+        final imageUrl = userData['profileImageUrl']?.toString() ?? '';
+
+        return Container(
+          padding: const EdgeInsets.all(17),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(21),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x060F172A),
+                blurRadius: 16,
+                offset: Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              SkillBridgeAvatar(
+                profileImageUrl: imageUrl,
+                name: name,
+                size: 56,
+                borderRadius: BorderRadius.circular(16),
+                backgroundColor: roleColor.withValues(alpha: 0.14),
+                foregroundColor: roleColor,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: roleColor.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        role,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: roleColor,
+                        ),
+                      ),
+                    ),
+                    if (email.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.email_outlined,
+                            size: 14,
+                            color: Color(0xFF98A2B3),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              email,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF667085),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -294,197 +482,6 @@ class _TeamHeader extends StatelessWidget {
                 fontWeight: FontWeight.w900,
                 color: Colors.white,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TeamMemberCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final String memberId;
-
-  const _TeamMemberCard({required this.data, required this.memberId});
-
-  String _formatRole(BuildContext context, String role) {
-    final l10n = AppLocalizations.of(context);
-
-    switch (role) {
-      case 'frontend':
-        return l10n.frontendDeveloper;
-
-      case 'backend':
-        return l10n.backendDeveloper;
-
-      case 'database':
-        return l10n.databaseDeveloper;
-
-      case 'tester':
-        return l10n.tester;
-
-      case 'project_manager':
-      case 'team_leader':
-        return l10n.teamLeader;
-
-      default:
-        return role;
-    }
-  }
-
-  Color _roleColor(String role) {
-    switch (role) {
-      case 'frontend':
-        return const Color(0xFF4F46E5);
-
-      case 'backend':
-        return const Color(0xFF2563EB);
-
-      case 'database':
-        return const Color(0xFF7C3AED);
-
-      case 'tester':
-        return const Color(0xFFD97706);
-
-      case 'project_manager':
-      case 'team_leader':
-        return const Color(0xFF0F766E);
-
-      default:
-        return const Color(0xFF4F46E5);
-    }
-  }
-
-  Widget _memberAvatar({required String name, required Color roleColor}) {
-    final storedImageUrl = data['profileImageUrl']?.toString() ?? '';
-
-    if (memberId.isEmpty) {
-      return SkillBridgeAvatar(
-        profileImageUrl: storedImageUrl,
-        name: name,
-        size: 56,
-        borderRadius: BorderRadius.circular(16),
-        backgroundColor: roleColor.withValues(alpha: 0.14),
-        foregroundColor: roleColor,
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(memberId)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final userData = snapshot.data?.data();
-
-        return SkillBridgeAvatar(
-          profileImageUrl:
-              userData?['profileImageUrl']?.toString() ?? storedImageUrl,
-          name: userData?['name']?.toString() ?? name,
-          size: 56,
-          borderRadius: BorderRadius.circular(16),
-          backgroundColor: roleColor.withValues(alpha: 0.14),
-          foregroundColor: roleColor,
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-
-    final name = data['name']?.toString() ?? l10n.frontendDeveloper;
-
-    final role = data['role']?.toString() ?? '';
-
-    final email = data['email']?.toString() ?? '';
-
-    final roleColor = _roleColor(role);
-
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(21),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x060F172A),
-            blurRadius: 16,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _memberAvatar(name: name, roleColor: roleColor),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF111827),
-                  ),
-                ),
-                if (role.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: roleColor.withValues(alpha: 0.09),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Text(
-                      _formatRole(context, role),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        color: roleColor,
-                      ),
-                    ),
-                  ),
-                ],
-                if (email.isNotEmpty) ...[
-                  const SizedBox(height: 7),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.email_outlined,
-                        size: 14,
-                        color: Color(0xFF98A2B3),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          email,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: Color(0xFF667085),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
             ),
           ),
         ],

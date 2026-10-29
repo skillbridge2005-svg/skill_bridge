@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/leaderboard_entry.dart';
 import '../../services/leaderboard_service.dart';
+import '../../services/podium_message_sevice.dart';
 
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
@@ -112,6 +115,8 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                       TopPerformersPodium(
                         entries: entries,
                         role: _selectedRole,
+                        currentUserId: FirebaseAuth.instance.currentUser?.uid,
+                        idOf: (entry) => entry.uid,
                       ),
                       const SizedBox(height: 32),
                       _buildRankingHeader(entries.length),
@@ -670,6 +675,9 @@ class TopPerformersPodium extends StatefulWidget {
     super.key,
     required this.entries,
     required this.role,
+    required this.idOf,
+    this.currentUserId,
+    this.messageService,
     this.onEntryTap,
   });
 
@@ -678,6 +686,16 @@ class TopPerformersPodium extends StatefulWidget {
 
   /// 'developer' or 'client' — only used for the subtitle text.
   final String role;
+
+  /// Returns the user id (same id used as the Firebase Auth uid) of an entry.
+  final String Function(LeaderboardEntry entry) idOf;
+
+  /// The signed-in user's id. If it matches one of the top three, that
+  /// performer can post or edit their cloud message.
+  final String? currentUserId;
+
+  /// Optional override (defaults to [PodiumMessageService]).
+  final PodiumMessageService? messageService;
 
   /// Optional: hook this up to your existing profile navigation.
   final ValueChanged<LeaderboardEntry>? onEntryTap;
@@ -776,6 +794,12 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
   bool _started = false;
   bool _reduceMotion = false;
 
+  late final PodiumMessageService _service =
+      widget.messageService ?? PodiumMessageService();
+  StreamSubscription<Map<String, PodiumMessage>>? _messageSub;
+  Map<String, PodiumMessage> _messages = const {};
+  String _idsKey = '';
+
   @override
   void initState() {
     super.initState();
@@ -816,6 +840,8 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
       final begin = _podiumEnd[i] - 0.2;
       return interval(begin, begin + 0.2, Curves.easeOut);
     });
+
+    _subscribeMessages();
   }
 
   @override
@@ -859,10 +885,79 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
       _entrance.forward(from: 0);
       _confetti.forward(from: 0);
     }
+
+    _subscribeMessages();
+  }
+
+  /// Listens to the cloud messages of the current top three users only.
+  void _subscribeMessages() {
+    final ids = widget.entries
+        .take(3)
+        .map(widget.idOf)
+        .where((id) => id.isNotEmpty)
+        .toList();
+    final key = ids.join(',');
+    if (key == _idsKey) return;
+
+    _idsKey = key;
+    _messageSub?.cancel();
+    _messageSub = null;
+    _messages = const {};
+
+    if (ids.isEmpty) return;
+
+    _messageSub = _service.watchMessages(ids).listen(
+      (messages) {
+        if (!mounted) return;
+        setState(() => _messages = messages);
+      },
+      // If reading fails the podium simply shows no clouds.
+      onError: (Object _) {},
+    );
+  }
+
+  bool _isOwner(String id) {
+    return id.isNotEmpty &&
+        widget.currentUserId != null &&
+        widget.currentUserId == id;
+  }
+
+  Future<void> _openComposer(LeaderboardEntry entry) async {
+    final id = widget.idOf(entry);
+    if (!_isOwner(id)) return;
+
+    final result = await showDialog<_ComposeResult>(
+      context: context,
+      builder: (_) => _PodiumMessageDialog(
+        initialText: _messages[id]?.text ?? '',
+        maxLength: PodiumMessageService.maxLength,
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    try {
+      if (result.delete) {
+        await _service.deleteMessage(id);
+      } else {
+        await _service.setMessage(
+          userId: id,
+          name: _displayName(entry.name),
+          text: result.text,
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not update your message. Please try again.'),
+        ),
+      );
+    }
   }
 
   @override
   void dispose() {
+    _messageSub?.cancel();
     _entrance.dispose();
     _loop.dispose();
     _confetti.dispose();
@@ -906,7 +1001,12 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
                   builder: (context, constraints) {
                     final stageW = constraints.maxWidth;
                     final s = (stageW / 360).clamp(0.7, 1.45).toDouble();
-                    final stageH = 360 * s;
+                    final bs = s.clamp(0.95, 1.2).toDouble();
+                    final firstId = widget.idOf(top.first);
+                    final firstHasCloud =
+                        _messages[firstId] != null || _isOwner(firstId);
+                    // Extra headroom above the winner only when a cloud shows.
+                    final stageH = firstHasCloud ? 355 * s + 118 * bs : 360 * s;
                     final slotW = stageW / 3;
 
                     // Visual order: 2nd | 1st | 3rd (only for qualified users).
@@ -929,7 +1029,9 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
                       children: [
                         _buildTitle(isDeveloper),
                         const SizedBox(height: 14),
-                        SizedBox(
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeOut,
                           width: stageW,
                           height: stageH,
                           child: Stack(
@@ -1091,6 +1193,17 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
     final crownW = 42 * s;
     final crownH = 32 * s;
 
+    // Cloud message (opinion) shown above the character's head.
+    final id = widget.idOf(entry);
+    final message = _messages[id];
+    final isOwner = _isOwner(id);
+    final bs = s.clamp(0.95, 1.2).toDouble();
+    final cloudW = slotW * (isFirst ? 1.7 : 1.2);
+    final headTop = charBottom + charH * 0.96;
+    final cloudBottom = isFirst
+        ? headTop + 3 * s + crownH + style.bounce * s + 13 * s
+        : headTop + style.bounce * s + 10 * s;
+
     return _HoverLift(
       onTap: widget.onEntryTap == null ? null : () => widget.onEntryTap!(entry),
       child: SizedBox(
@@ -1200,6 +1313,55 @@ class _TopPerformersPodiumState extends State<TopPerformersPodium>
                       },
                       child: const RepaintBoundary(
                         child: CustomPaint(painter: _CrownPainter()),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Opinion cloud (visible to everyone; editable by its owner).
+            if (message != null || isOwner)
+              Positioned(
+                bottom: cloudBottom,
+                left: (slotW - cloudW) / 2,
+                width: cloudW,
+                child: FadeTransition(
+                  opacity: _charFade[place],
+                  child: ScaleTransition(
+                    scale: _charScale[place],
+                    alignment: Alignment.bottomCenter,
+                    child: AnimatedBuilder(
+                      animation: _loop,
+                      builder: (context, child) {
+                        return Transform.translate(
+                          offset: Offset(
+                            0,
+                            2 *
+                                bs *
+                                math.sin(2 * math.pi * _loop.value + place),
+                          ),
+                          child: child,
+                        );
+                      },
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 320),
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: ScaleTransition(
+                              scale: animation,
+                              alignment: Alignment.bottomCenter,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _SpeechCloud(
+                          key: ValueKey(message?.text ?? '__placeholder'),
+                          text: message?.text,
+                          scale: bs,
+                          isOwner: isOwner,
+                          accent: style.metal.mid,
+                          onTap: isOwner ? () => _openComposer(entry) : null,
+                        ),
                       ),
                     ),
                   ),
@@ -2307,7 +2469,7 @@ class _RaysPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * 0.46);
+    final center = Offset(size.width / 2, size.height - radius * 0.95);
     final pulse = 1 + 0.05 * math.sin(2 * math.pi * _loop.value);
 
     // Glow.
@@ -2533,4 +2695,269 @@ class _ConfettiPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ConfettiPainter old) => false;
+}
+
+// ============================================================================
+// CLOUD MESSAGE (speech / thought cloud shown above a top performer)
+// ============================================================================
+
+class _SpeechCloud extends StatelessWidget {
+  const _SpeechCloud({
+    super.key,
+    required this.text,
+    required this.scale,
+    required this.isOwner,
+    required this.accent,
+    this.onTap,
+  });
+
+  /// `null` means "placeholder" (owner has not written a message yet).
+  final String? text;
+  final double scale;
+  final bool isOwner;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bs = scale;
+    final bump = 6.5 * bs;
+    final isPlaceholder = text == null;
+    final label = text ?? 'Tap to share your thoughts';
+
+    Widget dot(double d) => Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        shape: BoxShape.circle,
+      ),
+    );
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CustomPaint(
+            painter: _CloudPainter(
+              bump: bump,
+              opacity: isPlaceholder ? 0.82 : 1.0,
+            ),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                bump + 5 * bs,
+                bump + 3 * bs,
+                bump + 5 * bs,
+                bump + 3 * bs,
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isPlaceholder ? const Color(0xFF64748B) : _kInk,
+                      fontSize: 10.5 * bs,
+                      height: 1.25,
+                      fontWeight: isPlaceholder
+                          ? FontWeight.w600
+                          : FontWeight.w700,
+                      fontStyle: isPlaceholder
+                          ? FontStyle.italic
+                          : FontStyle.normal,
+                    ),
+                  ),
+                  if (isOwner)
+                    Positioned(
+                      right: -bump * 1.3,
+                      top: -bump * 1.2,
+                      child: Container(
+                        width: 15 * bs,
+                        height: 15 * bs,
+                        decoration: BoxDecoration(
+                          color: accent,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.2),
+                        ),
+                        child: Icon(
+                          Icons.edit_rounded,
+                          size: 9 * bs,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: 1.5 * bs),
+          // Thought-bubble tail drifting down towards the character.
+          dot(8 * bs),
+          SizedBox(height: 2 * bs),
+          dot(5.5 * bs),
+          SizedBox(height: 2 * bs),
+          dot(3.5 * bs),
+        ],
+      ),
+    );
+  }
+}
+
+/// Scalloped cloud outline: a rounded rectangle with bumps all around.
+class _CloudPainter extends CustomPainter {
+  const _CloudPainter({required this.bump, required this.opacity});
+
+  final double bump;
+  final double opacity;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = bump;
+    final inner = Rect.fromLTRB(r, r, size.width - r, size.height - r);
+    if (inner.width <= 0 || inner.height <= 0) return;
+
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(inner, Radius.circular(r * 0.6)));
+
+    final nx = math.max(2, (inner.width / (r * 1.5)).round());
+    for (var i = 0; i <= nx; i++) {
+      final x = inner.left + inner.width * i / nx;
+      path.addOval(Rect.fromCircle(center: Offset(x, inner.top), radius: r));
+      path.addOval(Rect.fromCircle(center: Offset(x, inner.bottom), radius: r));
+    }
+    final ny = math.max(1, (inner.height / (r * 1.5)).round());
+    for (var j = 0; j <= ny; j++) {
+      final y = inner.top + inner.height * j / ny;
+      path.addOval(Rect.fromCircle(center: Offset(inner.left, y), radius: r));
+      path.addOval(Rect.fromCircle(center: Offset(inner.right, y), radius: r));
+    }
+
+    // Soft shadow.
+    canvas.drawPath(
+      path.shift(const Offset(0, 2)),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    );
+
+    // Cloud body.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: opacity),
+            const Color(0xFFE0ECFF).withValues(alpha: opacity),
+          ],
+        ).createShader(Offset.zero & size),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CloudPainter old) =>
+      old.bump != bump || old.opacity != opacity;
+}
+
+class _ComposeResult {
+  const _ComposeResult.post(this.text) : delete = false;
+  const _ComposeResult.remove() : text = '', delete = true;
+
+  final String text;
+  final bool delete;
+}
+
+class _PodiumMessageDialog extends StatefulWidget {
+  const _PodiumMessageDialog({
+    required this.initialText,
+    required this.maxLength,
+  });
+
+  final String initialText;
+  final int maxLength;
+
+  @override
+  State<_PodiumMessageDialog> createState() => _PodiumMessageDialogState();
+}
+
+class _PodiumMessageDialogState extends State<_PodiumMessageDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialText,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      title: const Text(
+        'Your message to everyone',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'As a top performer, you can share a short opinion. '
+            'Everyone will see it in the cloud above you.',
+            style: TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLength: widget.maxLength,
+            minLines: 2,
+            maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              hintText: 'Write your opinion…',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        if (widget.initialText.isNotEmpty)
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(context, const _ComposeResult.remove()),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final text = _controller.text.trim();
+            if (text.isEmpty) return;
+            Navigator.pop(context, _ComposeResult.post(text));
+          },
+          child: const Text('Post'),
+        ),
+      ],
+    );
+  }
 }

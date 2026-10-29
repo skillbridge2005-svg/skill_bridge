@@ -9,6 +9,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:cloud_functions/cloud_functions.dart';
+
 import '../../localization/app_localizations.dart';
 import '../shared/leaderboard_screen.dart';
 import 'client_payments_screen.dart';
@@ -94,6 +96,22 @@ class ClientProfileScreen extends StatelessWidget {
         'webp' => 'image/webp',
         _ => 'image/jpeg',
       };
+      // Configure Firebase JWT for Supabase Storage.
+      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+      await functions.httpsCallable('ensureSupabaseRole').call();
+
+      // Refresh the token after the Cloud Function sets the custom claim.
+      await user.getIdToken(true);
+
+      final tokenResult = await user.getIdTokenResult();
+      final jwtRole = tokenResult.claims?['role'];
+
+      debugPrint('SUPABASE PROFILE CHECK: JWT role = $jwtRole');
+
+      if (jwtRole != 'authenticated') {
+        throw StateError('Firebase token is missing role=authenticated.');
+      }
       final path =
           '${user.uid}/profile_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
@@ -145,6 +163,172 @@ class ClientProfileScreen extends StatelessWidget {
         SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
     }
+  }
+
+  Future<void> _deleteProfilePhoto(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Please log in again.')));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete profile photo?'),
+        content: const Text(
+          'Are you sure you want to remove your profile photo?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final userDoc = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+
+      final snapshot = await userDoc.get();
+      final data = snapshot.data();
+
+      final path = data?['profileImagePath']?.toString().trim() ?? '';
+
+      // Ensure Firebase token has the required Supabase role.
+      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+      await functions.httpsCallable('ensureSupabaseRole').call();
+      await user.getIdToken(true);
+
+      final tokenResult = await user.getIdTokenResult();
+
+      if (tokenResult.claims?['role'] != 'authenticated') {
+        throw StateError('Firebase token is missing role=authenticated.');
+      }
+
+      // Delete the actual image from Supabase Storage.
+      if (path.isNotEmpty) {
+        await Supabase.instance.client.storage.from('profile-photos').remove([
+          path,
+        ]);
+      }
+
+      // Remove the saved photo reference from Firestore.
+      await userDoc.set({
+        'profileImageUrl': '',
+        'profileImagePath': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Clear the Firebase Auth profile photo.
+      await user.updatePhotoURL(null);
+
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile photo deleted successfully!')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete profile photo: $error')),
+      );
+    }
+  }
+
+  Future<void> _showProfileOptions(
+    BuildContext context,
+    Map<String, dynamic> data,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        final hasPhoto =
+            data['profileImageUrl']?.toString().trim().isNotEmpty == true ||
+            (FirebaseAuth.instance.currentUser?.photoURL?.trim().isNotEmpty ==
+                true);
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD1D5DB),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Manage Profile',
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                ListTile(
+                  leading: const Icon(
+                    Icons.add_a_photo_outlined,
+                    color: Color(0xFF4F46E5),
+                  ),
+                  title: Text(
+                    hasPhoto ? 'Change Profile Photo' : 'Upload Profile Photo',
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _uploadProfilePhoto(context);
+                  },
+                ),
+
+                if (hasPhoto)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.red,
+                    ),
+                    title: const Text(
+                      'Delete Profile Photo',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _deleteProfilePhoto(context);
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _editProfile(
@@ -490,8 +674,12 @@ class ClientProfileScreen extends StatelessWidget {
               final name = data['name']?.toString() ?? '';
               final email = data['email']?.toString() ?? user.email ?? '';
               final role = data['role']?.toString() ?? '';
-              final savedImageUrl = data['profileImageUrl']?.toString().trim();
-              final imageUrl = savedImageUrl != null && savedImageUrl.isNotEmpty
+              final hasStoredProfileImage = data.containsKey('profileImageUrl');
+
+              final savedImageUrl =
+                  data['profileImageUrl']?.toString().trim() ?? '';
+
+              final imageUrl = hasStoredProfileImage
                   ? savedImageUrl
                   : user.photoURL ?? '';
 
@@ -515,7 +703,8 @@ class ClientProfileScreen extends StatelessWidget {
                           role: role,
                           initial: _initial(name),
                           imageUrl: imageUrl,
-                          onChangePhoto: () => _uploadProfilePhoto(context),
+                          onManageProfile: () =>
+                              _showProfileOptions(context, data),
                         ),
                         const SizedBox(height: 18),
                         _ProfileActionCard(
@@ -708,7 +897,7 @@ class _ProfileHero extends StatelessWidget {
   final String role;
   final String initial;
   final String imageUrl;
-  final VoidCallback onChangePhoto;
+  final VoidCallback onManageProfile;
 
   const _ProfileHero({
     required this.name,
@@ -716,7 +905,7 @@ class _ProfileHero extends StatelessWidget {
     required this.role,
     required this.initial,
     required this.imageUrl,
-    required this.onChangePhoto,
+    required this.onManageProfile,
   });
 
   @override
@@ -800,18 +989,23 @@ class _ProfileHero extends StatelessWidget {
                         ),
                 ),
               ),
-              Material(
-                color: Colors.white,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: onChangePhoto,
-                  child: const Padding(
-                    padding: EdgeInsets.all(5),
-                    child: Icon(
-                      Icons.camera_alt_rounded,
-                      size: 14,
-                      color: Color(0xFF4F46E5),
+              // Profile photo edit button
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Material(
+                  color: Colors.white,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: onManageProfile,
+                    child: const Padding(
+                      padding: EdgeInsets.all(5),
+                      child: Icon(
+                        Icons.edit_rounded,
+                        size: 14,
+                        color: Color(0xFF4F46E5),
+                      ),
                     ),
                   ),
                 ),

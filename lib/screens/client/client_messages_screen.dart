@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -12,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../localization/app_localizations.dart';
 import '../../widgets/skillbridge_avatar.dart';
+import '../../config/supabase_config.dart';
 
 class ClientMessagesScreen extends StatelessWidget {
   const ClientMessagesScreen({super.key});
@@ -375,6 +378,35 @@ class ClientProjectChat extends StatefulWidget {
 class _ClientProjectChatState extends State<ClientProjectChat> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  Future<void> _ensureSupabaseRole(User user) async {
+    final tokenResult = await user.getIdTokenResult();
+
+    if (tokenResult.claims?['role'] == 'authenticated') return;
+
+    final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+    await functions.httpsCallable('ensureSupabaseRole').call();
+    await user.getIdToken(true);
+
+    final refreshedToken = await user.getIdTokenResult(true);
+
+    if (refreshedToken.claims?['role'] != 'authenticated') {
+      throw StateError('Unable to enable Supabase access.');
+    }
+  }
+
+  Future<void> _cleanupSupabaseUpload(String? storagePath) async {
+    if (storagePath == null || storagePath.isEmpty) return;
+
+    try {
+      await _supabase.storage.from('team-chat-media').remove([storagePath]);
+    } catch (error) {
+      debugPrint('Supabase attachment cleanup failed: $error');
+    }
+  }
 
   Timer? _typingTimer;
   bool _isTyping = false;
@@ -850,11 +882,7 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Please log in again.')));
-      }
+      _showAttachmentMessage('Please log in again.');
       return;
     }
 
@@ -864,6 +892,7 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
     }
 
     const maxFileSize = 15 * 1024 * 1024;
+
     if (bytes.length > maxFileSize) {
       _showAttachmentMessage('Files must be 15 MB or smaller.');
       return;
@@ -872,9 +901,13 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
     if (_isUploading || _isSending) return;
 
     setState(() => _isUploading = true);
-    Reference? uploadedRef;
+
+    String? uploadedPath;
+
+    final bucket = _supabase.storage.from('team-chat-media');
 
     try {
+      // 1. Validate project
       final projectSnapshot = await _firestore
           .collection('projects')
           .doc(widget.projectId)
@@ -885,17 +918,23 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
       }
 
       final projectData = projectSnapshot.data();
+
       final clientId = projectData?['clientId']?.toString().trim() ?? '';
+
       final developerId =
           (projectData?['developerId'] ?? projectData?['assignedDeveloperId'])
               ?.toString()
               .trim() ??
           '';
+
+      // 2. Validate user and role
       final userSnapshot = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
+
       final userData = userSnapshot.data();
+
       final userRole = userData?['role']?.toString().trim().toLowerCase() ?? '';
 
       final authorized = await _isAuthorizedProjectMember(
@@ -909,26 +948,42 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
         throw StateError('You are not authorized to share files in this chat.');
       }
 
-      final safeFileName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-      uploadedRef = FirebaseStorage.instance
-          .ref()
-          .child('project_chat')
-          .child(widget.projectId)
-          .child(user.uid)
-          .child('${DateTime.now().microsecondsSinceEpoch}_$safeFileName');
+      // 3. Ensure Supabase accepts this Firebase user's JWT.
+      await _ensureSupabaseRole(user);
 
-      final uploadSnapshot = await uploadedRef.putData(
+      // 4. Create a safe storage path.
+      // The first folder is the Firebase UID for the Storage RLS policy.
+      final safeFileName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+
+      uploadedPath =
+          '${user.uid}/project_chat/${widget.projectId}/'
+          '${DateTime.now().microsecondsSinceEpoch}_$safeFileName';
+
+      // 5. Upload file to Supabase Storage.
+      await bucket.uploadBinary(
+        uploadedPath,
         bytes,
-        SettableMetadata(contentType: contentType),
+        fileOptions: FileOptions(
+          contentType: contentType,
+          cacheControl: '3600',
+          upsert: false,
+        ),
       );
-      final downloadUrl = await uploadSnapshot.ref.getDownloadURL();
+
+      final downloadUrl = bucket.getPublicUrl(uploadedPath!);
+
+      // 6. Resolve sender's display name.
       final profileName = (userData?['name'] ?? userData?['displayName'] ?? '')
           .toString()
           .trim();
+
       final senderName = profileName.isNotEmpty
           ? profileName
           : user.displayName ?? user.email ?? 'User';
+
       final isImage = contentType.startsWith('image/');
+
+      // 7. Save the attachment message in Firestore.
       final messageRef = _firestore
           .collection('projects')
           .doc(widget.projectId)
@@ -948,6 +1003,8 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
         'fileUrl': downloadUrl,
         'contentType': contentType,
         'fileSize': bytes.length,
+        'storagePath': uploadedPath,
+        'storageProvider': 'supabase',
         'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
         'replyToMessageId': _replyToMessageId,
@@ -958,29 +1015,10 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
       if (mounted && _replyToMessageId != null) {
         _cancelReply();
       }
-    } on FirebaseException catch (error) {
-      if (uploadedRef != null) {
-        try {
-          await uploadedRef.delete();
-        } on FirebaseException catch (cleanupError) {
-          debugPrint(
-            'Unable to remove orphaned chat upload: ${cleanupError.message}',
-          );
-        }
-      }
-      _showAttachmentMessage(
-        'Unable to upload file: ${error.message ?? error.code}',
-      );
     } catch (error) {
-      if (uploadedRef != null) {
-        try {
-          await uploadedRef.delete();
-        } on FirebaseException catch (cleanupError) {
-          debugPrint(
-            'Unable to remove orphaned chat upload: ${cleanupError.message}',
-          );
-        }
-      }
+      // 8. Best-effort cleanup if upload/message creation fails.
+      await _cleanupSupabaseUpload(uploadedPath);
+
       _showAttachmentMessage('Unable to upload file: $error');
     } finally {
       if (mounted) {
@@ -1038,7 +1076,11 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
       await _uploadAndSendFile(
         bytes: bytes,
         fileName: image.name,
-        contentType: image.mimeType ?? 'image/jpeg',
+        contentType:
+            image.mimeType ??
+            _getContentType(
+              image.name.contains('.') ? image.name.split('.').last : null,
+            ),
       );
     } catch (error, stackTrace) {
       debugPrint('Image preview error: $error');
@@ -1228,37 +1270,72 @@ class _ClientProjectChatState extends State<ClientProjectChat> {
   Future<void> _openAttachment(String fileUrl) async {
     try {
       final uri = Uri.tryParse(fileUrl.trim());
+
       if (uri == null ||
           uri.scheme != 'https' ||
-          uri.host != 'firebasestorage.googleapis.com' ||
           uri.userInfo.isNotEmpty ||
           uri.hasPort) {
         throw const FormatException('Invalid attachment URL.');
       }
 
       final pathSegments = uri.pathSegments;
-      if (pathSegments.length < 5 ||
-          pathSegments[0] != 'v0' ||
-          pathSegments[1] != 'b' ||
-          pathSegments[2] != FirebaseStorage.instance.bucket ||
-          pathSegments[3] != 'o') {
-        throw const FormatException('Attachment is not in Firebase Storage.');
-      }
 
-      final objectPath = pathSegments.skip(4).join('/');
-      if (!objectPath.startsWith('project_chat/${widget.projectId}/')) {
-        throw const FormatException(
-          'Attachment is not part of this project chat.',
-        );
+      final supabaseHost = SupabaseConfig.host;
+
+      if (uri.host == supabaseHost) {
+        // Validate a Supabase public Storage URL.
+        if (pathSegments.length < 9 ||
+            pathSegments[0] != 'storage' ||
+            pathSegments[1] != 'v1' ||
+            pathSegments[2] != 'object' ||
+            pathSegments[3] != 'public' ||
+            pathSegments[4] != 'team-chat-media') {
+          throw const FormatException('Invalid Supabase attachment URL.');
+        }
+
+        // Expected path:
+        // UID/project_chat/projectId/fileName
+        final objectSegments = pathSegments.skip(5).toList();
+
+        if (objectSegments.length < 4 ||
+            objectSegments[1] != 'project_chat' ||
+            objectSegments[2] != widget.projectId) {
+          throw const FormatException(
+            'Attachment is not part of this project chat.',
+          );
+        }
+      } else if (uri.host == 'firebasestorage.googleapis.com') {
+        // Continue supporting previously uploaded Firebase files.
+        if (pathSegments.length < 5 ||
+            pathSegments[0] != 'v0' ||
+            pathSegments[1] != 'b' ||
+            pathSegments[2] != FirebaseStorage.instance.bucket ||
+            pathSegments[3] != 'o') {
+          throw const FormatException(
+            'Invalid Firebase Storage attachment URL.',
+          );
+        }
+
+        final objectPath = pathSegments.skip(4).join('/');
+
+        if (!objectPath.startsWith('project_chat/${widget.projectId}/')) {
+          throw const FormatException(
+            'Attachment is not part of this project chat.',
+          );
+        }
+      } else {
+        throw const FormatException('Attachment host is not allowed.');
       }
 
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!opened) {
+
+      if (!opened && mounted) {
         _showAttachmentMessage('Unable to open the attachment.');
       }
     } catch (error, stackTrace) {
       debugPrint('Open attachment error: $error');
       debugPrintStack(stackTrace: stackTrace);
+
       _showAttachmentMessage('Failed to open attachment.');
     }
   }
