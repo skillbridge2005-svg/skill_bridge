@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -44,9 +47,15 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
   String? _replyToMessageId;
   String? _replyToMessage;
   String? _replyToSenderName;
+  bool _markingUnreadMessagesRead = false;
+  bool _markReadAgain = false;
+  bool _initialTeamReadCheckStarted = false;
 
-  CollectionReference<Map<String, dynamic>> get _messages =>
-      FirebaseFirestore.instance.collection('teams').doc(widget.teamId).collection('messages');
+  CollectionReference<Map<String, dynamic>> get _messages => FirebaseFirestore
+      .instance
+      .collection('teams')
+      .doc(widget.teamId)
+      .collection('messages');
 
   @override
   void dispose() {
@@ -79,26 +88,13 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     });
 
     try {
-      if (replyId == null) {
-        await _chat.sendMessage(teamId: widget.teamId, text: text);
-      } else {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user == null) throw StateError('Please sign in to send messages.');
-        final profile = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-        final profileData = profile.data() ?? <String, dynamic>{};
-        final displayName = (profileData['name'] ?? profileData['displayName'] ?? user.displayName ?? 'Team member').toString();
-        await _messages.add({
-          'senderId': user.uid,
-          'senderName': displayName,
-          'text': text,
-          'type': 'text',
-          'createdAt': FieldValue.serverTimestamp(),
-          'replyToMessageId': replyId,
-          'replyToMessage': replyText ?? '',
-          'replyToSenderName': replyName ?? 'Team member',
-          'isEdited': false,
-        });
-      }
+      await _chat.sendMessage(
+        teamId: widget.teamId,
+        text: text,
+        replyToMessageId: replyId,
+        replyToMessage: replyText,
+        replyToSenderName: replyName,
+      );
     } catch (error) {
       if (!mounted) return;
       _messageController.text = text;
@@ -115,6 +111,58 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       _showMessage('Could not send message: $error');
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  bool _hasUnreadMessagesForCurrentUser(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> messages,
+    String? currentUid,
+  ) {
+    if (currentUid == null) return false;
+
+    return messages.any((message) {
+      final data = message.data();
+      final rawUnreadFor = data['unreadFor'];
+      return data['senderId'] != currentUid &&
+          rawUnreadFor is List &&
+          rawUnreadFor.contains(currentUid);
+    });
+  }
+
+  Future<void> _markTeamMessagesRead() async {
+    if (_markingUnreadMessagesRead) {
+      _markReadAgain = true;
+      return;
+    }
+
+    _markingUnreadMessagesRead = true;
+    try {
+      do {
+        _markReadAgain = false;
+        await _chat.markMessagesRead(widget.teamId);
+      } while (_markReadAgain && mounted);
+    } catch (error) {
+      debugPrint('Could not mark team messages as read: $error');
+    } finally {
+      _markingUnreadMessagesRead = false;
+    }
+  }
+
+  void _handleUnreadMessages(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> messages,
+    String? currentUid,
+  ) {
+    // Mark the initial unread backlog, including messages older than the
+    // 100-message window returned by watchMessages().
+    if (!_initialTeamReadCheckStarted) {
+      _initialTeamReadCheckStarted = true;
+      unawaited(_markTeamMessagesRead());
+      return;
+    }
+
+    // New messages arriving while this screen is open are marked as read too.
+    if (_hasUnreadMessagesForCurrentUser(messages, currentUid)) {
+      unawaited(_markTeamMessagesRead());
     }
   }
 
@@ -150,9 +198,8 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
               child: Image.memory(
                 imageBytes,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Center(
-                  child: Text('Could not preview this image.'),
-                ),
+                errorBuilder: (_, __, ___) =>
+                    const Center(child: Text('Could not preview this image.')),
               ),
             ),
           ),
@@ -190,91 +237,166 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
 
   Future<void> _pickAndSendFile() async {
     if (_uploadingFile) return;
+
     try {
       final file = await FilePicker.pickFile(type: FileType.any);
+
       if (file == null || !mounted) return;
+
       final bytes = await file.readAsBytes();
+
       if (bytes.isEmpty) {
         _showMessage('The selected file is empty or could not be read.');
         return;
       }
+
+      // Maximum file size: 20 MB
       if (bytes.length > 20 * 1024 * 1024) {
         _showMessage('Please select a file smaller than 20 MB.');
         return;
       }
+
+      // Confirm before sharing
       final confirm = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text('Share this file?'),
-          content: Row(children: [
-            const Icon(Icons.insert_drive_file_rounded, color: _blue, size: 34),
-            const SizedBox(width: 12),
-            Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(file.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(_readableSize(bytes.length), style: const TextStyle(color: _muted, fontSize: 12)),
-            ])),
-          ]),
+          content: Row(
+            children: [
+              const Icon(
+                Icons.insert_drive_file_rounded,
+                color: _blue,
+                size: 34,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      file.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _readableSize(bytes.length),
+                      style: const TextStyle(color: _muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-            FilledButton.icon(onPressed: () => Navigator.pop(dialogContext, true), icon: const Icon(Icons.send_rounded), label: const Text('Share')),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('Share'),
+            ),
           ],
         ),
       );
+
       if (confirm != true || !mounted) return;
+
       setState(() => _uploadingFile = true);
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw StateError('Please sign in to share files.');
-      final safeName = file.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final storagePath = 'team-chat-media/${widget.teamId}/${DateTime.now().millisecondsSinceEpoch}_$safeName';
-      final ref = FirebaseStorage.instance.ref(storagePath);
-      await ref.putData(bytes, SettableMetadata(contentType: file.extension == null ? 'application/octet-stream' : _mimeFromExtension(file.extension!)));
-      final url = await ref.getDownloadURL();
-      final profile = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final profileData = profile.data() ?? <String, dynamic>{};
-      final senderName = (profileData['name'] ?? profileData['displayName'] ?? user.displayName ?? 'Team member').toString();
-      await _messages.add({
-        'senderId': user.uid,
-        'senderName': senderName,
-        'text': '',
-        'type': 'file',
-        'fileUrl': url,
-        'fileName': file.name,
-        'fileSize': bytes.length,
-        'mimeType': file.extension == null ? 'application/octet-stream' : _mimeFromExtension(file.extension!),
-        'createdAt': FieldValue.serverTimestamp(),
-        'isEdited': false,
-      });
-      _showMessage('File shared successfully.');
+
+      final mimeType = file.extension == null
+          ? 'application/octet-stream'
+          : _mimeFromExtension(file.extension!);
+
+      // Upload file to Supabase through TeamChatService.
+      // This service also saves the message metadata in Firestore.
+      await _chat.sendFileMessage(
+        teamId: widget.teamId,
+        bytes: bytes,
+        fileName: file.name,
+        contentType: mimeType,
+      );
+
+      if (mounted) {
+        _showMessage('File shared successfully.');
+      }
     } catch (error) {
-      _showMessage('Could not share file: $error');
+      if (mounted) {
+        _showMessage('Could not share file: $error');
+      }
     } finally {
-      if (mounted) setState(() => _uploadingFile = false);
+      if (mounted) {
+        setState(() => _uploadingFile = false);
+      }
     }
   }
 
   String _readableSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024) {
+      return '$bytes B';
+    }
+
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   String _mimeFromExtension(String extension) {
     switch (extension.toLowerCase()) {
-      case 'pdf': return 'application/pdf';
-      case 'png': return 'image/png';
+      case 'pdf':
+        return 'application/pdf';
+
+      case 'png':
+        return 'image/png';
+
       case 'jpg':
-      case 'jpeg': return 'image/jpeg';
-      case 'gif': return 'image/gif';
-      case 'txt': return 'text/plain';
-      case 'doc': return 'application/msword';
-      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls': return 'application/vnd.ms-excel';
-      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'zip': return 'application/zip';
-      case 'csv': return 'text/csv';
-      default: return 'application/octet-stream';
+      case 'jpeg':
+        return 'image/jpeg';
+
+      case 'gif':
+        return 'image/gif';
+
+      case 'webp':
+        return 'image/webp';
+
+      case 'txt':
+        return 'text/plain';
+
+      case 'doc':
+        return 'application/msword';
+
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      case 'xls':
+        return 'application/vnd.ms-excel';
+
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+      case 'csv':
+        return 'text/csv';
+
+      case 'zip':
+        return 'application/zip';
+
+      case 'mp3':
+        return 'audio/mpeg';
+
+      case 'mp4':
+        return 'video/mp4';
+
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -288,19 +410,61 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => Container(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 22),
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 42, height: 4, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(5))),
-          const SizedBox(height: 14),
-          ListTile(leading: const Icon(Icons.reply_rounded, color: _blue), title: const Text('Reply'), onTap: () => Navigator.pop(sheetContext, 'reply')),
-          if (isMine && data['type'] == 'text') ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('Edit message'), onTap: () => Navigator.pop(sheetContext, 'edit')),
-          if (isMine) ListTile(leading: const Icon(Icons.delete_outline_rounded, color: Colors.red), title: const Text('Delete message', style: TextStyle(color: Colors.red)), onTap: () => Navigator.pop(sheetContext, 'delete')),
-          ListTile(leading: const Icon(Icons.close_rounded), title: const Text('Cancel'), onTap: () => Navigator.pop(sheetContext)),
-        ]),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: _border,
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+            const SizedBox(height: 14),
+            ListTile(
+              leading: const Icon(Icons.reply_rounded, color: _blue),
+              title: const Text('Reply'),
+              onTap: () => Navigator.pop(sheetContext, 'reply'),
+            ),
+            if (isMine && data['type'] == 'text')
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit message'),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
+              ),
+            if (isMine)
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.red,
+                ),
+                title: const Text(
+                  'Delete message',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.close_rounded),
+              title: const Text('Cancel'),
+              onTap: () => Navigator.pop(sheetContext),
+            ),
+          ],
+        ),
       ),
     );
     if (!mounted || choice == null) return;
-    final text = (data['text'] ?? (data['type'] == 'image' ? 'Image' : data['fileName'] ?? 'Attachment')).toString();
+    final text =
+        (data['text'] ??
+                (data['type'] == 'image'
+                    ? 'Image'
+                    : data['fileName'] ?? 'Attachment'))
+            .toString();
     final sender = (data['senderName'] ?? 'Team member').toString();
     final messageRef = _messages.doc(messageId);
     if (choice == 'reply') {
@@ -316,16 +480,38 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       final edited = await showDialog<String>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text('Edit message'),
-          content: TextField(controller: controller, autofocus: true, minLines: 1, maxLines: 5, decoration: const InputDecoration(hintText: 'Update your message')),
-          actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, controller.text.trim()), child: const Text('Save'))],
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 1,
+            maxLines: 5,
+            decoration: const InputDecoration(hintText: 'Update your message'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
         ),
       );
       controller.dispose();
       if (edited == null || edited.isEmpty) return;
       try {
-        await messageRef.update({'text': edited, 'isEdited': true, 'editedAt': FieldValue.serverTimestamp()});
+        await messageRef.update({
+          'text': edited,
+          'isEdited': true,
+          'editedAt': FieldValue.serverTimestamp(),
+        });
         _showMessage('Message updated.');
       } catch (error) {
         _showMessage('Could not edit message: $error');
@@ -336,10 +522,24 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text('Delete message?'),
-          content: const Text('This message will be removed from the team chat.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete'))],
+          content: const Text(
+            'This message will be removed from the team chat.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
         ),
       );
       if (confirmed != true) return;
@@ -357,7 +557,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     if (parts.isEmpty) return 'T';
     if (parts.length == 1) {
       final value = parts.first;
-      return value.length > 1 ? value.substring(0, 2).toUpperCase() : value.toUpperCase();
+      return value.length > 1
+          ? value.substring(0, 2).toUpperCase()
+          : value.toUpperCase();
     }
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
@@ -378,8 +580,18 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       return 'Yesterday';
     }
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
@@ -427,8 +639,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 13),
       child: Row(
-        mainAxisAlignment:
-            isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isMine
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMine) ...[
@@ -461,8 +674,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                 maxWidth: MediaQuery.sizeOf(context).width * 0.76,
               ),
               child: Column(
-                crossAxisAlignment:
-                    isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                crossAxisAlignment: isMine
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
                 children: [
                   if (!isMine)
                     Padding(
@@ -487,7 +701,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                               end: Alignment.bottomRight,
                             )
                           : null,
-                      color: isMine ? null : Colors.white.withValues(alpha: 0.97),
+                      color: isMine
+                          ? null
+                          : Colors.white.withValues(alpha: 0.97),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(20),
                         topRight: const Radius.circular(20),
@@ -509,21 +725,49 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if ((data['replyToMessage'] ?? '').toString().isNotEmpty)
+                          if ((data['replyToMessage'] ?? '')
+                              .toString()
+                              .isNotEmpty)
                             Container(
                               width: double.infinity,
                               margin: const EdgeInsets.only(bottom: 8),
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: isMine ? Colors.white.withValues(alpha: 0.14) : const Color(0xFFF1F5F9),
+                                color: isMine
+                                    ? Colors.white.withValues(alpha: 0.14)
+                                    : const Color(0xFFF1F5F9),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border(left: BorderSide(color: isMine ? Colors.white70 : _blue, width: 3)),
+                                border: Border(
+                                  left: BorderSide(
+                                    color: isMine ? Colors.white70 : _blue,
+                                    width: 3,
+                                  ),
+                                ),
                               ),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text((data['replyToSenderName'] ?? 'Team member').toString(), style: TextStyle(color: isMine ? Colors.white : _blue, fontWeight: FontWeight.w800, fontSize: 10)),
-                                const SizedBox(height: 2),
-                                Text(data['replyToMessage'].toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: isMine ? Colors.white70 : _muted, fontSize: 11)),
-                              ]),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    (data['replyToSenderName'] ?? 'Team member')
+                                        .toString(),
+                                    style: TextStyle(
+                                      color: isMine ? Colors.white : _blue,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    data['replyToMessage'].toString(),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isMine ? Colors.white70 : _muted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           if (isImage)
                             if (imageUrl.isNotEmpty)
@@ -541,16 +785,16 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                                             fit: BoxFit.contain,
                                             errorBuilder: (_, __, ___) =>
                                                 const SizedBox(
-                                              height: 240,
-                                              child: Center(
-                                                child: Text(
-                                                  'Unable to load image.',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
+                                                  height: 240,
+                                                  child: Center(
+                                                    child: Text(
+                                                      'Unable to load image.',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            ),
                                           ),
                                         ),
                                         Positioned(
@@ -558,8 +802,11 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                                           top: 8,
                                           child: IconButton.filledTonal(
                                             onPressed: () =>
-                                                Navigator.of(dialogContext).pop(),
-                                            icon: const Icon(Icons.close_rounded),
+                                                Navigator.of(dialogContext)
+                                                    .pop(),
+                                            icon: const Icon(
+                                              Icons.close_rounded,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -585,13 +832,16 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                                         ),
                                       );
                                     },
-                                    errorBuilder: (_, __, ___) => const SizedBox(
-                                      width: 230,
-                                      height: 100,
-                                      child: Center(
-                                        child: Text('Unable to load image.'),
-                                      ),
-                                    ),
+                                    errorBuilder: (_, __, ___) =>
+                                        const SizedBox(
+                                          width: 230,
+                                          height: 100,
+                                          child: Center(
+                                            child: Text(
+                                              'Unable to load image.',
+                                            ),
+                                          ),
+                                        ),
                                   ),
                                 ),
                               )
@@ -607,31 +857,83 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                               ),
                           if (isFile)
                             InkWell(
-                              onTap: fileUrl.isEmpty ? null : () async {
-                                final uri = Uri.tryParse(fileUrl);
-                                if (uri != null) {
-                                  final opened = await launchUrl(uri, mode: LaunchMode.platformDefault);
-                                  if (!opened) _showMessage('Could not open this attachment.');
-                                }
-                              },
+                              onTap: fileUrl.isEmpty
+                                  ? null
+                                  : () async {
+                                      final uri = Uri.tryParse(fileUrl);
+                                      if (uri != null) {
+                                        final opened = await launchUrl(
+                                          uri,
+                                          mode: LaunchMode.platformDefault,
+                                        );
+                                        if (!opened)
+                                          _showMessage(
+                                            'Could not open this attachment.',
+                                          );
+                                      }
+                                    },
                               borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                constraints: const BoxConstraints(minWidth: 190, maxWidth: 250),
+                                constraints: const BoxConstraints(
+                                  minWidth: 190,
+                                  maxWidth: 250,
+                                ),
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: isMine ? Colors.white.withValues(alpha: 0.13) : const Color(0xFFF1F5F9),
+                                  color: isMine
+                                      ? Colors.white.withValues(alpha: 0.13)
+                                      : const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Row(children: [
-                                  Icon(Icons.insert_drive_file_rounded, color: isMine ? Colors.white : _blue, size: 30),
-                                  const SizedBox(width: 9),
-                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    Text(fileName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: isMine ? Colors.white : _ink, fontWeight: FontWeight.w800, fontSize: 12)),
-                                    const SizedBox(height: 3),
-                                    Text(_readableSize((data['fileSize'] as num?)?.toInt() ?? 0), style: TextStyle(color: isMine ? Colors.white70 : _muted, fontSize: 10)),
-                                  ])),
-                                  Icon(Icons.download_rounded, color: isMine ? Colors.white70 : _muted, size: 18),
-                                ]),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.insert_drive_file_rounded,
+                                      color: isMine ? Colors.white : _blue,
+                                      size: 30,
+                                    ),
+                                    const SizedBox(width: 9),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            fileName,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: isMine
+                                                  ? Colors.white
+                                                  : _ink,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            _readableSize(
+                                              (data['fileSize'] as num?)
+                                                      ?.toInt() ??
+                                                  0,
+                                            ),
+                                            style: TextStyle(
+                                              color: isMine
+                                                  ? Colors.white70
+                                                  : _muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.download_rounded,
+                                      color: isMine ? Colors.white70 : _muted,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           if (!isImage && !isFile && messageText.isNotEmpty)
@@ -647,7 +949,14 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                           if (data['isEdited'] == true)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
-                              child: Text('edited', style: TextStyle(fontSize: 9, fontStyle: FontStyle.italic, color: isMine ? Colors.white70 : _muted)),
+                              child: Text(
+                                'edited',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontStyle: FontStyle.italic,
+                                  color: isMine ? Colors.white70 : _muted,
+                                ),
+                              ),
                             ),
                           const SizedBox(height: 5),
                           Row(
@@ -666,7 +975,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                               if (isMine) ...[
                                 const SizedBox(width: 4),
                                 Icon(
-                                  data['isRead'] == true ? Icons.done_all_rounded : Icons.done_rounded,
+                                  data['isRead'] == true
+                                      ? Icons.done_all_rounded
+                                      : Icons.done_rounded,
                                   size: 14,
                                   color: Colors.white.withValues(alpha: 0.78),
                                 ),
@@ -688,7 +999,11 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
             child: IconButton(
               tooltip: 'Message options',
               padding: EdgeInsets.zero,
-              icon: const Icon(Icons.more_horiz_rounded, size: 19, color: _muted),
+              icon: const Icon(
+                Icons.more_horiz_rounded,
+                size: 19,
+                color: _muted,
+              ),
               onPressed: () => _chooseMessageAction(
                 messageId: messageId,
                 data: data,
@@ -713,133 +1028,183 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: _border)),
-                child: Row(children: [
-                  const Icon(Icons.reply_rounded, color: _blue),
-                  const SizedBox(width: 8),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Replying to ${_replyToSenderName ?? 'Team member'}', style: const TextStyle(color: _blue, fontWeight: FontWeight.w800, fontSize: 11)),
-                    Text(_replyToMessage ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 12)),
-                  ])),
-                  IconButton(onPressed: () => setState(() { _replyToMessageId = null; _replyToMessage = null; _replyToSenderName = null; }), icon: const Icon(Icons.close_rounded, size: 18)),
-                ]),
-              ),
-            Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.97),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: _border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x080F172A),
-                blurRadius: 20,
-                offset: Offset(0, 7),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Material(
-                color: const Color(0xFFEFF4FF),
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  onTap: _uploadingImage ? null : _pickAndSendImage,
-                  borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(
-                    width: 43,
-                    height: 43,
-                    child: Center(
-                      child: _uploadingImage
-                          ? const SizedBox(
-                              width: 19,
-                              height: 19,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(
-                              Icons.add_photo_alternate_outlined,
-                              color: _blue,
-                              size: 22,
-                            ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Material(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  onTap: _uploadingFile ? null : _pickAndSendFile,
-                  borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(width: 39, height: 43, child: Center(child: _uploadingFile ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.attach_file_rounded, color: _blue, size: 21))),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _messageController,
-                  minLines: 1,
-                  maxLines: 5,
-                  textCapitalization: TextCapitalization.sentences,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(
-                    hintText: 'Message your team…',
-                    hintStyle: TextStyle(
-                      color: Color(0xFF94A3B8),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 11,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 44,
-                height: 44,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3478F6), Color(0xFF2458D8)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x302563EB),
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _border),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.reply_rounded, color: _blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Replying to ${_replyToSenderName ?? 'Team member'}',
+                            style: const TextStyle(
+                              color: _blue,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                            ),
+                          ),
+                          Text(
+                            _replyToMessage ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: _muted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() {
+                        _replyToMessageId = null;
+                        _replyToMessage = null;
+                        _replyToSenderName = null;
+                      }),
+                      icon: const Icon(Icons.close_rounded, size: 18),
                     ),
                   ],
                 ),
-                child: IconButton(
-                  tooltip: 'Send message',
-                  onPressed: _sending ? null : _send,
-                  color: Colors.white,
-                  icon: _sending
-                      ? const SizedBox(
-                          width: 19,
-                          height: 19,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.send_rounded, size: 20),
-                ),
               ),
-            ],
-          ),
-        ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.97),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: _border),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x080F172A),
+                    blurRadius: 20,
+                    offset: Offset(0, 7),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Material(
+                    color: const Color(0xFFEFF4FF),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _uploadingImage ? null : _pickAndSendImage,
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 43,
+                        height: 43,
+                        child: Center(
+                          child: _uploadingImage
+                              ? const SizedBox(
+                                  width: 19,
+                                  height: 19,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.add_photo_alternate_outlined,
+                                  color: _blue,
+                                  size: 22,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Material(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _uploadingFile ? null : _pickAndSendFile,
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 39,
+                        height: 43,
+                        child: Center(
+                          child: _uploadingFile
+                              ? const SizedBox(
+                                  width: 17,
+                                  height: 17,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.attach_file_rounded,
+                                  color: _blue,
+                                  size: 21,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      minLines: 1,
+                      maxLines: 5,
+                      textCapitalization: TextCapitalization.sentences,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: const InputDecoration(
+                        hintText: 'Message your team…',
+                        hintStyle: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF3478F6), Color(0xFF2458D8)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x302563EB),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: IconButton(
+                      tooltip: 'Send message',
+                      onPressed: _sending ? null : _send,
+                      color: Colors.white,
+                      icon: _sending
+                          ? const SizedBox(
+                              width: 19,
+                              height: 19,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded, size: 20),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -988,8 +1353,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                         return _stateCard(
                           icon: Icons.group_outlined,
                           title: 'Team members only',
-                          subtitle:
-                              'Only accepted team members can access this chat.',
+                          subtitle: 'Only accepted team members can access this chat.',
                         );
                       }
 
@@ -1011,6 +1375,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                           }
 
                           final messages = snapshot.data!.docs;
+                          _handleUnreadMessages(messages, currentUid);
                           if (messages.isEmpty) {
                             return Center(
                               child: Container(
@@ -1073,8 +1438,12 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                               ListView.builder(
                                 controller: _scrollController,
                                 reverse: true,
-                                padding:
-                                    const EdgeInsets.fromLTRB(14, 12, 14, 18),
+                                padding: const EdgeInsets.fromLTRB(
+                                  14,
+                                  12,
+                                  14,
+                                  18,
+                                ),
                                 itemCount: orderedMessages.length,
                                 itemBuilder: (context, index) {
                                   final doc = orderedMessages[index];
@@ -1084,13 +1453,18 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
                                   final time = _formatTime(timestamp, context);
 
                                   final bubble = GestureDetector(
-                                    onLongPress: () => _chooseMessageAction(messageId: doc.id, data: data, isMine: isMine),
+                                    onLongPress: () => _chooseMessageAction(
+                                      messageId: doc.id,
+                                      data: data,
+                                      isMine: isMine,
+                                    ),
                                     child: _buildMessageBubble(
-                                    messageId: doc.id,
-                                    data: data,
-                                    isMine: isMine,
-                                    time: time,
-                                  ));
+                                      messageId: doc.id,
+                                      data: data,
+                                      isMine: isMine,
+                                      time: time,
+                                    ),
+                                  );
 
                                   // Date labels are only added when a valid
                                   // timestamp is present.
@@ -1175,11 +1549,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: _muted,
-                fontSize: 13,
-                height: 1.45,
-              ),
+              style: const TextStyle(color: _muted, fontSize: 13, height: 1.45),
             ),
           ],
         ),
@@ -1221,25 +1591,13 @@ class _MessagesAmbientPainter extends CustomPainter {
     final paint = Paint()..style = PaintingStyle.fill;
 
     paint.color = const Color(0xFFBBD1FF).withValues(alpha: 0.14);
-    canvas.drawCircle(
-      Offset(size.width * 0.08, size.height * 0.18),
-      74,
-      paint,
-    );
+    canvas.drawCircle(Offset(size.width * 0.08, size.height * 0.18), 74, paint);
 
     paint.color = const Color(0xFFD9C7FF).withValues(alpha: 0.13);
-    canvas.drawCircle(
-      Offset(size.width * 0.93, size.height * 0.42),
-      94,
-      paint,
-    );
+    canvas.drawCircle(Offset(size.width * 0.93, size.height * 0.42), 94, paint);
 
     paint.color = const Color(0xFFB9E7F8).withValues(alpha: 0.12);
-    canvas.drawCircle(
-      Offset(size.width * 0.24, size.height * 0.91),
-      82,
-      paint,
-    );
+    canvas.drawCircle(Offset(size.width * 0.24, size.height * 0.91), 82, paint);
 
     final dotPaint = Paint()
       ..color = const Color(0xFF8AAAF0).withValues(alpha: 0.17)

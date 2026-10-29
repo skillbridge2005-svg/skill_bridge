@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../models/team_model.dart';
 import '../../services/team_service.dart';
+import '../../services/team_chat_service.dart';
 import 'team_chat_screen.dart';
 
 class TeamMessagesScreen extends StatefulWidget {
-  const TeamMessagesScreen({super.key});
+  const TeamMessagesScreen({super.key, this.showAppBar = true});
+
+  /// Set to false when this screen is embedded in DeveloperMessagesHubScreen.
+  /// Standalone navigation keeps the existing AppBar by default.
+  final bool showAppBar;
 
   @override
   State<TeamMessagesScreen> createState() => _TeamMessagesScreenState();
@@ -13,6 +18,7 @@ class TeamMessagesScreen extends StatefulWidget {
 
 class _TeamMessagesScreenState extends State<TeamMessagesScreen> {
   final TeamService _teamService = TeamService();
+  final TeamChatService _chatService = TeamChatService();
   final TextEditingController _searchController = TextEditingController();
 
   String _searchQuery = '';
@@ -40,16 +46,18 @@ class _TeamMessagesScreenState extends State<TeamMessagesScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
-          'Messages',
-          style: TextStyle(color: ink, fontWeight: FontWeight.w800),
-        ),
-        iconTheme: const IconThemeData(color: ink),
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              title: const Text(
+                'Messages',
+                style: TextStyle(color: ink, fontWeight: FontWeight.w800),
+              ),
+              iconTheme: const IconThemeData(color: ink),
+            )
+          : null,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -265,9 +273,52 @@ class _TeamMessagesScreenState extends State<TeamMessagesScreen> {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              const Icon(
-                                Icons.chevron_right_rounded,
-                                color: muted,
+                              StreamBuilder<int>(
+                                stream: _chatService.watchTeamUnreadCount(
+                                  team.id,
+                                ),
+                                builder: (context, unreadSnapshot) {
+                                  final unreadCount = unreadSnapshot.data ?? 0;
+
+                                  return Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (unreadCount > 0)
+                                        Container(
+                                          constraints: const BoxConstraints(
+                                            minWidth: 20,
+                                            minHeight: 20,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 5,
+                                            vertical: 2,
+                                          ),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: primary,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            unreadCount > 9
+                                                ? '9+'
+                                                : '$unreadCount',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 5),
+                                      const Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: muted,
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ],
                           ),

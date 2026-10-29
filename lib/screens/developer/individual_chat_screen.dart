@@ -1,8 +1,8 @@
-import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,12 +12,60 @@ class IndividualChatService {
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
-      _firestore.collection('chats').doc(chatId).collection('messages');
+      _firestore
+          .collection('individualChats')
+          .doc(chatId)
+          .collection('messages');
+
+  Future<String> _recipientUidForChat(String chatId, String senderUid) async {
+    final snapshot = await _firestore
+        .collection('individualChats')
+        .doc(chatId)
+        .get();
+
+    if (!snapshot.exists) {
+      throw StateError('This conversation does not exist.');
+    }
+
+    final data = snapshot.data()!;
+    final participants = List<String>.from(
+      data['participants'] ?? const <String>[],
+    );
+
+    final recipients = participants.where((uid) => uid != senderUid).toList();
+
+    if (participants.length != 2 || recipients.length != 1) {
+      throw StateError('Invalid private conversation participants.');
+    }
+
+    return recipients.single;
+  }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String chatId) =>
       _messages(chatId).orderBy('createdAt', descending: true).snapshots();
+
+  Future<void> _ensureSupabaseRole(User user) async {
+    final tokenResult = await user.getIdTokenResult();
+
+    if (tokenResult.claims?['role'] == 'authenticated') {
+      return;
+    }
+
+    final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+
+    await functions.httpsCallable('ensureSupabaseRole').call();
+
+    await user.getIdToken(true);
+
+    final refreshedToken = await user.getIdTokenResult(true);
+
+    if (refreshedToken.claims?['role'] != 'authenticated') {
+      throw StateError('Unable to enable Supabase access for this account.');
+    }
+  }
 
   Future<void> sendMessage({
     required String chatId,
@@ -27,12 +75,27 @@ class IndividualChatService {
     String? replyToSenderName,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Please sign in to send messages.');
 
-    await _messages(chatId).add({
+    if (user == null) {
+      throw StateError('Please sign in to send messages.');
+    }
+
+    final cleanText = text.trim();
+
+    if (cleanText.isEmpty) {
+      throw StateError('Message cannot be empty.');
+    }
+
+    final recipientUid = await _recipientUidForChat(chatId, user.uid);
+
+    final messageRef = _messages(chatId).doc();
+
+    final chatRef = _firestore.collection('individualChats').doc(chatId);
+    
+    await messageRef.set({
       'senderId': user.uid,
       'senderName': user.displayName ?? user.email ?? 'User',
-      'text': text,
+      'text': cleanText,
       'type': 'text',
       'createdAt': FieldValue.serverTimestamp(),
       'isRead': false,
@@ -40,6 +103,17 @@ class IndividualChatService {
       'replyToMessage': replyToMessage,
       'replyToSenderName': replyToSenderName,
     });
+
+    try {
+      await chatRef.update({
+        'lastMessage': cleanText,
+        'lastSenderId': user.uid,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'unreadCounts.$recipientUid': FieldValue.increment(1),
+      });
+    } catch (error) {
+      debugPrint('Message saved, but unread count update failed: $error');
+    }
   }
 
   Future<void> sendAttachment({
@@ -49,48 +123,127 @@ class IndividualChatService {
     required String contentType,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Please sign in to send attachments.');
-    if (bytes.isEmpty) throw StateError('The selected file is empty.');
+
+    if (user == null) {
+      throw StateError('Please sign in to send attachments.');
+    }
+
+    if (bytes.isEmpty) {
+      throw StateError('The selected file is empty.');
+    }
+
     if (bytes.length > 15 * 1024 * 1024) {
       throw StateError('Files must be 15 MB or smaller.');
     }
 
-    final safeName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    final storageRef = FirebaseStorage.instance
-        .ref()
-        .child('individual_chat')
-        .child(chatId)
-        .child(user.uid)
-        .child('${DateTime.now().microsecondsSinceEpoch}_$safeName');
+    final recipientUid = await _recipientUidForChat(chatId, user.uid);
 
-    final upload = await storageRef.putData(
+    await _ensureSupabaseRole(user);
+
+    final safeName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+
+    final storagePath =
+        '${user.uid}/individual/$chatId/'
+        '${DateTime.now().microsecondsSinceEpoch}_$safeName';
+
+    final bucket = _supabase.storage.from('team-chat-media');
+
+    // Step 1: Upload the file to Supabase Storage.
+    await bucket.uploadBinary(
+      storagePath,
       bytes,
-      SettableMetadata(contentType: contentType),
+      fileOptions: FileOptions(
+        contentType: contentType,
+        cacheControl: '3600',
+        upsert: false,
+      ),
     );
 
+    final fileUrl = bucket.getPublicUrl(storagePath);
+    final isImage = contentType.startsWith('image/');
+
+    final messageRef = _messages(chatId).doc();
+    final chatRef = _firestore.collection('individualChats').doc(chatId);
+
+    // Step 2: Save the attachment message to Firestore.
     try {
-      final url = await upload.ref.getDownloadURL();
-      final isImage = contentType.startsWith('image/');
-      await _messages(chatId).add({
+      await messageRef.set({
         'senderId': user.uid,
         'senderName': user.displayName ?? user.email ?? 'User',
         'text': isImage ? 'Image: $fileName' : 'File: $fileName',
         'type': isImage ? 'image' : 'file',
-        'fileUrl': url,
+        'fileUrl': fileUrl,
         'fileName': fileName,
         'contentType': contentType,
         'fileSize': bytes.length,
+        'storagePath': storagePath,
+        'storageProvider': 'supabase',
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
-    } catch (_) {
+    } catch (error) {
+      // Remove the uploaded file if saving its message fails.
       try {
-        await storageRef.delete();
+        await bucket.remove([storagePath]);
       } catch (cleanupError) {
-        debugPrint('Attachment cleanup failed: $cleanupError');
+        debugPrint('Supabase attachment cleanup failed: $cleanupError');
       }
+
       rethrow;
     }
+
+    // Step 3: Update the conversation preview separately.
+    // A preview failure should not delete an already-saved message.
+    try {
+      await chatRef.update({
+        'lastMessage': isImage ? 'Image: $fileName' : 'File: $fileName',
+        'lastSenderId': user.uid,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'unreadCounts.$recipientUid': FieldValue.increment(1),
+      });
+    } catch (error) {
+      debugPrint(
+        'Attachment saved, but conversation preview update failed: $error',
+      );
+    }
+  }
+
+  /// Resolves chat media without relying on a permanent public URL.
+  /// Private buckets require a Storage SELECT policy for the signed-in user.
+  Future<String> resolveAttachmentUrl({
+    required String storagePath,
+    required String fallbackUrl,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Please sign in to view attachments.');
+
+    if (storagePath.isNotEmpty) {
+      try {
+        await _ensureSupabaseRole(user);
+        return await _supabase.storage
+            .from('team-chat-media')
+            .createSignedUrl(storagePath, 3600);
+      } catch (error) {
+        debugPrint('Signed attachment URL failed: $error');
+      }
+    }
+
+    // Repair older public-object URLs that were saved without `/public/`.
+    // This only helps when the bucket is public; private buckets use signed URLs above.
+    final correctedFallbackUrl = fallbackUrl.replaceFirst(
+      '/storage/v1/object/team-chat-media/',
+      '/storage/v1/object/public/team-chat-media/',
+    );
+    final uri = Uri.tryParse(correctedFallbackUrl);
+    if (uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty) {
+      return correctedFallbackUrl;
+    }
+
+    throw StateError(
+      'Cannot access this attachment. Check the Storage bucket and SELECT policy.',
+    );
   }
 
   Future<void> editMessage({
@@ -102,11 +255,17 @@ class IndividualChatService {
     if (user == null) throw StateError('Please sign in again.');
     final ref = _messages(chatId).doc(messageId);
     final snapshot = await ref.get();
-    if (!snapshot.exists || snapshot.data()?['senderId'] != user.uid) {
+    final data = snapshot.data();
+    if (!snapshot.exists || data?['senderId'] != user.uid) {
       throw StateError('You can only edit your own messages.');
     }
+    if ((data?['type'] ?? 'text') != 'text') {
+      throw StateError('Only text messages can be edited.');
+    }
+    final cleanText = text.trim();
+    if (cleanText.isEmpty) throw StateError('Message cannot be empty.');
     await ref.update({
-      'text': text,
+      'text': cleanText,
       'type': 'text',
       'isEdited': true,
       'editedAt': FieldValue.serverTimestamp(),
@@ -121,10 +280,25 @@ class IndividualChatService {
     if (user == null) throw StateError('Please sign in again.');
     final ref = _messages(chatId).doc(messageId);
     final snapshot = await ref.get();
-    if (!snapshot.exists || snapshot.data()?['senderId'] != user.uid) {
+    final data = snapshot.data();
+    if (!snapshot.exists || data?['senderId'] != user.uid) {
       throw StateError('You can only delete your own messages.');
     }
+
+    // Remove the chat entry first so the UI responds immediately.
     await ref.delete();
+
+    final storagePath = (data?['storagePath'] ?? '').toString();
+    if (data?['storageProvider'] == 'supabase' && storagePath.isNotEmpty) {
+      try {
+        await _ensureSupabaseRole(user);
+        await _supabase.storage.from('team-chat-media').remove([storagePath]);
+      } catch (error) {
+        // Do not fail the user-facing delete because storage cleanup is denied;
+        // the leftover object can be cleaned up after correcting Storage RLS.
+        debugPrint('Attachment cleanup failed for $storagePath: $error');
+      }
+    }
   }
 
   Future<void> markMessagesRead(
@@ -132,19 +306,28 @@ class IndividualChatService {
     List<QueryDocumentSnapshot<Map<String, dynamic>>> messages,
   ) async {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) return;
+
     final unread = messages.where((doc) {
       final data = doc.data();
+
       return data['senderId'] != user.uid && data['isRead'] != true;
     }).toList();
 
+    final chatRef = _firestore.collection('individualChats').doc(chatId);
+
     for (var i = 0; i < unread.length; i += 400) {
       final batch = _firestore.batch();
+
       for (final doc in unread.skip(i).take(400)) {
         batch.update(doc.reference, {'isRead': true});
       }
+
       await batch.commit();
     }
+
+    await chatRef.update({'unreadCounts.${user.uid}': 0});
   }
 }
 
@@ -170,6 +353,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   bool _sending = false;
   bool _uploadingAttachment = false;
   bool _markingRead = false;
+  final Map<String, Future<String>> _attachmentUrlFutures = {};
+  final Map<String, DateTime> _attachmentUrlExpiry = {};
   String? _replyId;
   String? _replyText;
   String? _replyName;
@@ -185,6 +370,41 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<String> _resolvedAttachmentUrl({
+    required String storagePath,
+    required String fallbackUrl,
+  }) {
+    final cacheKey = storagePath.isNotEmpty ? storagePath : fallbackUrl;
+    final cachedFuture = _attachmentUrlFutures[cacheKey];
+    final expiry = _attachmentUrlExpiry[cacheKey];
+    final refreshBefore = DateTime.now().add(const Duration(minutes: 2));
+
+    if (cachedFuture != null &&
+        expiry != null &&
+        expiry.isAfter(refreshBefore)) {
+      return cachedFuture;
+    }
+
+    final future = _service.resolveAttachmentUrl(
+      storagePath: storagePath,
+      fallbackUrl: fallbackUrl,
+    );
+    _attachmentUrlFutures[cacheKey] = future;
+    _attachmentUrlExpiry[cacheKey] = DateTime.now().add(
+      const Duration(minutes: 50),
+    );
+    future.then<void>(
+      (_) {},
+      onError: (Object _) {
+        if (identical(_attachmentUrlFutures[cacheKey], future)) {
+          _attachmentUrlFutures.remove(cacheKey);
+          _attachmentUrlExpiry.remove(cacheKey);
+        }
+      },
+    );
+    return future;
   }
 
   void _showError(String message) {
@@ -277,7 +497,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   bytes,
                   height: 190,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
+                  errorBuilder: (_, _, _) =>
                       const Icon(Icons.broken_image_outlined, size: 48),
                 )
               else
@@ -334,10 +554,22 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         return 'image/webp';
       case 'gif':
         return 'image/gif';
+      case 'bmp':
+        return 'image/bmp';
+      case 'avif':
+        return 'image/avif';
+      case 'heic':
+        return 'image/heic';
+      case 'heif':
+        return 'image/heif';
+      case 'tif':
+      case 'tiff':
+        return 'image/tiff';
       case 'jpg':
       case 'jpeg':
-      default:
         return 'image/jpeg';
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -522,7 +754,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     senderName: senderName,
                   ),
                 ),
-                if (isMine)
+                if (isMine && (data['type'] ?? 'text') == 'text')
                   option(
                     icon: Icons.edit_rounded,
                     label: 'Edit message',
@@ -678,97 +910,132 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   Widget _buildAttachmentContent({
     required String type,
     required String fileUrl,
+    required String storagePath,
     required String fileName,
     required bool isMine,
   }) {
-    if (type == 'image' && fileUrl.isNotEmpty) {
-      return GestureDetector(
-        onTap: () => showDialog<void>(
-          context: context,
-          builder: (_) => Dialog(
-            child: InteractiveViewer(
-              child: Image.network(
-                fileUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Unable to load image.'),
-                ),
+    if (type != 'image' && type != 'file') {
+      return const SizedBox.shrink();
+    }
+    if (fileUrl.isEmpty && storagePath.isEmpty) {
+      return const Text('Attachment link is missing.');
+    }
+
+    return FutureBuilder<String>(
+      future: _resolvedAttachmentUrl(
+        storagePath: storagePath,
+        fallbackUrl: fileUrl,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            width: 230,
+            height: 100,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return const SizedBox(
+            width: 230,
+            height: 100,
+            child: Center(
+              child: Text(
+                'Unable to load attachment. Check Storage access settings.',
+                textAlign: TextAlign.center,
               ),
             ),
-          ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.network(
-            fileUrl,
-            width: 230,
-            height: 200,
-            fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) => progress == null
-                ? child
-                : const SizedBox(
-                    width: 230,
-                    height: 150,
-                    child: Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
+          );
+        }
+
+        final resolvedUrl = snapshot.data!;
+        if (type == 'image') {
+          return GestureDetector(
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => Dialog(
+                child: InteractiveViewer(
+                  child: Image.network(
+                    resolvedUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('Unable to load image.'),
                     ),
                   ),
-            errorBuilder: (_, __, ___) => const SizedBox(
-              width: 230,
-              height: 100,
-              child: Center(child: Text('Unable to load image.')),
-            ),
-          ),
-        ),
-      );
-    }
-    if (type == 'file' && fileUrl.isNotEmpty) {
-      return InkWell(
-        onTap: () => _openAttachment(fileUrl),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 280),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isMine
-                ? Colors.white.withValues(alpha: 0.12)
-                : const Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.insert_drive_file_rounded,
-                size: 28,
-                color: isMine ? Colors.white : _indigo,
-              ),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      fileName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Tap to open file',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                  ],
                 ),
               ),
-            ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                resolvedUrl,
+                width: 230,
+                height: 200,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const SizedBox(
+                        width: 230,
+                        height: 150,
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                errorBuilder: (_, _, _) => const SizedBox(
+                  width: 230,
+                  height: 100,
+                  child: Center(child: Text('Unable to load image.')),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return InkWell(
+          onTap: () => _openAttachment(resolvedUrl),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 280),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isMine
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.insert_drive_file_rounded,
+                  size: 28,
+                  color: isMine ? Colors.white : _indigo,
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        fileName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'Tap to open file',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-    }
-    return const SizedBox.shrink();
+        );
+      },
+    );
   }
 
   Widget _buildBubble({
@@ -780,6 +1047,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     final text = (data['text'] ?? '').toString();
     final type = (data['type'] ?? 'text').toString();
     final fileUrl = (data['fileUrl'] ?? '').toString();
+    final storagePath = (data['storagePath'] ?? '').toString();
     final fileName = (data['fileName'] ?? 'Attachment').toString();
     final timestampValue = data['createdAt'];
     final timestamp = timestampValue is Timestamp ? timestampValue : null;
@@ -909,7 +1177,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       ),
                       const SizedBox(height: 8),
                     ],
-                    if (type == 'text' || fileUrl.isEmpty)
+                    if (type == 'text')
                       Text(
                         text,
                         style: TextStyle(
@@ -922,6 +1190,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       _buildAttachmentContent(
                         type: type,
                         fileUrl: fileUrl,
+                        storagePath: storagePath,
                         fileName: fileName,
                         isMine: isMine,
                       ),
@@ -1245,8 +1514,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             child: Image.asset(
               'assets/images/chat_background.png.jpeg',
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  const ColoredBox(color: _background),
+              errorBuilder: (_, _, _) => const ColoredBox(color: _background),
             ),
           ),
           Positioned.fill(

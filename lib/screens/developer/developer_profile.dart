@@ -378,6 +378,131 @@ class _ProfileBody extends StatelessWidget {
     }
   }
 
+  Future<void> _showProfilePhotoOptions(BuildContext context) async {
+    final hasPhoto = profileImageUrl.trim().isNotEmpty;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Manage Profile Photo',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.add_a_photo_outlined,
+                  color: _primary,
+                ),
+                title: Text(
+                  hasPhoto ? 'Change Profile Photo' : 'Upload Profile Photo',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _changeProfilePhoto(context);
+                },
+              ),
+              if (hasPhoto)
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.red,
+                  ),
+                  title: const Text(
+                    'Delete Profile Photo',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _deleteProfilePhoto(context);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteProfilePhoto(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      _snack(context, 'Please log in again.');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete profile photo?'),
+        content: const Text(
+          'Are you sure you want to remove your profile photo?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final userDoc = FirebaseFirestore.instance.collection('users').doc(uid);
+
+      final userSnapshot = await userDoc.get();
+      final userData = userSnapshot.data();
+
+      final path = userData?['profileImagePath']?.toString().trim() ?? '';
+
+      if (path.isNotEmpty) {
+        await Supabase.instance.client.storage.from('profile-photos').remove([
+          path,
+        ]);
+      }
+
+      await userDoc.set({
+        'profileImageUrl': '',
+        'profileImagePath': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await FirebaseFirestore.instance
+          .collection('developerProfiles')
+          .doc(uid)
+          .set({
+            'photoUrl': '',
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+
+      await user.updatePhotoURL(null);
+
+      if (!context.mounted) return;
+      _snack(context, 'Profile photo deleted successfully.');
+    } catch (error) {
+      if (!context.mounted) return;
+      _snack(context, 'Could not delete profile photo: $error');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final skills = _stringList(profile['skills']);
@@ -444,7 +569,7 @@ class _ProfileBody extends StatelessWidget {
                 photoUrl: profileImageUrl,
                 availability: availability,
                 location: _text('location'),
-                onChangePhoto: () => _changeProfilePhoto(context),
+                onChangePhoto: () => _showProfilePhotoOptions(context),
               ),
               const SizedBox(height: 18),
 
@@ -894,7 +1019,7 @@ class _ProfileHero extends StatelessWidget {
                         child: const Padding(
                           padding: EdgeInsets.all(5),
                           child: Icon(
-                            Icons.camera_alt_rounded,
+                            Icons.edit_rounded,
                             size: 15,
                             color: _primary,
                           ),
