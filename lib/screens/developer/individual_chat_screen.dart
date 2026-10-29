@@ -13,8 +13,8 @@ class IndividualChatService {
 
   final FirebaseFirestore _firestore;
 
-  CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
-      _firestore.collection('chats').doc(chatId).collection('messages');
+CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
+    _firestore.collection('individualChats').doc(chatId).collection('messages');
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchMessages(String chatId) =>
       _messages(chatId).orderBy('createdAt', descending: true).snapshots();
@@ -29,7 +29,8 @@ class IndividualChatService {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Please sign in to send messages.');
 
-    await _messages(chatId).add({
+    final batch = _firestore.batch();
+    batch.set(_messages(chatId).doc(), {
       'senderId': user.uid,
       'senderName': user.displayName ?? user.email ?? 'User',
       'text': text,
@@ -40,6 +41,12 @@ class IndividualChatService {
       'replyToMessage': replyToMessage,
       'replyToSenderName': replyToSenderName,
     });
+    batch.update(_firestore.collection('individualChats').doc(chatId), {
+      'lastMessage': text,
+      'lastSenderId': user.uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
   }
 
   Future<void> sendAttachment({
@@ -71,7 +78,8 @@ class IndividualChatService {
     try {
       final url = await upload.ref.getDownloadURL();
       final isImage = contentType.startsWith('image/');
-      await _messages(chatId).add({
+      final batch = FirebaseFirestore.instance.batch();
+      batch.set(_messages(chatId).doc(), {
         'senderId': user.uid,
         'senderName': user.displayName ?? user.email ?? 'User',
         'text': isImage ? 'Image: $fileName' : 'File: $fileName',
@@ -83,6 +91,12 @@ class IndividualChatService {
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
+      batch.update(_firestore.collection('individualChats').doc(chatId), {
+        'lastMessage': isImage ? 'Image: $fileName' : 'File: $fileName',
+        'lastSenderId': user.uid,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
     } catch (_) {
       try {
         await storageRef.delete();

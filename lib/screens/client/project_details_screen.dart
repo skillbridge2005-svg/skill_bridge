@@ -7,24 +7,19 @@ import 'package:printing/printing.dart';
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
-import 'project_meeting_screen.dart';
 import 'client_applications_screen.dart';
 import 'developer_review_widget.dart';
+import 'project_meeting_screen.dart';
 import 'widgets/project_payment_card.dart';
 
-final GlobalKey _projectEstimateSectionKey = GlobalKey();
-
-class ProjectDetailsScreen extends StatefulWidget {
+class ProjectDetailsScreen extends StatelessWidget {
   final String projectId;
 
   const ProjectDetailsScreen({super.key, required this.projectId});
 
-  @override
-  State<ProjectDetailsScreen> createState() => _ProjectDetailsScreenState();
-}
-
-class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
-  bool _showCompleteEstimate = false;
+  // ------------------------------------------------------------
+  // STATUS HELPERS
+  // ------------------------------------------------------------
 
   String _formatStatus(BuildContext context, String status) {
     final l10n = AppLocalizations.of(context);
@@ -104,93 +99,14 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     }
   }
 
-  String _firstValidValue(List<dynamic> values) {
-    for (final value in values) {
-      if (value == null) continue;
-      if (value is num && value <= 0) continue;
-
-      final text = value.toString().trim();
-      if (text.isNotEmpty && text.toLowerCase() != 'null') {
-        return text;
-      }
-    }
-    return '';
-  }
-
-  double _parseProjectAmount(dynamic value) {
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(
-            value.replaceAll(',', '').replaceAll('₹', '').trim(),
-          ) ??
-          0.0;
-    }
-    return 0.0;
-  }
-
-  Map<String, dynamic> _mapValue(dynamic value) {
-    if (value is Map) return Map<String, dynamic>.from(value);
-    return <String, dynamic>{};
-  }
-
-  List<String> _stringList(dynamic value) {
-    if (value is! List) return <String>[];
-    return value
-        .where((item) => item != null)
-        .map((item) => item.toString())
-        .where((item) => item.trim().isNotEmpty)
-        .toList();
-  }
-
-  void _showFullImage(BuildContext context, String imageUrl) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.black,
-        insetPadding: const EdgeInsets.all(12),
-        child: Stack(
-          children: [
-            InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 5,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  );
-                },
-                errorBuilder: (_, _, _) => const Center(
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    color: Colors.white,
-                    size: 48,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                icon: const Icon(Icons.close, color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // ------------------------------------------------------------
+  // NAVIGATION
+  // ------------------------------------------------------------
 
   void _openTeam(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ClientTeamScreen(projectId: widget.projectId),
-      ),
+      MaterialPageRoute(builder: (_) => ClientTeamScreen(projectId: projectId)),
     );
   }
 
@@ -198,8 +114,18 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ClientProjectChat(
-          projectId: widget.projectId,
+        builder: (_) =>
+            ClientProjectChat(projectId: projectId, projectTitle: projectTitle),
+      ),
+    );
+  }
+
+  void _openApplications(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientApplicationsScreen(
+          projectId: projectId,
           projectTitle: projectTitle,
         ),
       ),
@@ -209,9 +135,9 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
   void _openMeetings(BuildContext context, String projectTitle) {
     Navigator.push(
       context,
-      MaterialPageRoute<void>(
+      MaterialPageRoute(
         builder: (_) => ProjectMeetingScreen(
-          projectId: widget.projectId,
+          projectId: projectId,
           projectTitle: projectTitle,
         ),
       ),
@@ -224,8 +150,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     required double projectTotal,
     required String currency,
   }) async {
-    final projectId = widget.projectId;
-
     try {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Generating payment statement...')),
@@ -650,285 +574,9 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     }
   }
 
-  void _openEstimate(
-    BuildContext context,
-    String title,
-    Map<String, dynamic> data,
-  ) {
-    final hasSavedPlan =
-        data['plan'] is Map && (data['plan'] as Map).isNotEmpty;
-    final hasSavedEstimate =
-        data['estimate'] is Map && (data['estimate'] as Map).isNotEmpty;
-
-    if (!hasSavedPlan && !hasSavedEstimate) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No saved estimate is available for this project yet.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _showCompleteEstimate = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!context.mounted) return;
-      final targetContext = _projectEstimateSectionKey.currentContext;
-      if (targetContext != null) {
-        Scrollable.ensureVisible(
-          targetContext,
-          duration: const Duration(milliseconds: 450),
-          curve: Curves.easeInOut,
-          alignment: 0.08,
-        );
-      }
-    });
-  }
-
-  bool _developerHasConfirmed(Map<String, dynamic> data) {
-    // Only explicit assignment/acceptance fields count here.
-    // A workflow status or a teamId alone is not proof of confirmation.
-    const confirmationFields = [
-      'assignedDeveloperId',
-      'selectedDeveloperId',
-      'hiredDeveloperId',
-      'acceptedDeveloperId',
-      'developerId',
-      'confirmedDeveloperId',
-      'developerConfirmed',
-      'developerAccepted',
-      'isDeveloperConfirmed',
-      'isDeveloperAccepted',
-    ];
-
-    for (final field in confirmationFields) {
-      final value = data[field];
-      if (value == true) return true;
-      if (value is String && value.trim().isNotEmpty) return true;
-      if (value is List && value.isNotEmpty) return true;
-    }
-    return false;
-  }
-
-  Future<bool> _hasConfirmedApplication(
-    FirebaseFirestore firestore,
-    String projectId,
-  ) async {
-    const collections = ['applications', 'projectApplications'];
-    const confirmedStatuses = {
-      'accepted',
-      'confirmed',
-      'hired',
-      'approved',
-      'developer_confirmed',
-      'developer_accepted',
-    };
-
-    for (final collectionName in collections) {
-      final query = await firestore
-          .collection(collectionName)
-          .where('projectId', isEqualTo: projectId)
-          .get();
-
-      for (final application in query.docs) {
-        final applicationData = application.data();
-        final status = (applicationData['status'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase()
-            .replaceAll(' ', '_');
-
-        if (confirmedStatuses.contains(status) ||
-            applicationData['accepted'] == true ||
-            applicationData['confirmed'] == true ||
-            applicationData['hired'] == true ||
-            applicationData['isAccepted'] == true ||
-            applicationData['isConfirmed'] == true) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  Future<void> _deleteProject(
-    BuildContext context,
-    Map<String, dynamic> data,
-    String projectTitle,
-  ) async {
-    if (_developerHasConfirmed(data)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'A developer has already been confirmed for this project. '
-            'For safety, this project cannot be deleted.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(
-          Icons.delete_forever_outlined,
-          color: Color(0xFFDC2626),
-          size: 34,
-        ),
-        title: const Text('Delete project?'),
-        content: Text(
-          '“$projectTitle” and its project-linked database records will be '
-          'deleted. This action cannot be undone. You can delete only before '
-          'a developer is confirmed.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('Delete project'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final projectRef = firestore.collection('projects').doc(widget.projectId);
-
-      // Re-read the project immediately before deletion so a developer
-      // confirmation that happened while the dialog was open blocks deletion.
-      final latestSnapshot = await projectRef.get();
-      if (!context.mounted) return;
-
-      if (!latestSnapshot.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This project has already been deleted.'),
-          ),
-        );
-        Navigator.of(context).maybePop();
-        return;
-      }
-
-      final latestData = latestSnapshot.data() ?? <String, dynamic>{};
-      final hasConfirmedApplication = await _hasConfirmedApplication(
-        firestore,
-        widget.projectId,
-      );
-      if (!context.mounted) return;
-
-      if (_developerHasConfirmed(latestData) || hasConfirmedApplication) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'A developer has now been confirmed. This project cannot be deleted.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      // Delete project-linked top-level records where projectId is stored.
-      // Each batch is kept below Firestore's 500-write limit.
-      const relatedCollections = [
-        'applications',
-        'projectApplications',
-        'projectMeetings',
-        'meetings',
-        'notifications',
-      ];
-
-      for (final collectionName in relatedCollections) {
-        final query = await firestore
-            .collection(collectionName)
-            .where('projectId', isEqualTo: widget.projectId)
-            .get();
-
-        for (var start = 0; start < query.docs.length; start += 450) {
-          final batch = firestore.batch();
-          final end = (start + 450 < query.docs.length)
-              ? start + 450
-              : query.docs.length;
-          for (final doc in query.docs.sublist(start, end)) {
-            batch.delete(doc.reference);
-          }
-          await batch.commit();
-        }
-      }
-
-      // Delete the parent project document last, after its linked records.
-      await projectRef.delete();
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Project and linked records deleted successfully.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      Navigator.of(context).maybePop();
-    } on FirebaseException catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not delete project: ${error.message ?? error.code}',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete project: $error')),
-      );
-    }
-  }
-
-  void _openApplications(BuildContext context, String projectTitle) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ClientApplicationsScreen(
-          projectId: widget.projectId,
-          projectTitle: projectTitle,
-        ),
-      ),
-    );
-  }
-
-  bool _isStepActive(String currentStatus, String step) {
-    const order = [
-      'requirement',
-      'team_formation',
-      'development',
-      'testing',
-      'client_review',
-      'completed',
-    ];
-
-    final currentIndex = order.indexOf(currentStatus);
-    final stepIndex = order.indexOf(step);
-
-    if (currentIndex == -1 || stepIndex == -1) {
-      return false;
-    }
-
-    return stepIndex <= currentIndex;
-  }
+  // ------------------------------------------------------------
+  // LOCALIZED FALLBACK TEXT
+  // ------------------------------------------------------------
 
   String _noDescriptionText(BuildContext context) {
     final languageCode = Localizations.localeOf(context).languageCode;
@@ -1028,188 +676,129 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     return 'Chat with your team';
   }
 
-  String _cleanDescription(String value) {
-    var cleaned = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  // ------------------------------------------------------------
+  // IMAGE PREVIEW
+  // ------------------------------------------------------------
 
-    // Remove Markdown emphasis markers while keeping the actual description text.
-    cleaned = cleaned.replaceAll('**', '').replaceAll('__', '');
-    cleaned = cleaned.replaceAllMapped(
-      RegExp(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)'),
-      (match) => match.group(1) ?? '',
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(12),
+          child: Stack(
+            children: [
+              InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 5,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) {
+                      return child;
+                    }
+
+                    return const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    );
+                  },
+                  errorBuilder: (_, _, _) {
+                    return const Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
-
-    // Convert Markdown star bullets to regular bullets instead of showing asterisks.
-    cleaned = cleaned.replaceAllMapped(
-      RegExp(r'(^|\n)\s*\*\s+'),
-      (match) => '${match.group(1)}• ',
-    );
-
-    // Remove Markdown heading markers and normalize excessive blank lines.
-    cleaned = cleaned.replaceAll(
-      RegExp(r'^\s{0,3}#{1,6}\s*', multiLine: true),
-      '',
-    );
-    cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
-
-    return cleaned.trim();
   }
+
+  // ------------------------------------------------------------
+  // VALUE HELPERS
+  // ------------------------------------------------------------
+
+  String _firstValidValue(List<dynamic> values) {
+    for (final value in values) {
+      if (value == null) continue;
+
+      if (value is num && value <= 0) {
+        continue;
+      }
+
+      final text = value.toString().trim();
+
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+
+    return '';
+  }
+
+  double _parseProjectAmount(dynamic value) {
+    if (value is num) return value.toDouble();
+
+    if (value is String) {
+      return double.tryParse(
+            value.replaceAll(',', '').replaceAll('₹', '').trim(),
+          ) ??
+          0.0;
+    }
+
+    return 0.0;
+  }
+
+  Map<String, dynamic> _mapValue(dynamic value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+
+    return <String, dynamic>{};
+  }
+
+  List<String> _stringList(dynamic value) {
+    if (value is! List) {
+      return <String>[];
+    }
+
+    return value
+        .where((item) => item != null)
+        .map((item) => item.toString())
+        .where((item) => item.trim().isNotEmpty)
+        .toList();
+  }
+
+  // ------------------------------------------------------------
+  // MAIN SCREEN
+  // ------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
-    Widget buildEstimateValue(String label, dynamic value, {int depth = 0}) {
-      if (value == null) {
-        return const SizedBox.shrink();
-      }
-
-      if (value is String && value.trim().isEmpty) {
-        return const SizedBox.shrink();
-      }
-
-      if (value is Map) {
-        final entries = value.entries.where((entry) {
-          return entry.value != null;
-        }).toList();
-
-        if (entries.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        return Padding(
-          padding: EdgeInsets.only(left: depth > 0 ? 12 : 0, bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (label.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    _formatPlanLabel(label),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF344054),
-                    ),
-                  ),
-                ),
-              ...entries.map(
-                (entry) => buildEstimateValue(
-                  entry.key.toString(),
-                  entry.value,
-                  depth: depth + 1,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-
-      if (value is List) {
-        final items = value.where((item) => item != null).toList();
-
-        if (items.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        return Padding(
-          padding: EdgeInsets.only(left: depth > 0 ? 12 : 0, bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (label.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    _formatPlanLabel(label),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF344054),
-                    ),
-                  ),
-                ),
-              ...items.asMap().entries.map((entry) {
-                final item = entry.value;
-
-                if (item is Map || item is List) {
-                  return Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                    ),
-                    child: buildEstimateValue(
-                      item is Map ? '' : 'Item ${entry.key + 1}',
-                      item,
-                      depth: depth + 1,
-                    ),
-                  );
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 17,
-                        color: Color(0xFF4F46E5),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          item.toString(),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            height: 1.5,
-                            color: Color(0xFF475467),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ],
-          ),
-        );
-      }
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _formatPlanLabel(label),
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF667085),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value.toString(),
-              style: const TextStyle(
-                fontSize: 13,
-                height: 1.5,
-                color: Color(0xFF344054),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
 
+      // --------------------------------------------------------
+      // CUSTOM APP BAR
+      // --------------------------------------------------------
       appBar: AppBar(
         toolbarHeight: 82,
         elevation: 0,
@@ -1237,7 +826,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
             ),
             child: Row(
               children: [
-                // Back button
                 Material(
                   color: const Color(0xFFEFF4FF),
                   borderRadius: BorderRadius.circular(13),
@@ -1258,7 +846,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
                 const SizedBox(width: 12),
 
-                // Project icon
                 Container(
                   width: 44,
                   height: 44,
@@ -1275,14 +862,13 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
                 const SizedBox(width: 12),
 
-                // Title and subtitle
                 Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        AppLocalizations.of(context).projectDetails,
+                        l10n.projectDetails,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -1312,6 +898,10 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
           ),
         ),
       ),
+
+      // --------------------------------------------------------
+      // FIRESTORE PROJECT STREAM
+      // --------------------------------------------------------
       body: Stack(
         children: [
           const Positioned.fill(
@@ -1319,11 +909,13 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
               child: CustomPaint(painter: _ProjectDetailsAmbientPainter()),
             ),
           ),
+
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
                 .collection('projects')
-                .doc(widget.projectId)
+                .doc(projectId)
                 .snapshots(),
+
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: _ProjectLoader());
@@ -1370,51 +962,38 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                 );
               }
 
+              // ------------------------------------------------
+              // PROJECT DATA
+              // ------------------------------------------------
+
               final title = data['title']?.toString() ?? l10n.project;
 
-              // Support both singular category and legacy categories lists.
+              // Support both category and categories.
               final categories = _stringList(data['categories']);
+
               final category = _firstValidValue([
                 data['category'],
                 if (categories.isNotEmpty) categories.join(', '),
               ]);
 
-              final description = _cleanDescription(
-                data['description']?.toString() ?? '',
-              );
+              final description = data['description']?.toString() ?? '';
 
               final requirements = data['requirements']?.toString() ?? '';
 
-              final plan = data['plan'] is Map
-                  ? Map<String, dynamic>.from(data['plan'] as Map)
-                  : <String, dynamic>{};
+              final plan = _mapValue(data['plan']);
 
-              // Prefer the top-level estimate, but fall back to the saved
-              // plan estimate if the top-level map is absent or empty.
-              final directEstimate = _mapValue(data['estimate']);
               final planEstimate = _mapValue(plan['estimate']);
+
+              final directEstimate = _mapValue(data['estimate']);
+
               final estimate = directEstimate.isNotEmpty
                   ? directEstimate
                   : planEstimate;
 
-              String firstValidValue(List<dynamic> values) {
-                for (final value in values) {
-                  if (value == null) continue;
-
-                  if (value is num && value <= 0) continue;
-
-                  final text = value.toString().trim();
-                  if (text.isNotEmpty && text.toLowerCase() != 'null') {
-                    return text;
-                  }
-                }
-                return '';
-              }
-
-              final budget = firstValidValue([
+              // Support manually entered and AI-generated budgets.
+              final budget = _firstValidValue([
                 data['budget'],
                 data['amount'],
-                data['projectAmount'],
                 estimate['totalCost'],
                 estimate['totalBudget'],
                 estimate['budget'],
@@ -1422,20 +1001,8 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                 estimate['amount'],
               ]);
 
-              final projectTotal = _parseProjectAmount(
-                _firstValidValue([
-                  data['budget'],
-                  data['amount'],
-                  data['projectAmount'],
-                  estimate['totalCost'],
-                  estimate['totalBudget'],
-                  estimate['budget'],
-                  estimate['estimatedCost'],
-                  estimate['amount'],
-                ]),
-              );
-
-              final timeline = firstValidValue([
+              // Support both timeline and estimatedDuration.
+              final timeline = _firstValidValue([
                 data['timeline'],
                 data['estimatedDuration'],
                 estimate['timeline'],
@@ -1444,19 +1011,30 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                 plan['timeline'],
                 plan['duration'],
               ]);
+
               final budgetType = data['budgetType']?.toString() ?? '';
+
               final currency = data['currency']?.toString() ?? 'INR';
+
               final deadline = data['deadline'];
+
               final deadlineText = deadline is Timestamp
                   ? '${deadline.toDate().day.toString().padLeft(2, '0')}/'
                         '${deadline.toDate().month.toString().padLeft(2, '0')}/'
                         '${deadline.toDate().year}'
                   : '';
+
               final experienceLevel = data['experienceLevel']?.toString() ?? '';
+
               final workMode = data['workMode']?.toString() ?? '';
+
               final priority = data['priority']?.toString() ?? '';
+
               final additionalInfo = data['additionalInfo']?.toString() ?? '';
+
               final status = data['status']?.toString() ?? 'requirement';
+
+              final statusColor = _statusColor(status);
               final milestones = data['milestones'] is Map
                   ? Map<String, dynamic>.from(data['milestones'] as Map)
                   : <String, dynamic>{};
@@ -1476,15 +1054,22 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
               final isCompleted =
                   calculatedProgress == 100 ||
                   status.trim().toLowerCase() == 'completed';
-              final acceptedScope = _stringList(data['acceptedScope']);
-              final acceptedCost = data['acceptedCost'] == true;
-              final acceptedTimeline = data['acceptedTimeline'] == true;
-              final acceptedTerms = data['acceptedTerms'] == true;
 
-              final statusColor = _statusColor(status);
               final designImages = _stringList(data['designImageUrls'])
                   .where((url) => url.startsWith('https://'))
                   .toList();
+
+              final acceptedScope = _stringList(data['acceptedScope']);
+
+              final acceptedCost = data['acceptedCost'] == true;
+
+              final acceptedTimeline = data['acceptedTimeline'] == true;
+
+              final acceptedTerms = data['acceptedTerms'] == true;
+
+              // ------------------------------------------------
+              // RESPONSIVE PAGE
+              // ------------------------------------------------
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -1506,6 +1091,10 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            // ------------------------------------
+                            // PROJECT HEADER
+                            // ------------------------------------
+
                             _ProjectHero(
                               title: title,
                               category: category,
@@ -1545,8 +1134,13 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 ),
                               ),
                             ],
+
+                            // ------------------------------------
+                            // DESIGN IMAGES
+                            // ------------------------------------
                             if (designImages.isNotEmpty) ...[
                               const SizedBox(height: 16),
+
                               _DetailsCard(
                                 title: 'Project Design Images',
                                 icon: Icons.image_outlined,
@@ -1577,6 +1171,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                                   if (progress == null) {
                                                     return child;
                                                   }
+
                                                   return const SizedBox(
                                                     width: 250,
                                                     child: Center(
@@ -1585,17 +1180,16 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                                     ),
                                                   );
                                                 },
-                                            errorBuilder: (_, _, _) =>
-                                                Container(
-                                                  width: 250,
-                                                  color: const Color(
-                                                    0xFFF1F5F9,
-                                                  ),
-                                                  child: const Icon(
-                                                    Icons.broken_image_outlined,
-                                                    size: 40,
-                                                  ),
+                                            errorBuilder: (_, _, _) {
+                                              return Container(
+                                                width: 250,
+                                                color: const Color(0xFFF1F5F9),
+                                                child: const Icon(
+                                                  Icons.broken_image_outlined,
+                                                  size: 40,
                                                 ),
+                                              );
+                                            },
                                           ),
                                         ),
                                       );
@@ -1603,11 +1197,13 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 16),
                             ],
 
                             const SizedBox(height: 16),
 
+                            // ------------------------------------
+                            // ACTION BUTTONS
+                            // ------------------------------------
                             LayoutBuilder(
                               builder: (context, actionConstraints) {
                                 final buttons = [
@@ -1618,46 +1214,35 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                     onTap: () =>
                                         _openApplications(context, title),
                                   ),
+
                                   _ActionButton(
                                     icon: Icons.groups_outlined,
                                     title: l10n.projectTeam,
                                     subtitle: _teamSubtitle(context),
                                     onTap: () => _openTeam(context),
                                   ),
+
                                   _ActionButton(
                                     icon: Icons.chat_bubble_outline_rounded,
                                     title: l10n.projectConversation,
                                     subtitle: _messagesSubtitle(context),
                                     onTap: () => _openMessages(context, title),
                                   ),
+
                                   _ActionButton(
                                     icon: Icons.video_call_rounded,
-                                    title: 'Project Meetings',
-                                    subtitle: 'Schedule or view team meetings',
+                                    title: 'Schedule Meeting',
+                                    subtitle: 'Plan a meeting with your team',
                                     onTap: () => _openMeetings(context, title),
-                                  ),
-                                  _ActionButton(
-                                    icon: Icons.calculate_outlined,
-                                    title: 'Project Estimate',
-                                    subtitle: 'View the saved project plan and estimate',
-                                    onTap: () =>
-                                        _openEstimate(context, title, data),
-                                  ),
-                                  _ActionButton(
-                                    icon: Icons.delete_outline_rounded,
-                                    title: 'Delete Project',
-                                    subtitle: _developerHasConfirmed(data)
-                                        ? 'Unavailable after developer confirmation'
-                                        : 'Delete project before a developer is confirmed',
-                                    onTap: () =>
-                                        _deleteProject(context, data, title),
                                   ),
                                 ];
 
-                                if (actionConstraints.maxWidth > 650) {
+                                if (actionConstraints.maxWidth > 900) {
                                   return Column(
                                     children: [
                                       Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Expanded(child: buttons[0]),
                                           const SizedBox(width: 14),
@@ -1666,16 +1251,40 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                       ),
                                       const SizedBox(height: 14),
                                       Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Expanded(child: buttons[2]),
                                           const SizedBox(width: 14),
                                           Expanded(child: buttons[3]),
                                         ],
                                       ),
+                                    ],
+                                  );
+                                }
+
+                                if (actionConstraints.maxWidth > 650) {
+                                  return Column(
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[0]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[1]),
+                                        ],
+                                      ),
                                       const SizedBox(height: 14),
-                                      buttons[4],
-                                      const SizedBox(height: 14),
-                                      buttons[5],
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: buttons[2]),
+                                          const SizedBox(width: 14),
+                                          Expanded(child: buttons[3]),
+                                        ],
+                                      ),
                                     ],
                                   );
                                 }
@@ -1695,11 +1304,21 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                               },
                             ),
 
-                            // Keep the existing live payment summary and PDF statement.
                             ProjectPaymentCard(
-                              projectId: widget.projectId,
-                              projectTotal: projectTotal,
-                              currency: currency,
+                              projectId: projectId,
+                              projectTotal: _parseProjectAmount(
+                                _firstValidValue([
+                                  data['budget'],
+                                  data['amount'],
+                                  data['projectAmount'],
+                                  data['estimate']?['totalCost'],
+                                  data['estimate']?['totalBudget'],
+                                  data['estimate']?['budget'],
+                                  data['estimate']?['estimatedCost'],
+                                  data['estimate']?['amount'],
+                                ]),
+                              ),
+                              currency: data['currency']?.toString() ?? 'INR',
                             ),
 
                             const SizedBox(height: 12),
@@ -1710,8 +1329,20 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 onPressed: () => _downloadPaymentReceipt(
                                   context: context,
                                   projectTitle: title,
-                                  projectTotal: projectTotal,
-                                  currency: currency,
+                                  projectTotal: _parseProjectAmount(
+                                    _firstValidValue([
+                                      data['budget'],
+                                      data['amount'],
+                                      data['projectAmount'],
+                                      data['estimate']?['totalCost'],
+                                      data['estimate']?['totalBudget'],
+                                      data['estimate']?['budget'],
+                                      data['estimate']?['estimatedCost'],
+                                      data['estimate']?['amount'],
+                                    ]),
+                                  ),
+                                  currency:
+                                      data['currency']?.toString() ?? 'INR',
                                 ),
                                 icon: const Icon(Icons.picture_as_pdf_rounded),
                                 label: const Text('Share Payment Statement'),
@@ -1731,101 +1362,59 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
                             const SizedBox(height: 18),
 
+                            // ------------------------------------
+                            // DESCRIPTION
+                            // ------------------------------------
                             _DetailsCard(
                               title: l10n.projectDescription,
                               icon: Icons.description_outlined,
-                              child: Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: [
-                                      Color(0xFFF8FAFF),
-                                      Color(0xFFF5F7FF),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: const Color(0xFFE0E7FF),
-                                  ),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Container(
-                                      width: 34,
-                                      height: 34,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFE0E7FF),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: const Icon(
-                                        Icons.notes_rounded,
-                                        size: 18,
-                                        color: Color(0xFF4F46E5),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: SelectableText(
-                                        description.isEmpty
-                                            ? _noDescriptionText(context)
-                                            : description,
-                                        textAlign: TextAlign.start,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          height: 1.75,
-                                          letterSpacing: 0.1,
-                                          color: Color(0xFF344054),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                              child: Text(
+                                description.isEmpty
+                                    ? _noDescriptionText(context)
+                                    : description,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  height: 1.65,
+                                  color: Color(0xFF475467),
                                 ),
                               ),
                             ),
 
                             const SizedBox(height: 14),
 
+                            // ------------------------------------
+                            // REQUIREMENTS
+                            // ------------------------------------
                             _DetailsCard(
                               title: l10n.requirements,
                               icon: Icons.checklist_rounded,
-                              child: Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: const Color(0xFFE5EAF2),
-                                  ),
-                                ),
-                                child: SelectableText(
-                                  requirements.isEmpty
-                                      ? _noRequirementsText(context)
-                                      : requirements,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    height: 1.75,
-                                    letterSpacing: 0.1,
-                                    color: Color(0xFF344054),
-                                  ),
+                              child: Text(
+                                requirements.isEmpty
+                                    ? _noRequirementsText(context)
+                                    : requirements,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  height: 1.65,
+                                  color: Color(0xFF475467),
                                 ),
                               ),
                             ),
 
                             const SizedBox(height: 14),
 
+                            // ------------------------------------
+                            // BUDGET AND TIMELINE
+                            // ------------------------------------
                             LayoutBuilder(
                               builder: (context, infoConstraints) {
+                                final budgetDisplay = budget.isEmpty
+                                    ? _notSpecifiedText(context)
+                                    : '$currency $budget';
+
                                 final budgetCard = _InfoCard(
                                   icon: Icons.currency_rupee_rounded,
                                   title: l10n.budget,
-                                  value: budget.isEmpty
-                                      ? _notSpecifiedText(context)
-                                      : '$currency $budget',
+                                  value: budgetDisplay,
                                 );
 
                                 final timelineCard = _InfoCard(
@@ -1856,28 +1445,9 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                               },
                             ),
 
-                            const SizedBox(height: 14),
-
-                            _DetailsCard(
-                              title: l10n.progress,
-                              icon: Icons.timeline_rounded,
-                              child: _MilestoneProgressTracker(
-                                milestones: data['milestones'],
-                                updatedAt: data['updatedAt'],
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            DeveloperReviewWidget(
-                              projectId: widget.projectId,
-                              projectTitle: title,
-                              developerId:
-                                  (data['developerId'] ??
-                                          data['assignedDeveloperId'] ??
-                                          '')
-                                      .toString(),
-                              projectStatus: status,
-                              progress: calculatedProgress,
-                            ),
+                            // ------------------------------------
+                            // ADDITIONAL PROJECT DETAILS
+                            // ------------------------------------
                             if (budgetType.isNotEmpty ||
                                 deadlineText.isNotEmpty ||
                                 experienceLevel.isNotEmpty ||
@@ -1885,6 +1455,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 priority.isNotEmpty ||
                                 additionalInfo.isNotEmpty) ...[
                               const SizedBox(height: 14),
+
                               _DetailsCard(
                                 title: 'Additional Project Details',
                                 icon: Icons.tune_rounded,
@@ -1895,26 +1466,31 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                         label: 'Payment Type',
                                         value: budgetType,
                                       ),
+
                                     if (deadlineText.isNotEmpty)
                                       _DetailRow(
                                         label: 'Deadline',
                                         value: deadlineText,
                                       ),
+
                                     if (experienceLevel.isNotEmpty)
                                       _DetailRow(
                                         label: 'Experience Level',
                                         value: experienceLevel,
                                       ),
+
                                     if (workMode.isNotEmpty)
                                       _DetailRow(
                                         label: 'Work Arrangement',
                                         value: workMode,
                                       ),
+
                                     if (priority.isNotEmpty)
                                       _DetailRow(
                                         label: 'Priority',
                                         value: priority,
                                       ),
+
                                     if (additionalInfo.isNotEmpty)
                                       _DetailRow(
                                         label: 'Additional Instructions',
@@ -1924,13 +1500,47 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                 ),
                               ),
                             ],
+
+                            const SizedBox(height: 14),
+
+                            // ------------------------------------
+                            // PROJECT PROGRESS
+                            // ------------------------------------
+                            _DetailsCard(
+                              title: l10n.progress,
+                              icon: Icons.timeline_rounded,
+                              child: _MilestoneProgressTracker(
+                                milestones: data['milestones'],
+                                updatedAt: data['updatedAt'],
+                              ),
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            DeveloperReviewWidget(
+                              projectId: projectId,
+                              projectTitle:
+                                  data['title']?.toString() ?? 'Project',
+                              developerId:
+                                  (data['developerId'] ??
+                                          data['assignedDeveloperId'] ??
+                                          '')
+                                      .toString(),
+                              projectStatus: data['status']?.toString() ?? '',
+                              progress: calculatedProgress,
+                            ),
+
+                            // ------------------------------------
+                            // FINAL ACCEPTED PLAN
+                            // ------------------------------------
                             if (acceptedCost ||
                                 acceptedTimeline ||
                                 acceptedTerms ||
-                                acceptedScope.isNotEmpty ||
                                 plan.isNotEmpty ||
-                                estimate.isNotEmpty) ...[
+                                estimate.isNotEmpty ||
+                                acceptedScope.isNotEmpty) ...[
                               const SizedBox(height: 14),
+
                               _DetailsCard(
                                 title: 'Final Accepted Plan & Estimate',
                                 icon: Icons.task_alt_rounded,
@@ -1939,26 +1549,27 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                   children: [
                                     if ((plan['projectSummary']?.toString() ??
                                             '')
-                                        .trim()
                                         .isNotEmpty) ...[
                                       const Text(
                                         'Project Summary',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w700,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(plan['projectSummary'].toString()),
                                       const SizedBox(height: 14),
                                     ],
+
                                     if (acceptedScope.isNotEmpty) ...[
                                       const Text(
                                         'Accepted Scope',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w700,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
+                                      const SizedBox(height: 6),
+
                                       for (final item in acceptedScope)
                                         Padding(
                                           padding: const EdgeInsets.only(
@@ -1978,16 +1589,19 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                             ],
                                           ),
                                         ),
+
                                       const SizedBox(height: 14),
                                     ],
+
                                     if (estimate.isNotEmpty) ...[
                                       const Text(
                                         'Estimate Details',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w700,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
+
                                       for (final entry in estimate.entries)
                                         if (entry.value != null &&
                                             entry.value is! Map &&
@@ -2019,6 +1633,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                             ),
                                           ),
                                     ],
+
                                     if (plan['deliveryPhases'] is List &&
                                         (plan['deliveryPhases'] as List)
                                             .isNotEmpty) ...[
@@ -2026,10 +1641,11 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                       const Text(
                                         'Delivery Phases',
                                         style: TextStyle(
-                                          fontWeight: FontWeight.w700,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
+
                                       for (final phase
                                           in plan['deliveryPhases'] as List)
                                         if (phase is Map)
@@ -2052,6 +1668,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                             child: Text(phase.toString()),
                                           ),
                                     ],
+
                                     if (acceptedCost ||
                                         acceptedTimeline ||
                                         acceptedTerms) ...[
@@ -2065,71 +1682,21 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                         ),
                                       ),
                                       const SizedBox(height: 8),
+
                                       if (acceptedCost)
                                         const _AcceptedBadge(
                                           label: 'Budget Accepted',
                                         ),
+
                                       if (acceptedTimeline)
                                         const _AcceptedBadge(
                                           label: 'Timeline Accepted',
                                         ),
+
                                       if (acceptedTerms)
                                         const _AcceptedBadge(
                                           label: 'Terms Accepted',
                                         ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ],
-
-                            if (_showCompleteEstimate &&
-                                (plan.isNotEmpty || estimate.isNotEmpty)) ...[
-                              const SizedBox(height: 14),
-                              _DetailsCard(
-                                key: _projectEstimateSectionKey,
-                                title: 'Complete Project Estimate',
-                                icon: Icons.analytics_outlined,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (plan['projectSummary'] != null)
-                                      buildEstimateValue(
-                                        'Project Summary',
-                                        plan['projectSummary'],
-                                      ),
-
-                                    ...plan.entries
-                                        .where(
-                                          (entry) =>
-                                              entry.key != 'projectSummary' &&
-                                              entry.key != 'estimate',
-                                        )
-                                        .map(
-                                          (entry) => buildEstimateValue(
-                                            entry.key.toString(),
-                                            entry.value,
-                                          ),
-                                        ),
-
-                                    if (estimate.isNotEmpty) ...[
-                                      const Divider(height: 24),
-                                      const Text(
-                                        'Estimate Details',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w900,
-                                          color: Color(0xFF111827),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-
-                                      ...estimate.entries.map(
-                                        (entry) => buildEstimateValue(
-                                          entry.key.toString(),
-                                          entry.value,
-                                        ),
-                                      ),
                                     ],
                                   ],
                                 ),
@@ -2149,6 +1716,10 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     );
   }
 }
+
+// ============================================================================
+// PROJECT HERO
+// ============================================================================
 
 class _ProjectHero extends StatelessWidget {
   final String title;
@@ -2209,7 +1780,9 @@ class _ProjectHero extends StatelessWidget {
                   size: 28,
                 ),
               ),
+
               const SizedBox(width: 14),
+
               Expanded(
                 child: Text(
                   title,
@@ -2226,13 +1799,16 @@ class _ProjectHero extends StatelessWidget {
               ),
             ],
           ),
+
           const SizedBox(height: 17),
+
           Wrap(
             spacing: 9,
             runSpacing: 9,
             children: [
               if (category.isNotEmpty)
                 _HeroChip(icon: Icons.category_outlined, label: category),
+
               _HeroStatusChip(
                 icon: statusIcon,
                 label: statusText,
@@ -2245,6 +1821,10 @@ class _ProjectHero extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// HERO CHIP
+// ============================================================================
 
 class _HeroChip extends StatelessWidget {
   final IconData icon;
@@ -2279,6 +1859,10 @@ class _HeroChip extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// STATUS CHIP
+// ============================================================================
 
 class _HeroStatusChip extends StatelessWidget {
   final IconData icon;
@@ -2318,6 +1902,10 @@ class _HeroStatusChip extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ACTION BUTTON
+// ============================================================================
 
 class _ActionButton extends StatelessWidget {
   final IconData icon;
@@ -2365,7 +1953,9 @@ class _ActionButton extends StatelessWidget {
                 ),
                 child: Icon(icon, color: const Color(0xFF4F46E5), size: 22),
               ),
+
               const SizedBox(width: 13),
+
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2389,6 +1979,7 @@ class _ActionButton extends StatelessWidget {
                   ],
                 ),
               ),
+
               Container(
                 width: 30,
                 height: 30,
@@ -2410,13 +2001,16 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// DETAILS CARD
+// ============================================================================
+
 class _DetailsCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final Widget child;
 
   const _DetailsCard({
-    super.key,
     required this.title,
     required this.icon,
     required this.child,
@@ -2453,7 +2047,9 @@ class _DetailsCard extends StatelessWidget {
                 ),
                 child: Icon(icon, size: 19, color: const Color(0xFF4F46E5)),
               ),
+
               const SizedBox(width: 11),
+
               Expanded(
                 child: Text(
                   title,
@@ -2467,13 +2063,19 @@ class _DetailsCard extends StatelessWidget {
               ),
             ],
           ),
+
           const SizedBox(height: 15),
+
           child,
         ],
       ),
     );
   }
 }
+
+// ============================================================================
+// BUDGET / TIMELINE INFO CARD
+// ============================================================================
 
 class _InfoCard extends StatelessWidget {
   final IconData icon;
@@ -2514,7 +2116,9 @@ class _InfoCard extends StatelessWidget {
             ),
             child: Icon(icon, size: 20, color: const Color(0xFF4F46E5)),
           ),
+
           const SizedBox(width: 12),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2543,130 +2147,6 @@ class _InfoCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ProgressTimeline extends StatelessWidget {
-  final String currentStatus;
-  final bool Function(String currentStatus, String step) isStepActive;
-
-  const _ProgressTimeline({
-    required this.currentStatus,
-    required this.isStepActive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-
-    return Column(
-      children: [
-        _ProgressStep(
-          title: l10n.requirement,
-          icon: Icons.description_outlined,
-          active: isStepActive(currentStatus, 'requirement'),
-        ),
-        _ProgressStep(
-          title: l10n.teamFormation,
-          icon: Icons.groups_outlined,
-          active: isStepActive(currentStatus, 'team_formation'),
-        ),
-        _ProgressStep(
-          title: l10n.development,
-          icon: Icons.code_rounded,
-          active: isStepActive(currentStatus, 'development'),
-        ),
-        _ProgressStep(
-          title: l10n.testing,
-          icon: Icons.bug_report_outlined,
-          active: isStepActive(currentStatus, 'testing'),
-        ),
-        _ProgressStep(
-          title: l10n.clientReview,
-          icon: Icons.rate_review_outlined,
-          active: isStepActive(currentStatus, 'client_review'),
-        ),
-        _ProgressStep(
-          title: l10n.completed,
-          icon: Icons.check_circle_outline_rounded,
-          active: isStepActive(currentStatus, 'completed'),
-          isLast: true,
-        ),
-      ],
-    );
-  }
-}
-
-class _ProgressStep extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final bool active;
-  final bool isLast;
-
-  const _ProgressStep({
-    required this.title,
-    required this.icon,
-    required this.active,
-    this.isLast = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: active
-                    ? const Color(0xFFEEF2FF)
-                    : const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: active
-                      ? const Color(0xFFC7D2FE)
-                      : const Color(0xFFE5E7EB),
-                ),
-              ),
-              child: Icon(
-                active ? Icons.check_rounded : icon,
-                size: 17,
-                color: active
-                    ? const Color(0xFF4F46E5)
-                    : const Color(0xFF98A2B3),
-              ),
-            ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 31,
-                margin: const EdgeInsets.symmetric(vertical: 3),
-                decoration: BoxDecoration(
-                  color: active
-                      ? const Color(0xFFC7D2FE)
-                      : const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(width: 13),
-        Padding(
-          padding: const EdgeInsets.only(top: 7),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-              color: active ? const Color(0xFF111827) : const Color(0xFF98A2B3),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -3096,6 +2576,8 @@ class _MilestoneProgressTracker extends StatelessWidget {
 }
 
 // ============================================================================
+// LOADING INDICATOR
+// ============================================================================
 
 class _ProjectLoader extends StatelessWidget {
   const _ProjectLoader();
@@ -3112,6 +2594,10 @@ class _ProjectLoader extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// ERROR CARD
+// ============================================================================
 
 class _ProjectErrorCard extends StatelessWidget {
   final String message;
@@ -3142,7 +2628,9 @@ class _ProjectErrorCard extends StatelessWidget {
               color: Color(0xFFD97706),
             ),
           ),
+
           const SizedBox(width: 13),
+
           Expanded(
             child: Text(
               message,
@@ -3158,6 +2646,10 @@ class _ProjectErrorCard extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// BACKGROUND AMBIENT PAINTER
+// ============================================================================
 
 class _ProjectDetailsAmbientPainter extends CustomPainter {
   const _ProjectDetailsAmbientPainter();

@@ -954,19 +954,20 @@ class _DeveloperHomeState extends State<DeveloperHome>
       ),
     );
   }
-String _getGreeting() {
-  final hour = DateTime.now().hour;
 
-  if (hour >= 5 && hour < 12) {
-    return 'Good morning';
-  } else if (hour >= 12 && hour < 17) {
-    return 'Good afternoon';
-  } else if (hour >= 17 && hour < 21) {
-    return 'Good evening';
-  } else {
-    return 'Good night';
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+
+    if (hour >= 5 && hour < 12) {
+      return 'Good morning';
+    } else if (hour >= 12 && hour < 17) {
+      return 'Good afternoon';
+    } else if (hour >= 17 && hour < 21) {
+      return 'Good evening';
+    } else {
+      return 'Good night';
+    }
   }
-}
 
   Widget _buildGreeting(bool mobile, String name) {
     return Row(
@@ -1236,11 +1237,12 @@ String _getGreeting() {
         ),
         const SizedBox(height: 13),
         SizedBox(
+          // Keep enough vertical room for the project card on narrow screens.
           height: mobile
-              ? 310
+              ? 330
               : tablet
-              ? 310
-              : 300,
+              ? 330
+              : 310,
           child: uid == null
               ? const Center(child: Text('Please log in to view projects.'))
               : StreamBuilder<List<ProjectModel>>(
@@ -3790,6 +3792,11 @@ class _ProjectCardState extends State<_ProjectCard> {
 
   @override
   Widget build(BuildContext context) {
+    final skills = widget.project.skills
+        .map((skill) => skill.trim())
+        .where((skill) => skill.isNotEmpty)
+        .toList();
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -3871,24 +3878,29 @@ class _ProjectCardState extends State<_ProjectCard> {
               ),
             ),
             const SizedBox(height: 12),
-            // Keep recommendation cards compact even when Firestore contains
-            // long or unexpectedly formatted skill/technology values.
-            Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: [
-                ...widget.project.skills
-                    .where((skill) => skill.trim().isNotEmpty)
-                    .take(4)
-                    .map((skill) => _SkillChip(skill.trim())),
-                if (widget.project.skills
-                        .where((skill) => skill.trim().isNotEmpty)
-                        .length >
-                    4)
-                  _SkillChip(
-                    '+${widget.project.skills.where((skill) => skill.trim().isNotEmpty).length - 4} more',
-                  ),
-              ],
+            // Keep skill chips on one horizontally scrollable row. A Wrap can
+            // create several rows for long project skill lists and push the
+            // View/Apply buttons outside the fixed-height recommendation card.
+            SizedBox(
+              height: 34,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    ...skills
+                        .take(3)
+                        .map(
+                          (skill) => Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: _SkillChip(skill),
+                          ),
+                        ),
+                    if (skills.length > 3)
+                      _SkillChip('+${skills.length - 3} more'),
+                  ],
+                ),
+              ),
             ),
             const Spacer(),
             Row(
