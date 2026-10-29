@@ -1,8 +1,28 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:skill_bridge/models/project_model.dart';
 
 import '../../widgets/skillbridge_avatar.dart';
+import '../developer/developer_public_profile_screen.dart';
+
+class _RecommendedApplicant {
+  final String applicationId;
+  final String developerId;
+  final String name;
+  final String photoUrl;
+  final int matchPercentage;
+  final String status;
+
+  const _RecommendedApplicant({
+    required this.applicationId,
+    required this.developerId,
+    required this.name,
+    required this.photoUrl,
+    required this.matchPercentage,
+    required this.status,
+  });
+}
 
 class ClientApplicationsScreen extends StatelessWidget {
   final String projectId;
@@ -46,26 +66,6 @@ class ClientApplicationsScreen extends StatelessWidget {
     }
   }
 
-  double? _parseBudget(dynamic value) {
-    final double? amount = value is num
-        ? value.toDouble()
-        : double.tryParse(value?.toString() ?? '');
-
-    if (amount == null || !amount.isFinite || amount <= 0) {
-      return null;
-    }
-
-    return amount;
-  }
-
-  String _formatBudget(double amount) {
-    final formatted = amount == amount.roundToDouble()
-        ? amount.toStringAsFixed(0)
-        : amount.toStringAsFixed(2);
-
-    return '₹$formatted';
-  }
-
   Future<void> _updateStatus(
     BuildContext context,
     String applicationId,
@@ -78,6 +78,7 @@ class ClientApplicationsScreen extends StatelessWidget {
       return;
     }
 
+    // Only these actions are supported.
     const allowedStatuses = {'shortlisted', 'rejected', 'accepted'};
 
     if (!allowedStatuses.contains(newStatus)) {
@@ -87,13 +88,11 @@ class ClientApplicationsScreen extends StatelessWidget {
 
     try {
       final projectRef = _firestore.collection('projects').doc(projectId);
-
       final applicationRef = _firestore
           .collection('applications')
           .doc(applicationId);
 
       await _firestore.runTransaction((transaction) async {
-        // Read both documents before performing any writes.
         final projectSnapshot = await transaction.get(projectRef);
         final applicationSnapshot = await transaction.get(applicationRef);
 
@@ -112,13 +111,10 @@ class ClientApplicationsScreen extends StatelessWidget {
           throw Exception('INVALID_DOCUMENT');
         }
 
-        // Verify that the signed-in user owns the project.
         if (projectData['clientId'] != user.uid) {
           throw Exception('ACCESS_DENIED');
         }
 
-        // Verify that this application belongs to the requested project
-        // and to the signed-in client.
         if (applicationData['projectId'] != projectId ||
             applicationData['clientId'] != user.uid) {
           throw Exception('APPLICATION_ACCESS_DENIED');
@@ -130,7 +126,6 @@ class ClientApplicationsScreen extends StatelessWidget {
                 .trim()
                 .toLowerCase();
 
-        // Only pending or shortlisted applications can be processed.
         if (currentApplicationStatus != 'pending' &&
             currentApplicationStatus != 'shortlisted') {
           throw Exception('APPLICATION_ALREADY_PROCESSED');
@@ -139,11 +134,9 @@ class ClientApplicationsScreen extends StatelessWidget {
         final now = FieldValue.serverTimestamp();
 
         if (newStatus == 'accepted') {
-          // Prevent assigning multiple developers to the project.
           final existingDeveloperId = (projectData['developerId'] ?? '')
               .toString()
               .trim();
-
           final projectStatus = (projectData['status'] ?? '')
               .toString()
               .trim()
@@ -161,35 +154,27 @@ class ClientApplicationsScreen extends StatelessWidget {
             throw Exception('INVALID_DEVELOPER');
           }
 
-          // Always read the proposed amount from Firestore.
-          // Do not trust a budget passed from the UI.
-          final proposedBudget = _parseBudget(
-            applicationData['proposedBudget'],
-          );
-
-          if (proposedBudget == null) {
-            throw Exception('INVALID_PROPOSED_BUDGET');
-          }
-
-          // Confirm the developer and save the agreed amount.
           transaction.update(applicationRef, {
             'status': 'accepted',
-            'confirmedBudget': proposedBudget,
-            'budgetConfirmedAt': now,
             'updatedAt': now,
           });
 
-          // Assign the developer and update the official project budget.
+          final agreedDuration = (applicationData['estimatedDuration'] ?? '')
+              .toString()
+              .trim();
+
+          if (agreedDuration.isEmpty) {
+            throw Exception('MISSING_PROJECT_DURATION');
+          }
+
           transaction.update(projectRef, {
             'developerId': applicantDeveloperId,
             'status': 'active',
-            'budget': proposedBudget,
-            'confirmedBudget': proposedBudget,
-            'budgetConfirmedAt': now,
+            'startedAt': now,
+            'duration': agreedDuration,
             'updatedAt': now,
           });
         } else {
-          // Shortlisting and rejection do not change the project budget.
           transaction.update(applicationRef, {
             'status': newStatus,
             'updatedAt': now,
@@ -201,7 +186,7 @@ class ClientApplicationsScreen extends StatelessWidget {
         _showMessage(
           context,
           newStatus == 'accepted'
-              ? 'Developer accepted and budget confirmed successfully.'
+              ? 'Developer accepted and project assigned successfully.'
               : 'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
         );
       }
@@ -215,8 +200,8 @@ class ClientApplicationsScreen extends StatelessWidget {
           context,
           'A developer has already been assigned to this project.',
         );
-      } else if (error.contains('APPLICATION_ACCESS_DENIED') ||
-          error.contains('ACCESS_DENIED')) {
+      } else if (error.contains('ACCESS_DENIED') ||
+          error.contains('APPLICATION_ACCESS_DENIED')) {
         _showMessage(
           context,
           'You are not authorized to update this application.',
@@ -232,14 +217,8 @@ class ClientApplicationsScreen extends StatelessWidget {
           context,
           'The application does not contain a valid developer ID.',
         );
-      } else if (error.contains('INVALID_PROPOSED_BUDGET')) {
-        _showMessage(
-          context,
-          'Cannot accept this application because its proposed budget is invalid.',
-        );
       } else {
         debugPrint('Application status update failed: $e');
-
         _showMessage(
           context,
           'Could not update application. Please check your Firestore rules and try again.',
@@ -258,154 +237,345 @@ class ClientApplicationsScreen extends StatelessWidget {
     BuildContext context,
     String applicationId,
     String status,
-    Map<String, dynamic> applicationData,
   ) async {
-    final isAccepting = status == 'accepted';
-
-    final proposedBudget = _parseBudget(applicationData['proposedBudget']);
-
-    if (isAccepting && proposedBudget == null) {
-      _showMessage(
-        context,
-        'This developer has not provided a valid proposed budget.',
-      );
-      return;
-    }
-
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Confirm ${_statusLabel(status)}'),
+        content: Text(
+          'Are you sure you want to ${status == 'shortlisted' ? 'shortlist' : status} this application?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
           ),
-          title: Row(
-            children: [
-              Icon(
-                isAccepting
-                    ? Icons.verified_user_rounded
-                    : Icons.assignment_turned_in_outlined,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  isAccepting
-                      ? 'Confirm Developer & Budget'
-                      : 'Confirm ${_statusLabel(status)}',
-                ),
-              ),
-            ],
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirm'),
           ),
-          content: SingleChildScrollView(
-            child: isAccepting
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Review the developer’s proposed budget before '
-                        'accepting this application.',
-                      ),
-                      const SizedBox(height: 20),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEFF4FF),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFBFDBFE)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Developer’s Proposed Budget',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF475569),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _formatBudget(proposedBudget!),
-                              style: const TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF2563EB),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            const Divider(),
-                            const SizedBox(height: 10),
-                            const Row(
-                              children: [
-                                Icon(
-                                  Icons.check_circle_rounded,
-                                  size: 19,
-                                  color: Color(0xFF15803D),
-                                ),
-                                SizedBox(width: 7),
-                                Expanded(
-                                  child: Text(
-                                    'Budget to be confirmed',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Color(0xFF475569),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _formatBudget(proposedBudget),
-                              style: const TextStyle(
-                                fontSize: 21,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF15803D),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Confirming will assign this developer to your '
-                        'project and set this amount as the official '
-                        'project budget.',
-                        style: TextStyle(height: 1.45),
-                      ),
-                    ],
-                  )
-                : Text(
-                    'Are you sure you want to '
-                    '${status == 'shortlisted' ? 'shortlist' : status} '
-                    'this application?',
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              icon: Icon(
-                isAccepting
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.check_rounded,
-              ),
-              label: Text(isAccepting ? 'Confirm & Accept' : 'Confirm'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
 
     if (confirmed == true && context.mounted) {
       await _updateStatus(context, applicationId, status);
     }
+  }
+
+  Future<List<_RecommendedApplicant>> _loadTopApplicants(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) async {
+    final eligibleApplications = applications.where((doc) {
+      final data = doc.data();
+      final status = (data['status'] ?? 'pending')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      final developerId = (data['developerId'] ?? '').toString().trim();
+
+      return developerId.isNotEmpty &&
+          status != 'rejected' &&
+          status != 'withdrawn';
+    }).toList();
+
+    if (eligibleApplications.isEmpty) return [];
+
+    final projectSnapshot = await _firestore
+        .collection('projects')
+        .doc(projectId)
+        .get();
+
+    if (!projectSnapshot.exists) return [];
+
+    final project = ProjectModel.fromFirestore(projectSnapshot);
+
+    final results = await Future.wait(
+      eligibleApplications.map((application) async {
+        final developerId = application.data()['developerId'].toString().trim();
+
+        final profileFuture = _firestore
+            .collection('developerProfiles')
+            .doc(developerId)
+            .get();
+
+        final userFuture = _firestore
+            .collection('users')
+            .doc(developerId)
+            .get();
+
+        final snapshots = await Future.wait([profileFuture, userFuture]);
+
+        final profileData = snapshots[0].data() ?? <String, dynamic>{};
+        final userData = snapshots[1].data() ?? <String, dynamic>{};
+
+        List<String> readList(dynamic value) {
+          if (value is! List) return [];
+
+          return value
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList();
+        }
+
+        String? readString(dynamic value) {
+          final result = value?.toString().trim();
+          return result == null || result.isEmpty ? null : result;
+        }
+
+        final score = project.getMatchPercentage(
+          developerSkills: readList(profileData['skills']),
+          developerTechnologies: readList(profileData['technologies']),
+          developerProjectType:
+              readString(profileData['projectType']) ??
+              readString(userData['projectType']),
+          developerWorkMode:
+              readString(profileData['workMode']) ??
+              readString(userData['workMode']),
+          developerDuration:
+              readString(profileData['projectDuration']) ??
+              readString(profileData['duration']) ??
+              readString(userData['duration']),
+        );
+
+        final name =
+            readString(userData['name']) ??
+            readString(userData['fullName']) ??
+            readString(userData['displayName']) ??
+            readString(profileData['name']) ??
+            'Developer';
+
+        final photoUrl =
+            readString(userData['profileImageUrl']) ??
+            readString(profileData['photoUrl']) ??
+            '';
+
+        return _RecommendedApplicant(
+          applicationId: application.id,
+          developerId: developerId,
+          name: name,
+          photoUrl: photoUrl,
+          matchPercentage: score,
+          status: (application.data()['status'] ?? 'pending').toString(),
+        );
+      }),
+    );
+
+    results.sort((a, b) => b.matchPercentage.compareTo(a.matchPercentage));
+
+    return results.take(3).toList();
+  }
+
+  Future<Map<String, int>> _loadAllApplicantScores(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) async {
+    final projectSnapshot = await _firestore
+        .collection('projects')
+        .doc(projectId)
+        .get();
+
+    if (!projectSnapshot.exists) return {};
+
+    final project = ProjectModel.fromFirestore(projectSnapshot);
+
+    final scores = <String, int>{};
+
+    for (final application in applications) {
+      final developerId = (application.data()['developerId'] ?? '')
+          .toString()
+          .trim();
+
+      if (developerId.isEmpty) continue;
+
+      final profileSnapshot = await _firestore
+          .collection('developerProfiles')
+          .doc(developerId)
+          .get();
+
+      final userSnapshot = await _firestore
+          .collection('users')
+          .doc(developerId)
+          .get();
+
+      final profile = profileSnapshot.data() ?? <String, dynamic>{};
+      final user = userSnapshot.data() ?? <String, dynamic>{};
+
+      List<String> readList(dynamic value) {
+        if (value is! List) return [];
+        return value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+      }
+
+      String? readString(dynamic value) {
+        final result = value?.toString().trim();
+        return result == null || result.isEmpty ? null : result;
+      }
+
+      scores[application.id] = project.getMatchPercentage(
+        developerSkills: readList(profile['skills']),
+        developerTechnologies: readList(profile['technologies']),
+        developerProjectType:
+            readString(profile['projectType']) ??
+            readString(user['projectType']),
+        developerWorkMode:
+            readString(profile['workMode']) ?? readString(user['workMode']),
+        developerDuration:
+            readString(profile['projectDuration']) ??
+            readString(profile['duration']) ??
+            readString(user['duration']),
+      );
+    }
+
+    return scores;
+  }
+
+  Widget _buildTopRecommendations(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> applications,
+  ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return FutureBuilder<List<_RecommendedApplicant>>(
+      future: _loadTopApplicants(applications),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Unable to calculate applicant matches.'),
+          );
+        }
+
+        final recommendations = snapshot.data ?? [];
+
+        if (recommendations.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFE5EAF2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome_rounded, color: colors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Top 3 Recommended Applicants',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Ranked by skills, technologies and project preferences.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ...recommendations.asMap().entries.map((entry) {
+                final rank = entry.key + 1;
+                final applicant = entry.value;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F7FB),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: colors.primaryContainer,
+                          child: Text(
+                            '$rank',
+                            style: TextStyle(
+                              color: colors.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        SkillBridgeAvatar(
+                          profileImageUrl: applicant.photoUrl,
+                          name: applicant.name,
+                          size: 42,
+                          backgroundColor: colors.primaryContainer,
+                          foregroundColor: colors.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                applicant.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                applicant.status.toUpperCase(),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${applicant.matchPercentage}%',
+                              style: TextStyle(
+                                color: colors.primary,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            Text('match', style: theme.textTheme.labelSmall),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -450,6 +620,7 @@ class ClientApplicationsScreen extends StatelessWidget {
             ),
             child: Row(
               children: [
+                // Back button
                 Material(
                   color: const Color(0xFFEFF4FF),
                   borderRadius: BorderRadius.circular(13),
@@ -467,7 +638,10 @@ class ClientApplicationsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 12),
+
+                // Applications icon
                 Container(
                   width: 44,
                   height: 44,
@@ -481,7 +655,10 @@ class ClientApplicationsScreen extends StatelessWidget {
                     size: 22,
                   ),
                 ),
+
                 const SizedBox(width: 12),
+
+                // Title and subtitle
                 const Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -614,7 +791,7 @@ class ClientApplicationsScreen extends StatelessWidget {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final applications = [...?snapshot.data?.docs];
+                    final applications = snapshot.data?.docs ?? [];
 
                     applications.sort((a, b) {
                       final aTime = a.data()['createdAt'] as Timestamp?;
@@ -646,8 +823,7 @@ class ClientApplicationsScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Developer applications will appear here '
-                                'when someone applies to this project.',
+                                'Developer applications will appear here when someone applies to this project.',
                                 textAlign: TextAlign.center,
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: colors.onSurfaceVariant,
@@ -660,12 +836,7 @@ class ClientApplicationsScreen extends StatelessWidget {
                     }
 
                     final pendingCount = applications.where((doc) {
-                      final status = (doc.data()['status'] ?? 'pending')
-                          .toString()
-                          .trim()
-                          .toLowerCase();
-
-                      return status == 'pending';
+                      return (doc.data()['status'] ?? 'pending') == 'pending';
                     }).length;
 
                     return Column(
@@ -676,8 +847,7 @@ class ClientApplicationsScreen extends StatelessWidget {
                           child: Row(
                             children: [
                               Text(
-                                '${applications.length} '
-                                '${applications.length == 1 ? 'Application' : 'Applications'}',
+                                '${applications.length} ${applications.length == 1 ? 'Application' : 'Applications'}',
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -694,31 +864,64 @@ class ClientApplicationsScreen extends StatelessWidget {
                           ),
                         ),
                         Expanded(
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                            itemCount: applications.length,
-                            itemBuilder: (context, index) {
-                              final doc = applications[index];
-                              final data = doc.data();
+                          child: ListView(
+                            padding: const EdgeInsets.only(bottom: 24),
+                            children: [
+                              _buildTopRecommendations(context, applications),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  8,
+                                  20,
+                                  4,
+                                ),
+                                child: Text(
+                                  'All Applications',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
 
-                              return _ApplicationCard(
-                                applicationId: doc.id,
-                                data: data,
-                                statusColor: _statusColor(
-                                  (data['status'] ?? 'pending').toString(),
-                                  colors,
-                                ),
-                                statusLabel: _statusLabel(
-                                  (data['status'] ?? 'pending').toString(),
-                                ),
-                                onStatusChange: (status) => _confirmAction(
-                                  context,
-                                  doc.id,
-                                  status,
-                                  data,
-                                ),
-                              );
-                            },
+                              FutureBuilder<Map<String, int>>(
+                                future: _loadAllApplicantScores(applications),
+                                builder: (context, scoreSnapshot) {
+                                  final scores = scoreSnapshot.data ?? {};
+
+                                  return Column(
+                                    children: applications.map((doc) {
+                                      final data = doc.data();
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                        ),
+                                        child: _ApplicationCard(
+                                          applicationId: doc.id,
+                                          data: data,
+                                          matchPercentage: scores[doc.id],
+                                          statusColor: _statusColor(
+                                            (data['status'] ?? 'pending')
+                                                .toString(),
+                                            colors,
+                                          ),
+                                          statusLabel: _statusLabel(
+                                            (data['status'] ?? 'pending')
+                                                .toString(),
+                                          ),
+                                          onStatusChange: (status) =>
+                                              _confirmAction(
+                                                context,
+                                                doc.id,
+                                                status,
+                                              ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -735,6 +938,7 @@ class ClientApplicationsScreen extends StatelessWidget {
 }
 
 class _ApplicationCard extends StatelessWidget {
+  final int? matchPercentage;
   final String applicationId;
   final Map<String, dynamic> data;
   final Color statusColor;
@@ -742,6 +946,7 @@ class _ApplicationCard extends StatelessWidget {
   final ValueChanged<String> onStatusChange;
 
   const _ApplicationCard({
+    this.matchPercentage,
     required this.applicationId,
     required this.data,
     required this.statusColor,
@@ -757,41 +962,16 @@ class _ApplicationCard extends StatelessWidget {
         .toString();
   }
 
-  double? _parseBudget(dynamic value) {
-    final amount = value is num
-        ? value.toDouble()
-        : double.tryParse(value?.toString() ?? '');
-
-    if (amount == null || !amount.isFinite || amount <= 0) {
-      return null;
-    }
-
-    return amount;
-  }
-
-  String _formatBudget(double amount) {
-    final formatted = amount == amount.roundToDouble()
-        ? amount.toStringAsFixed(0)
-        : amount.toStringAsFixed(2);
-
-    return '₹$formatted';
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-
     final status = (data['status'] ?? 'pending').toString().toLowerCase();
     final developerId = (data['developerId'] ?? '').toString();
 
-    final proposedBudget = _parseBudget(data['proposedBudget']);
-    final confirmedBudget = _parseBudget(data['confirmedBudget']);
-
+    final budget = data['proposedBudget'];
     final duration = data['estimatedDuration'];
     final coverLetter = (data['coverLetter'] ?? '').toString().trim();
-
-    final isAccepted = status == 'accepted';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -855,21 +1035,36 @@ class _ApplicationCard extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 18),
+            if (developerId.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DeveloperPublicProfileScreen(
+                          developerId: developerId.trim(),
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.person_outline_rounded),
+                  label: const Text('View Developer Profile'),
+                ),
+              ),
+            ],
 
-            // Budget details.
+            const SizedBox(height: 18),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: _InfoItem(
                     icon: Icons.currency_rupee_rounded,
-                    label: isAccepted ? 'Confirmed Budget' : 'Proposed Budget',
-                    value: isAccepted && confirmedBudget != null
-                        ? _formatBudget(confirmedBudget)
-                        : proposedBudget == null
+                    label: 'Proposed Budget',
+                    value: budget == null || budget.toString().isEmpty
                         ? 'Not specified'
-                        : _formatBudget(proposedBudget),
+                        : '₹$budget',
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -884,39 +1079,6 @@ class _ApplicationCard extends StatelessWidget {
                 ),
               ],
             ),
-
-            if (isAccepted && confirmedBudget != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0FDF4),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFBBF7D0)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.verified_rounded,
-                      color: Color(0xFF15803D),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Budget confirmed: ${_formatBudget(confirmedBudget)}',
-                        style: const TextStyle(
-                          color: Color(0xFF166534),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
             if (coverLetter.isNotEmpty) ...[
               const SizedBox(height: 18),
               Text(
@@ -931,7 +1093,6 @@ class _ApplicationCard extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
               ),
             ],
-
             if (status == 'pending' || status == 'shortlisted') ...[
               const SizedBox(height: 18),
               Divider(color: colors.outlineVariant),
@@ -976,7 +1137,7 @@ class _ApplicationCard extends StatelessWidget {
                       child: FilledButton.icon(
                         onPressed: () => onStatusChange('accepted'),
                         icon: const Icon(Icons.check_rounded),
-                        label: const Text('Accept & Confirm Budget'),
+                        label: const Text('Accept'),
                       ),
                     ),
                   ],
@@ -1024,6 +1185,27 @@ class _ApplicationCard extends StatelessWidget {
                   color: colors.onSurfaceVariant,
                 ),
               ),
+              if (matchPercentage != null) ...[
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.auto_awesome_rounded,
+                      size: 14,
+                      color: Color(0xFF2563EB),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$matchPercentage% match',
+                      style: const TextStyle(
+                        color: Color(0xFF2563EB),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

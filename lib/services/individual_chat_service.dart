@@ -24,6 +24,57 @@ class IndividualChatService {
     return '${ids[0]}_${ids[1]}';
   }
 
+  Future<String> openDirectChat({
+    required String otherUid,
+    required String otherName,
+  }) async {
+    final uid = _currentUid;
+
+    if (otherUid.trim().isEmpty || otherUid == uid) {
+      throw ArgumentError('Select another user to start a chat.');
+    }
+
+    final userSnapshot = await _db.collection('users').doc(uid).get();
+    final userData = userSnapshot.data() ?? <String, dynamic>{};
+    final currentName =
+        (userData['name'] ??
+                userData['displayName'] ??
+                _auth.currentUser?.displayName ??
+                _auth.currentUser?.email ??
+                'User')
+            .toString();
+
+    final chatId = chatIdFor(otherUid);
+    final chatRef = _db.collection('individualChats').doc(chatId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(chatRef);
+
+      if (!snapshot.exists) {
+        transaction.set(chatRef, {
+          'participants': [uid, otherUid]..sort(),
+          'participantNames': {uid: currentName, otherUid: otherName},
+          'lastMessage': '',
+          'lastSenderId': '',
+          'updatedAt': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      final participants = List<String>.from(
+        snapshot.data()?['participants'] ?? [],
+      );
+      if (participants.length != 2 ||
+          !participants.contains(uid) ||
+          !participants.contains(otherUid)) {
+        throw StateError('This private conversation is invalid.');
+      }
+    });
+
+    return chatId;
+  }
+
   CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
       _db.collection('individualChats').doc(chatId).collection('messages');
 

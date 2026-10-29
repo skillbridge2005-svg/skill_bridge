@@ -74,7 +74,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
   bool _showFilters = false;
   bool _showRecommendations = true;
-
+  bool _showSavedOnly = false;
   int _visibleProjectCount = 8;
 
   @override
@@ -278,6 +278,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
       setState(() {
         _profileCompletion = profileCompletion;
+        _calculateRecommendations();
       });
     } catch (e) {
       if (mounted) {
@@ -301,6 +302,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
         setState(() {
           _savedProjectIds = ids;
+          _applyFilters();
         });
       },
       onError: (_) {
@@ -359,16 +361,24 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             return searchableText.contains(query);
           }).toList();
 
-    final sorted = _projectService.sortProjects(searched, sortBy: _sortBy);
+    final sorted = _projectService.sortProjects(
+      searched,
+      sortBy: _sortBy,
+    );
 
-    _filteredProjects = sorted;
+    _filteredProjects = _showSavedOnly
+        ? sorted
+              .where((project) => _savedProjectIds.contains(project.id))
+              .toList()
+        : sorted;
 
-    if (_visibleProjectCount > sorted.length) {
-      _visibleProjectCount = sorted.length;
+    if (_visibleProjectCount > _filteredProjects.length) {
+      _visibleProjectCount = _filteredProjects.length;
     }
 
-    if (_visibleProjectCount == 0 && sorted.isNotEmpty) {
-      _visibleProjectCount = sorted.length < 8 ? sorted.length : 8;
+    if (_visibleProjectCount == 0 && _filteredProjects.isNotEmpty) {
+      _visibleProjectCount =
+          _filteredProjects.length < 8 ? _filteredProjects.length : 8;
     }
   }
 
@@ -380,8 +390,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       developerProjectType: _developerProjectType,
       developerWorkMode: _developerWorkMode,
       developerDuration: _developerDuration,
-      minimumScore: 20,
-      limit: 6,
+      minimumScore: 0,
+      limit: 3,
     );
   }
 
@@ -667,7 +677,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             ),
           ),
 
-          if (_showRecommendations && _recommendations.isNotEmpty)
+          if (_showRecommendations && !_showSavedOnly && _recommendations.isNotEmpty)
             SliverToBoxAdapter(
               child: FadeTransition(
                 opacity: _contentFade,
@@ -966,6 +976,19 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                         onTap: () {
                           setState(() {
                             _showFilters = !_showFilters;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _FilterButton(
+                        icon: Icons.bookmark_rounded,
+                        label: 'Saved Projects',
+                        active: _showSavedOnly,
+                        onTap: () {
+                          setState(() {
+                            _showSavedOnly = !_showSavedOnly;
+                            _visibleProjectCount = 8;
+                            _applyFilters();
                           });
                         },
                       ),
@@ -1321,12 +1344,12 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       ),
       child: Row(
         children: [
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'All Projects',
+                  _showSavedOnly ? 'Saved Projects' : 'All Projects',
                   style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
@@ -1335,7 +1358,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                 ),
                 SizedBox(height: 3),
                 Text(
-                  'Explore currently available opportunities',
+                  _showSavedOnly
+                      ? 'Projects you have bookmarked'
+                      : 'Explore currently available opportunities',
                   style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                 ),
               ],
@@ -1401,6 +1426,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
   Widget _buildEmptyState(BuildContext context, ThemeData theme) {
     final hasFilters =
+        _showSavedOnly ||
         _searchController.text.isNotEmpty ||
         _selectedWorkMode != 'All' ||
         _selectedProjectType != 'All' ||
@@ -1442,7 +1468,11 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             ),
             const SizedBox(height: 20),
             Text(
-              hasFilters ? 'No matching projects' : 'No projects available',
+              _showSavedOnly
+                  ? 'No saved projects yet'
+                  : hasFilters
+                      ? 'No matching projects'
+                      : 'No projects available',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
@@ -1451,11 +1481,13 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             ),
             const SizedBox(height: 8),
             Text(
-              hasFilters
-                  ? 'Try changing your search or filters '
-                        'to discover more opportunities.'
-                  : 'New opportunities will appear here '
-                        'when clients publish projects.',
+              _showSavedOnly
+                  ? 'Bookmark a project to find it here later.'
+                  : hasFilters
+                      ? 'Try changing your search or filters '
+                            'to discover more opportunities.'
+                      : 'New opportunities will appear here '
+                            'when clients publish projects.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 13,
@@ -1466,8 +1498,18 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             if (hasFilters) ...[
               const SizedBox(height: 18),
               OutlinedButton(
-                onPressed: _resetFilters,
-                child: const Text('Clear filters'),
+                onPressed: () {
+                  if (_showSavedOnly) {
+                    setState(() {
+                      _showSavedOnly = false;
+                      _visibleProjectCount = 8;
+                      _applyFilters();
+                    });
+                  } else {
+                    _resetFilters();
+                  }
+                },
+                child: Text(_showSavedOnly ? 'View all projects' : 'Clear filters'),
               ),
             ],
           ],
@@ -1654,18 +1696,22 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   }) async {
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          ),
-          child: SafeArea(
+        final screenHeight = MediaQuery.sizeOf(sheetContext).height;
+        final sheetHeight = screenHeight * 0.72;
+
+        return SafeArea(
+          child: Container(
+            height: sheetHeight,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+            ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 42,
@@ -1675,7 +1721,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
@@ -1693,38 +1739,48 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  ...options.map((option) {
-                    final active = option == selected;
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: options.length,
+                      itemBuilder: (context, index) {
+                        final option = options[index];
+                        final active = option == selected;
 
-                    return ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      tileColor: active ? const Color(0xFFEEF2FF) : null,
-                      title: Text(
-                        option,
-                        style: TextStyle(
-                          fontWeight: active
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          color: active
-                              ? const Color(0xFF4F46E5)
-                              : const Color(0xFF374151),
-                        ),
-                      ),
-                      trailing: active
-                          ? const Icon(
-                              Icons.check_circle_rounded,
-                              color: Color(0xFF4F46E5),
-                            )
-                          : null,
-                      onTap: () {
-                        onSelected(option);
-                        Navigator.pop(sheetContext);
+                        return ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          tileColor:
+                              active ? const Color(0xFFEEF2FF) : null,
+                          title: Text(
+                            option,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: active
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: active
+                                  ? const Color(0xFF4F46E5)
+                                  : const Color(0xFF374151),
+                            ),
+                          ),
+                          trailing: active
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFF4F46E5),
+                                )
+                              : null,
+                          onTap: () {
+                            onSelected(option);
+                            Navigator.pop(sheetContext);
+                          },
+                        );
                       },
-                    );
-                  }),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1788,18 +1844,35 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     );
   }
 
+  // Filter menus should contain concise labels, not Markdown or whole project
+  // descriptions that may have accidentally been stored in a skills/technology
+  // field in older project documents.
+  bool _isValidFilterOption(String value) {
+    final item = value.trim();
+    if (item.isEmpty || item.length > 40) return false;
+    if (item.contains('\n') || item.contains('\r')) return false;
+    if (item.contains('**') || item.contains('```')) return false;
+    if (item.startsWith('#') || item.contains('Project Title:') ||
+        item.contains('Project Description:') ||
+        item.contains('Technology:**')) {
+      return false;
+    }
+    if (RegExp(r'[.!?]\s*$').hasMatch(item)) return false;
+    return true;
+  }
+
   List<String> _availableTechnologies() {
     final values = <String>{};
 
     for (final project in _allProjects) {
-      values.addAll(
-        project.technologies.where((item) => item.trim().isNotEmpty),
-      );
+      for (final technology in project.technologies) {
+        final cleaned = technology.trim();
+        if (_isValidFilterOption(cleaned)) values.add(cleaned);
+      }
     }
 
-    final result = values.toList();
-
-    result.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final result = values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     return result;
   }
@@ -1808,12 +1881,14 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     final values = <String>{};
 
     for (final project in _allProjects) {
-      values.addAll(project.skills.where((item) => item.trim().isNotEmpty));
+      for (final skill in project.skills) {
+        final cleaned = skill.trim();
+        if (_isValidFilterOption(cleaned)) values.add(cleaned);
+      }
     }
 
-    final result = values.toList();
-
-    result.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final result = values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     return result;
   }
@@ -2147,25 +2222,24 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
                       ],
                     ),
                   ),
-                  if (widget.matchPercentage > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFECFDF5),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Text(
-                        '${widget.matchPercentage}% match',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF047857),
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      '${widget.matchPercentage}% match',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF047857),
                       ),
                     ),
+                  ),
                 ],
               ),
 
@@ -2417,6 +2491,18 @@ class _ProjectPreviewSheet extends StatelessWidget {
   final bool isApplied;
   final String? applicationStatus;
 
+  String _cleanProjectText(String value) {
+    return value
+        .replaceAll(RegExp(r'```[\s\S]*?```'), '')
+        .replaceAll(RegExp(r'^\s*#{1,6}\s*', multiLine: true), '')
+        .replaceAll('**', '')
+        .replaceAll('__', '')
+        .replaceAll('~~', '')
+        .replaceAll(RegExp(r'`([^`]+)`'), r'$1')
+        .replaceAll(RegExp(r'\[([^\]]+)\]\(([^)]+)\)'), r'$1')
+        .trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -2510,14 +2596,13 @@ class _ProjectPreviewSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (matchPercentage > 0)
-                        _PreviewMatchBanner(percentage: matchPercentage),
+                      _PreviewMatchBanner(percentage: matchPercentage),
                       const SizedBox(height: 16),
                       _PreviewSection(
                         title: 'About the project',
                         icon: Icons.description_outlined,
                         child: Text(
-                          project.description,
+                          _cleanProjectText(project.description),
                           style: const TextStyle(
                             fontSize: 13,
                             height: 1.6,
@@ -2552,6 +2637,8 @@ class _ProjectPreviewSheet extends StatelessWidget {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 18),
+                      _ProjectAdditionalDetails(projectId: project.id),
                       const SizedBox(height: 18),
                       if (project.skills.isNotEmpty)
                         _PreviewSection(
@@ -2710,6 +2797,330 @@ class _PreviewMatchBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Loads fields that are not yet represented by ProjectModel (for example,
+/// uploaded reference images and richer project requirements) directly from
+/// the source Firestore project document.
+class _ProjectAdditionalDetails extends StatefulWidget {
+  const _ProjectAdditionalDetails({required this.projectId});
+
+  final String projectId;
+
+  @override
+  State<_ProjectAdditionalDetails> createState() =>
+      _ProjectAdditionalDetailsState();
+}
+
+class _ProjectAdditionalDetailsState extends State<_ProjectAdditionalDetails> {
+  late final Future<Map<String, dynamic>?> _projectDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _projectDataFuture = _loadData();
+  }
+
+  Future<Map<String, dynamic>?> _loadData() async {
+    if (widget.projectId.trim().isEmpty) return null;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('projects')
+        .doc(widget.projectId)
+        .get();
+    return snapshot.data();
+  }
+
+  List<String> _strings(dynamic value) {
+    if (value == null) return const [];
+    if (value is Iterable && value is! String) {
+      return value
+          .expand((item) {
+            if (item is Map) {
+              final url = item['url'] ??
+                  item['downloadURL'] ??
+                  item['downloadUrl'] ??
+                  item['imageUrl'] ??
+                  item['path'];
+              return url == null ? <String>[] : <String>[url.toString()];
+            }
+            return <String>[item.toString()];
+          })
+          .map((item) => item.trim())
+          .where((item) => item.startsWith('https://') || item.startsWith('http://'))
+          .toSet()
+          .toList();
+    }
+    if (value is Map) {
+      final url = value['url'] ??
+          value['downloadURL'] ??
+          value['downloadUrl'] ??
+          value['imageUrl'] ??
+          value['path'];
+      if (url != null) return _strings(url);
+      return const [];
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? const [] : [text];
+  }
+
+  String _text(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value == null) continue;
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+      if (value is num || value is bool) return value.toString();
+      if (value is Iterable && value is! String) {
+        final values = value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+        if (values.isNotEmpty) return values.map((e) => '• $e').join('\n');
+      }
+    }
+    return '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _projectDataFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+        if (!snapshot.hasData || snapshot.data == null) {
+          return const SizedBox.shrink();
+        }
+
+        final data = snapshot.data!;
+        final imageKeys = [
+          'imageUrls',
+          'images',
+          'uploadedImages',
+          'projectImages',
+          'referenceImages',
+          'designImages',
+          'attachments',
+          'imageUrl',
+          'imageURL',
+          'designImageUrl',
+          'uploadedImageUrl',
+          'referenceImageUrl',
+          'coverImageUrl',
+        ];
+        final imageUrls = <String>{};
+        for (final key in imageKeys) {
+          imageUrls.addAll(_strings(data[key]));
+        }
+
+        final requirements = _text(data, [
+          'requirements',
+          'projectRequirements',
+          'requiredDetails',
+          'requirement',
+          'scope',
+          'projectScope',
+          'objectives',
+          'projectObjectives',
+        ]);
+        final deliverables = _text(data, [
+          'deliverables',
+          'expectedDeliverables',
+          'projectDeliverables',
+          'outcomes',
+        ]);
+        final additionalNotes = _text(data, [
+          'additionalDetails',
+          'additionalRequirements',
+          'notes',
+          'specialInstructions',
+          'instructions',
+          'projectBrief',
+        ]);
+        final deadline = _text(data, [
+          'deadline',
+          'dueDate',
+          'deliveryDate',
+          'projectDeadline',
+        ]);
+        final experience = _text(data, [
+          'experienceLevel',
+          'experience',
+          'seniority',
+        ]);
+        final category = _text(data, ['category', 'industry', 'domain']);
+        final location = _text(data, ['location', 'projectLocation']);
+        final extra = <MapEntry<String, String>>[
+          if (deadline.isNotEmpty) MapEntry('Deadline', deadline),
+          if (experience.isNotEmpty) MapEntry('Experience level', experience),
+          if (category.isNotEmpty) MapEntry('Category', category),
+          if (location.isNotEmpty) MapEntry('Location', location),
+        ];
+
+        final hasContent = imageUrls.isNotEmpty ||
+            requirements.isNotEmpty ||
+            deliverables.isNotEmpty ||
+            additionalNotes.isNotEmpty ||
+            extra.isNotEmpty;
+        if (!hasContent) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (imageUrls.isNotEmpty) ...[
+              _PreviewSection(
+                title: 'Project images & references',
+                icon: Icons.photo_library_outlined,
+                child: SizedBox(
+                  height: 170,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: imageUrls.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      final url = imageUrls.elementAt(index);
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          width: 230,
+                          color: const Color(0xFFE5E7EB),
+                          child: Image.network(
+                            url,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.broken_image_outlined, size: 32),
+                                  SizedBox(height: 6),
+                                  Text('Image unavailable'),
+                                ],
+                              ),
+                            ),
+                            loadingBuilder: (context, child, progress) {
+                              if (progress == null) return child;
+                              return const Center(
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (requirements.isNotEmpty)
+              _PreviewSection(
+                title: 'Requirements & scope',
+                icon: Icons.checklist_rounded,
+                child: _DetailParagraph(text: requirements),
+              ),
+            if (requirements.isNotEmpty) const SizedBox(height: 16),
+            if (deliverables.isNotEmpty)
+              _PreviewSection(
+                title: 'Expected deliverables',
+                icon: Icons.task_alt_rounded,
+                child: _DetailParagraph(text: deliverables),
+              ),
+            if (deliverables.isNotEmpty) const SizedBox(height: 16),
+            if (additionalNotes.isNotEmpty)
+              _PreviewSection(
+                title: 'Additional information',
+                icon: Icons.notes_rounded,
+                child: _DetailParagraph(text: additionalNotes),
+              ),
+            if (additionalNotes.isNotEmpty) const SizedBox(height: 16),
+            if (extra.isNotEmpty)
+              _PreviewSection(
+                title: 'More details',
+                icon: Icons.fact_check_outlined,
+                child: Column(
+                  children: extra
+                      .map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(bottom: 9),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 112,
+                                child: Text(
+                                  entry.key,
+                                  style: const TextStyle(
+                                    color: Color(0xFF6B7280),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  entry.value,
+                                  style: const TextStyle(
+                                    color: Color(0xFF374151),
+                                    fontSize: 13,
+                                    height: 1.45,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DetailParagraph extends StatelessWidget {
+  const _DetailParagraph({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Text(
+        text
+            .replaceAll(RegExp(r'^\s*#{1,6}\s*', multiLine: true), '')
+            .replaceAll('**', '')
+            .replaceAll('__', '')
+            .replaceAll('~~', '')
+            .trim(),
+        style: const TextStyle(
+          fontSize: 13,
+          height: 1.6,
+          color: Color(0xFF4B5563),
+        ),
       ),
     );
   }

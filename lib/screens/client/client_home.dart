@@ -18,6 +18,8 @@ import 'project_details_screen.dart';
 import 'hire_developer_screen.dart';
 import 'client_analytics_screen.dart';
 import 'how_to_use_skillbridge_screen.dart';
+import 'hire_developer_screen.dart';
+
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -632,12 +634,14 @@ class _ClientDashboardSection extends StatelessWidget {
     );
   }
 
-  void _openHireDeveloper(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const HireDeveloperScreen()),
-    );
-  }
+void _openHireDeveloper(BuildContext context) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const FindDevelopersScreen(),
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {

@@ -1277,6 +1277,64 @@ class _TeamsState extends State<Teams> {
     }
   }
 
+
+Future<void> _renameTeam(TeamModel team) async {
+  final controller = TextEditingController(text: team.name);
+
+  final newName = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Rename Team'),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        maxLength: 60,
+        decoration: const InputDecoration(
+          labelText: 'Team name',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final value = controller.text.trim();
+            if (value.isNotEmpty) {
+              Navigator.pop(dialogContext, value);
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+
+  controller.dispose();
+
+  if (newName == null ||
+      newName.trim().isEmpty ||
+      newName.trim() == team.name ||
+      !mounted) {
+    return;
+  }
+
+  try {
+    await _teamService.updateTeam(
+      team.id,
+      {'name': newName.trim()},
+    );
+
+    if (!mounted) return;
+    _showSnackBar('Team renamed successfully.');
+  } catch (error) {
+    if (!mounted) return;
+    _showSnackBar('Could not rename team: $error');
+  }
+}
+
   void _showTeamDetails(TeamModel team) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     final isOwner = team.ownerId == currentUid;
@@ -1505,6 +1563,15 @@ class _TeamsState extends State<Teams> {
                 icon: const Icon(Icons.chat_bubble_outline),
                 label: const Text('Team Chat'),
               ),
+              if (isOwner)
+  TextButton.icon(
+    onPressed: () {
+      Navigator.of(dialogContext).pop();
+      _renameTeam(team);
+    },
+    icon: const Icon(Icons.edit_outlined),
+    label: const Text('Rename Team'),
+  ),
             if (isOwner)
               TextButton.icon(
                 onPressed: () => _confirmDeleteTeam(team),
