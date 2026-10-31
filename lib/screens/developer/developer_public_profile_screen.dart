@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../widgets/developer_rating_summary.dart';
 import '../../widgets/developer_reviews_list.dart';
@@ -181,16 +182,18 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
                 _value(profile, 'hourlyRate', 'Not specified'),
               ),
               _chipsSection('Languages', languages),
-              _section('GitHub', _value(profile, 'githubUrl', 'Not provided')),
-              _section(
+              _linkSection(context, 'GitHub', _value(profile, 'githubUrl', '')),
+              _linkSection(
+                context,
                 'LinkedIn',
-                _value(profile, 'linkedinUrl', 'Not provided'),
+                _value(profile, 'linkedinUrl', ''),
               ),
-              _section(
+              _linkSection(
+                context,
                 'Portfolio',
-                _value(profile, 'portfolioUrl', 'Not provided'),
+                _value(profile, 'portfolioUrl', ''),
               ),
-              _section('Resume', _value(profile, 'resumeUrl', 'Not provided')),
+              _linkSection(context, 'Resume', _value(profile, 'resumeUrl', '')),
               const SizedBox(height: 24),
               DeveloperRatingSummary(developerId: developerId),
               const SizedBox(height: 24),
@@ -245,6 +248,92 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _linkSection(BuildContext context, String title, String value) {
+    final hasLink = value.trim().isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: InkWell(
+        onTap: hasLink ? () => _openLink(context, value) : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF111827),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    hasLink ? 'Tap to open' : 'Not provided',
+                    style: TextStyle(
+                      height: 1.45,
+                      color: hasLink
+                          ? const Color(0xFF2563EB)
+                          : const Color(0xFF4B5563),
+                    ),
+                  ),
+                ),
+                if (hasLink) ...[
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.open_in_new_rounded,
+                    size: 18,
+                    color: Color(0xFF2563EB),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLink(BuildContext context, String rawValue) async {
+    var value = rawValue.trim();
+    if (!value.startsWith('http://') && !value.startsWith('https://')) {
+      value = 'https://$value';
+    }
+
+    final uri = Uri.tryParse(value);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('This link is not valid.')));
+      return;
+    }
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the link.')),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open the link.')));
+    }
   }
 
   Widget _chipsSection(String title, List<String> values) {
