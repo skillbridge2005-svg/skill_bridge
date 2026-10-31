@@ -10,7 +10,7 @@ import '../client/client_messages_screen.dart';
 import '../client/project_meeting_screen.dart';
 import 'developer_repositories_screen.dart';
 import 'note_editor_screen.dart';
-import 'teams.dart';
+import '../client/client_team_screen.dart';
 
 class DeveloperProjectDetailsScreen extends StatelessWidget {
   final String projectId;
@@ -209,7 +209,10 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const Teams()),
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    ClientTeamScreen(projectId: projectId),
+                              ),
                             );
                           },
                         ),

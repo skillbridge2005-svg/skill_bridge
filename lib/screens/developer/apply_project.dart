@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../services/project_service.dart';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -64,8 +62,6 @@ class _ApplyProjectState extends State<ApplyProject> {
         _errorMessage = null;
       });
 
-      _project ??= await _loadProject();
-
       if (_project == null) {
         throw Exception('The project could not be found.');
       }
@@ -87,16 +83,6 @@ class _ApplyProjectState extends State<ApplyProject> {
         _errorMessage = e.toString();
       });
     }
-  }
-
-  Future<ProjectModel?> _loadProject() async {
-    // The application service intentionally does not own
-    // project fetching. The initial project should normally
-    // be supplied by ProjectDetails.
-    //
-    // This fallback is handled by importing ProjectService
-    // locally through the existing project architecture.
-    return null;
   }
 
   // ===========================================================================
@@ -492,17 +478,9 @@ class _ApplyProjectState extends State<ApplyProject> {
               size: 27,
             ),
           ),
+
           const SizedBox(height: 20),
-          const Text(
-            'YOU ARE APPLYING FOR',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              color: Color(0xFF2563EB),
-            ),
-          ),
-          const SizedBox(height: 8),
+
           Text(
             project.title,
             style: const TextStyle(
@@ -512,78 +490,36 @@ class _ApplyProjectState extends State<ApplyProject> {
               color: Color(0xFF0F172A),
             ),
           ),
-          const SizedBox(height: 14),
-          Text(
-            project.description,
-            maxLines: 7,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.6,
-              color: Color(0xFF64748B),
-            ),
-          ),
+
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 20),
+
           _summaryRow(
             Icons.person_outline_rounded,
             'Client',
             project.clientName.isEmpty ? 'Client' : project.clientName,
           ),
-          const SizedBox(height: 16),
+
+          const SizedBox(height: 18),
+
           _summaryRow(Icons.payments_outlined, 'Budget', _budgetText(project)),
-          const SizedBox(height: 16),
+
+          const SizedBox(height: 18),
+
           _summaryRow(
             Icons.schedule_outlined,
             'Duration',
             project.duration.isEmpty ? 'Not specified' : project.duration,
           ),
-          const SizedBox(height: 16),
+
+          const SizedBox(height: 18),
+
           _summaryRow(
             Icons.laptop_mac_outlined,
             'Work mode',
             project.workMode.isEmpty ? 'Not specified' : project.workMode,
           ),
-          if (project.skills.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            const Text(
-              'Required skills',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-                color: Color(0xFF0F172A),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: project.skills
-                  .take(8)
-                  .map(
-                    (skill) => Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        skill,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF1D4ED8),
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
         ],
       ),
     );

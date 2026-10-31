@@ -413,7 +413,9 @@ class _AiHelpCard extends StatelessWidget {
 }
 
 class FindDevelopersScreen extends StatefulWidget {
-  const FindDevelopersScreen({super.key});
+  final Future<void> Function(String developerId)? onInviteDeveloper;
+
+  const FindDevelopersScreen({super.key, this.onInviteDeveloper});
 
   @override
   State<FindDevelopersScreen> createState() => _FindDevelopersScreenState();
@@ -896,12 +898,15 @@ class _FindDevelopersScreenState extends State<FindDevelopersScreen> {
                           data: data,
                           onChatTap: () => _openDeveloperChat(
                             developer.id,
-                            _firstText(
-                              data,
-                              ['name', 'fullName', 'displayName'],
-                              fallback: 'Developer',
-                            ),
+                            _firstText(data, [
+                              'name',
+                              'fullName',
+                              'displayName',
+                            ], fallback: 'Developer'),
                           ),
+                          onInviteTap: widget.onInviteDeveloper == null
+                              ? null
+                              : () => widget.onInviteDeveloper!(developer.id),
                           onTap: () {
                             Navigator.push(
                               context,
@@ -947,9 +952,8 @@ class _FindDevelopersScreenState extends State<FindDevelopersScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open chat: $error')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open chat: $error')));
     }
   }
 
@@ -1618,11 +1622,13 @@ class _DeveloperCard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onTap;
   final VoidCallback onChatTap;
+  final VoidCallback? onInviteTap;
 
   const _DeveloperCard({
     required this.data,
     required this.onTap,
     required this.onChatTap,
+    this.onInviteTap,
   });
 
   List<String> _strings(dynamic value) {
@@ -1779,6 +1785,13 @@ class _DeveloperCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onInviteTap != null)
+                IconButton(
+                  tooltip: 'Invite to team',
+                  onPressed: onInviteTap,
+                  icon: const Icon(Icons.group_add_outlined),
+                  color: const Color(0xFF059669),
+                ),
               IconButton(
                 tooltip: 'Chat with developer',
                 onPressed: onChatTap,

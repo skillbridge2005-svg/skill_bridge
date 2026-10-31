@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/developer_note.dart';
 import '../../services/developer_notes_service.dart';
+import 'developer_notes_screen.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   final DeveloperNote? note;
@@ -565,6 +566,34 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _primary,
                         foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    height: 54,
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => DeveloperNotesScreen(
+                              projectId: widget.projectId,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.notes_rounded),
+                      label: const Text('Show Notes'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _primary,
+                        side: const BorderSide(color: _primary, width: 1.5),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
