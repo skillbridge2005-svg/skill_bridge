@@ -8,6 +8,7 @@ import 'apply_project.dart';
 
 import 'package:skill_bridge/models/project_model.dart';
 import 'package:skill_bridge/services/project_service.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 class DiscoverProjects extends StatefulWidget {
   const DiscoverProjects({super.key});
@@ -122,7 +123,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     _listenToSavedProjects();
     _listenToApplicationStatuses();
 
-    void _listenToProjects() {
+    void listenToProjects() {
       _projectsSubscription = _openProjectsStream.listen(
         (projects) {
           if (!mounted) return;
@@ -144,7 +145,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
       );
     }
 
-    _listenToProjects();
+    listenToProjects();
   }
 
   void _listenToApplicationStatuses() {
@@ -361,10 +362,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             return searchableText.contains(query);
           }).toList();
 
-    final sorted = _projectService.sortProjects(
-      searched,
-      sortBy: _sortBy,
-    );
+    final sorted = _projectService.sortProjects(searched, sortBy: _sortBy);
 
     _filteredProjects = _showSavedOnly
         ? sorted
@@ -377,8 +375,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     }
 
     if (_visibleProjectCount == 0 && _filteredProjects.isNotEmpty) {
-      _visibleProjectCount =
-          _filteredProjects.length < 8 ? _filteredProjects.length : 8;
+      _visibleProjectCount = _filteredProjects.length < 8
+          ? _filteredProjects.length
+          : 8;
     }
   }
 
@@ -677,7 +676,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
             ),
           ),
 
-          if (_showRecommendations && !_showSavedOnly && _recommendations.isNotEmpty)
+          if (_showRecommendations &&
+              !_showSavedOnly &&
+              _recommendations.isNotEmpty)
             SliverToBoxAdapter(
               child: FadeTransition(
                 opacity: _contentFade,
@@ -1471,8 +1472,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               _showSavedOnly
                   ? 'No saved projects yet'
                   : hasFilters
-                      ? 'No matching projects'
-                      : 'No projects available',
+                  ? 'No matching projects'
+                  : 'No projects available',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
@@ -1484,10 +1485,10 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
               _showSavedOnly
                   ? 'Bookmark a project to find it here later.'
                   : hasFilters
-                      ? 'Try changing your search or filters '
-                            'to discover more opportunities.'
-                      : 'New opportunities will appear here '
-                            'when clients publish projects.',
+                  ? 'Try changing your search or filters '
+                        'to discover more opportunities.'
+                  : 'New opportunities will appear here '
+                        'when clients publish projects.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 13,
@@ -1509,7 +1510,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                     _resetFilters();
                   }
                 },
-                child: Text(_showSavedOnly ? 'View all projects' : 'Clear filters'),
+                child: Text(
+                  _showSavedOnly ? 'View all projects' : 'Clear filters',
+                ),
               ),
             ],
           ],
@@ -1752,8 +1755,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          tileColor:
-                              active ? const Color(0xFFEEF2FF) : null,
+                          tileColor: active ? const Color(0xFFEEF2FF) : null,
                           title: Text(
                             option,
                             maxLines: 2,
@@ -1852,7 +1854,8 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
     if (item.isEmpty || item.length > 40) return false;
     if (item.contains('\n') || item.contains('\r')) return false;
     if (item.contains('**') || item.contains('```')) return false;
-    if (item.startsWith('#') || item.contains('Project Title:') ||
+    if (item.startsWith('#') ||
+        item.contains('Project Title:') ||
         item.contains('Project Description:') ||
         item.contains('Technology:**')) {
       return false;
@@ -2492,23 +2495,175 @@ class _ProjectPreviewSheet extends StatelessWidget {
   final String? applicationStatus;
 
   String _cleanProjectText(String value) {
+    return value.trim();
+  }
+
+  String _cleanTechnology(String value) {
     return value
-        .replaceAll(RegExp(r'```[\s\S]*?```'), '')
-        .replaceAll(RegExp(r'^\s*#{1,6}\s*', multiLine: true), '')
+        .trim()
+        .replaceFirst(RegExp(r'^(?:[-•*]\s+|\d+[.)]\s+)'), '')
         .replaceAll('**', '')
-        .replaceAll('__', '')
-        .replaceAll('~~', '')
-        .replaceAll(RegExp(r'`([^`]+)`'), r'$1')
-        .replaceAll(RegExp(r'\[([^\]]+)\]\(([^)]+)\)'), r'$1')
+        .replaceAll('`', '')
         .trim();
+  }
+
+  bool _isLikelyTechnologyName(String value) {
+    final item = _cleanTechnology(value);
+
+    if (item.isEmpty || item.length > 90) return false;
+
+    if (RegExp(r'[.!?;]$').hasMatch(item)) {
+      return false;
+    }
+
+    return !RegExp(
+      r'\b(allows|provides|ensures|supports|enables|reducing|'
+      r'delivering|significantly|because|therefore|architecture|'
+      r'codebase|performance|compliance|handling|improving|'
+      r'maintaining|offers|built-in)\b',
+      caseSensitive: false,
+    ).hasMatch(item);
+  }
+
+  Map<String, List<String>> _extractTechnologyGroups(List<String> rawItems) {
+    final groups = <String, List<String>>{};
+
+    void addTechnology(String category, String value) {
+      final technology = _cleanTechnology(value);
+
+      if (!_isLikelyTechnologyName(technology)) return;
+
+      final categoryName = category.trim().isEmpty
+          ? 'Technologies'
+          : category.trim();
+
+      final items = groups.putIfAbsent(categoryName, () => <String>[]);
+
+      if (!items.any(
+        (item) => item.toLowerCase() == technology.toLowerCase(),
+      )) {
+        items.add(technology);
+      }
+    }
+
+    final combinedText = rawItems.join('\n');
+
+    final isStructured = RegExp(
+      r'^\s*#{1,6}\s|'
+      r'^\s*(?:[-*•]\s*)?\*{0,2}\s*'
+      r'(?:technology|technologies|tech stack|why|reason)\s*:',
+      multiLine: true,
+      caseSensitive: false,
+    ).hasMatch(combinedText);
+
+    // Support normal technology lists also.
+    if (!isStructured) {
+      for (final line in combinedText.split('\n')) {
+        final value = _cleanTechnology(line);
+
+        if (_isLikelyTechnologyName(value)) {
+          addTechnology('Technologies', value);
+        }
+      }
+
+      return groups;
+    }
+
+    String currentCategory = 'Technologies';
+    bool skippingExplanation = false;
+
+    for (final rawLine in combinedText.split('\n')) {
+      final line = rawLine.trim();
+
+      if (line.isEmpty) continue;
+
+      // Detect category headings such as:
+      // ### 1. Frontend (Mobile Application)
+      final headingMatch = RegExp(
+        r'^#{1,6}\s*(?:(?:\d+)\s*[.)]\s*)?(.+?)\s*#*$',
+      ).firstMatch(line);
+
+      if (headingMatch != null) {
+        currentCategory = _cleanTechnology(headingMatch.group(1) ?? '');
+
+        skippingExplanation = false;
+        continue;
+      }
+
+      // Extract only Technology: values.
+      final technologyMatch = RegExp(
+        r'^(?:[-*•]\s*)?\*{0,2}\s*'
+        r'(?:technology|technologies|tech stack|tools?)'
+        r'\s*:?\s*\*{0,2}\s*(.*?)\s*$',
+        caseSensitive: false,
+      ).firstMatch(line);
+
+      if (technologyMatch != null) {
+        final rawTechnology = technologyMatch.group(1) ?? '';
+
+        final inlineWhy = RegExp(
+          r'\s+\*{0,2}\s*(?:why|reason)\s*:.*$',
+          caseSensitive: false,
+        );
+
+        final hasInlineExplanation = inlineWhy.hasMatch(rawTechnology);
+
+        final technology = rawTechnology.replaceFirst(inlineWhy, '');
+
+        addTechnology(currentCategory, technology);
+
+        skippingExplanation = hasInlineExplanation;
+        continue;
+      }
+
+      // Detect explanation sections.
+      final isExplanation = RegExp(
+        r'^(?:[-*•]\s*)?\*{0,2}\s*'
+        r'(?:why|reason|purpose|benefit|rationale|'
+        r'explanation|description)\s*:',
+        caseSensitive: false,
+      ).hasMatch(line);
+
+      if (isExplanation) {
+        skippingExplanation = true;
+        continue;
+      }
+
+      // Ignore all continuation lines of Why explanations.
+      if (skippingExplanation) continue;
+
+      // Support simple bullet lists inside a category.
+      final bulletMatch = RegExp(r'^[-*•]\s+(.+)$').firstMatch(line);
+
+      if (bulletMatch != null) {
+        addTechnology(currentCategory, bulletMatch.group(1) ?? '');
+      }
+    }
+
+    return groups;
   }
 
   @override
   Widget build(BuildContext context) {
+    final detailPills = <Widget>[
+      if (project.effectiveBudgetMin > 0 || project.effectiveBudgetMax > 0)
+        _DetailPill(icon: Icons.payments_outlined, label: _budget(project)),
+
+      if (project.duration.trim().isNotEmpty)
+        _DetailPill(icon: Icons.schedule_rounded, label: project.duration),
+
+      if (project.workMode.trim().isNotEmpty)
+        _DetailPill(icon: Icons.public_rounded, label: project.workMode),
+
+      if (project.projectType.trim().isNotEmpty)
+        _DetailPill(icon: Icons.category_outlined, label: project.projectType),
+    ];
+
+    final technologyGroups = _extractTechnologyGroups(project.technologies);
     return DraggableScrollableSheet(
-      initialChildSize: 0.72,
-      minChildSize: 0.45,
-      maxChildSize: 0.94,
+      initialChildSize: 0.88,
+      minChildSize: 0.55,
+      maxChildSize: 0.96,
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
@@ -2601,42 +2756,24 @@ class _ProjectPreviewSheet extends StatelessWidget {
                       _PreviewSection(
                         title: 'About the project',
                         icon: Icons.description_outlined,
-                        child: Text(
-                          _cleanProjectText(project.description),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            height: 1.6,
-                            color: Color(0xFF4B5563),
-                          ),
+                        child: _DetailParagraph(
+                          text: project.description.trim().isEmpty
+                              ? 'No description provided.'
+                              : _cleanProjectText(project.description),
                         ),
                       ),
                       const SizedBox(height: 18),
-                      _PreviewSection(
-                        title: 'Project details',
-                        icon: Icons.info_outline_rounded,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _DetailPill(
-                              icon: Icons.payments_outlined,
-                              label: _budget(project),
-                            ),
-                            _DetailPill(
-                              icon: Icons.schedule_rounded,
-                              label: project.duration,
-                            ),
-                            _DetailPill(
-                              icon: Icons.public_rounded,
-                              label: project.workMode,
-                            ),
-                            _DetailPill(
-                              icon: Icons.category_outlined,
-                              label: project.projectType,
-                            ),
-                          ],
+                      if (detailPills.isNotEmpty) ...[
+                        _PreviewSection(
+                          title: 'Project details',
+                          icon: Icons.info_outline_rounded,
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: detailPills,
+                          ),
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 18),
                       _ProjectAdditionalDetails(projectId: project.id),
                       const SizedBox(height: 18),
@@ -2653,19 +2790,124 @@ class _ProjectPreviewSheet extends StatelessWidget {
                           ),
                         ),
                       const SizedBox(height: 18),
-                      if (project.technologies.isNotEmpty)
+                      if (technologyGroups.isNotEmpty)
                         _PreviewSection(
                           title: 'Technologies',
                           icon: Icons.code_rounded,
-                          child: Wrap(
-                            spacing: 7,
-                            runSpacing: 7,
-                            children: project.technologies
-                                .map(
-                                  (technology) =>
-                                      _TechnologyChip(label: technology),
-                                )
-                                .toList(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: technologyGroups.entries.map((entry) {
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFE5E7EB),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF4F46E5)
+                                          .withValues(alpha: 0.035),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 34,
+                                          height: 34,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFEEF0FF),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.layers_rounded,
+                                            color: Color(0xFF4F46E5),
+                                            size: 18,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 11),
+                                        Expanded(
+                                          child: Text(
+                                            entry.key,
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF27324A),
+                                            ),
+                                          ),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 9,
+                                            vertical: 5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFEEF0FF),
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '${entry.value.length}',
+                                            style: const TextStyle(
+                                              color: Color(0xFF4F46E5),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    const Divider(
+                                      height: 1,
+                                      color: Color(0xFFF0F1F5),
+                                    ),
+                                    const SizedBox(height: 5),
+
+                                    ...entry.value.map(
+                                      (technology) => Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.check_circle_rounded,
+                                              size: 17,
+                                              color: Color(0xFF6366F1),
+                                            ),
+                                            const SizedBox(width: 11),
+                                            Expanded(
+                                              child: Text(
+                                                technology,
+                                                softWrap: true,
+                                                style: const TextStyle(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF374151),
+                                                  height: 1.4,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ),
                       const SizedBox(height: 28),
@@ -2802,10 +3044,14 @@ class _PreviewMatchBanner extends StatelessWidget {
   }
 }
 
-
 /// Loads fields that are not yet represented by ProjectModel (for example,
 /// uploaded reference images and richer project requirements) directly from
 /// the source Firestore project document.
+
+/// Loads the complete accepted project data from the existing Firestore
+/// document: projects/{projectId}.
+///
+/// This widget does not write or modify any Firestore data.
 class _ProjectAdditionalDetails extends StatefulWidget {
   const _ProjectAdditionalDetails({required this.projectId});
 
@@ -2827,61 +3073,188 @@ class _ProjectAdditionalDetailsState extends State<_ProjectAdditionalDetails> {
 
   Future<Map<String, dynamic>?> _loadData() async {
     if (widget.projectId.trim().isEmpty) return null;
+
     final snapshot = await FirebaseFirestore.instance
         .collection('projects')
         .doc(widget.projectId)
         .get();
+
     return snapshot.data();
   }
 
-  List<String> _strings(dynamic value) {
-    if (value == null) return const [];
-    if (value is Iterable && value is! String) {
-      return value
-          .expand((item) {
-            if (item is Map) {
-              final url = item['url'] ??
-                  item['downloadURL'] ??
-                  item['downloadUrl'] ??
-                  item['imageUrl'] ??
-                  item['path'];
-              return url == null ? <String>[] : <String>[url.toString()];
-            }
-            return <String>[item.toString()];
-          })
-          .map((item) => item.trim())
-          .where((item) => item.startsWith('https://') || item.startsWith('http://'))
-          .toSet()
-          .toList();
+  Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
     }
+
     if (value is Map) {
-      final url = value['url'] ??
-          value['downloadURL'] ??
-          value['downloadUrl'] ??
-          value['imageUrl'] ??
-          value['path'];
-      if (url != null) return _strings(url);
-      return const [];
+      return value.map<String, dynamic>(
+        (key, value) => MapEntry(key.toString(), value),
+      );
     }
-    final text = value.toString().trim();
-    return text.isEmpty ? const [] : [text];
+
+    return <String, dynamic>{};
   }
 
-  String _text(Map<String, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final value = data[key];
-      if (value == null) continue;
-      if (value is String && value.trim().isNotEmpty) return value.trim();
-      if (value is num || value is bool) return value.toString();
-      if (value is Iterable && value is! String) {
-        final values = value
-            .map((item) => item.toString().trim())
-            .where((item) => item.isNotEmpty)
-            .toList();
-        if (values.isNotEmpty) return values.map((e) => '• $e').join('\n');
+  bool _isValidImageUrl(dynamic value) {
+    if (value == null) return false;
+
+    final uri = Uri.tryParse(value.toString().trim());
+
+    return uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty;
+  }
+
+  /// Extracts image URLs from strings, lists and common image objects.
+  List<String> _extractImageUrls(dynamic value) {
+    final result = <String>{};
+
+    void visit(dynamic item) {
+      if (item == null) return;
+
+      if (item is String) {
+        final url = item.trim();
+
+        if (_isValidImageUrl(url)) {
+          result.add(url);
+        }
+
+        return;
+      }
+
+      if (item is Map) {
+        const urlKeys = [
+          'url',
+          'imageUrl',
+          'imageURL',
+          'downloadURL',
+          'downloadUrl',
+          'publicUrl',
+          'publicURL',
+          'image_url',
+          'download_url',
+          'public_url',
+          'path',
+        ];
+
+        bool foundUrl = false;
+
+        for (final key in urlKeys) {
+          if (item.containsKey(key)) {
+            foundUrl = true;
+            visit(item[key]);
+          }
+        }
+
+        if (!foundUrl) {
+          for (final nestedValue in item.values) {
+            visit(nestedValue);
+          }
+        }
+
+        return;
+      }
+
+      if (item is Iterable && item is! String) {
+        for (final child in item) {
+          visit(child);
+        }
       }
     }
-    return '';
+
+    visit(value);
+    return result.toList();
+  }
+
+  /// Searches nested plan data for additional image references.
+  void _collectNestedImages(dynamic value, Set<String> result) {
+    if (value is Map) {
+      for (final entry in value.entries) {
+        final key = entry.key.toString();
+
+        if (RegExp(
+          r'image|design|reference|attachment',
+          caseSensitive: false,
+        ).hasMatch(key)) {
+          result.addAll(_extractImageUrls(entry.value));
+        } else {
+          _collectNestedImages(entry.value, result);
+        }
+      }
+    } else if (value is Iterable && value is! String) {
+      for (final item in value) {
+        _collectNestedImages(item, result);
+      }
+    }
+  }
+
+  bool _hasDisplayableValue(dynamic value) {
+    if (value == null) return false;
+
+    if (value is String) {
+      return value.trim().isNotEmpty;
+    }
+
+    if (value is Map) {
+      return value.values.any(_hasDisplayableValue);
+    }
+
+    if (value is Iterable && value is! String) {
+      return value.any(_hasDisplayableValue);
+    }
+
+    return true;
+  }
+
+  String _readable(dynamic value) {
+    if (value == null) return '';
+
+    if (value is Timestamp) {
+      return value.toDate().toLocal().toString().split('.').first;
+    }
+
+    if (value is DateTime) {
+      return value.toLocal().toString().split('.').first;
+    }
+
+    if (value is bool) {
+      return value ? 'Yes' : 'No';
+    }
+
+    if (value is num) {
+      return value.toString();
+    }
+
+    if (value is Iterable && value is! String) {
+      return value
+          .where((item) => item != null && item is! Map)
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .map((item) => '• $item')
+          .join('\n');
+    }
+
+    if (value is Map) return '';
+
+    return value.toString().trim();
+  }
+
+  Widget _textSection(String title, IconData icon, dynamic value) {
+    final text = _readable(value);
+
+    if (text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: _PreviewSection(
+        title: title,
+        icon: icon,
+        child: _DetailParagraph(text: text),
+      ),
+    );
   }
 
   @override
@@ -2891,22 +3264,37 @@ class _ProjectAdditionalDetailsState extends State<_ProjectAdditionalDetails> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Unable to load additional project information.',
+              style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13),
             ),
           );
         }
+
         if (!snapshot.hasData || snapshot.data == null) {
           return const SizedBox.shrink();
         }
 
         final data = snapshot.data!;
-        final imageKeys = [
+
+        // ============================================================
+        // 1. DESIGN IMAGES
+        // ============================================================
+
+        final imageUrls = <String>{};
+
+        // Exact field used by the existing Client acceptance flow.
+        _collectNestedImages(data, imageUrls);
+
+        const legacyImageKeys = [
           'imageUrls',
           'images',
           'uploadedImages',
@@ -2921,175 +3309,805 @@ class _ProjectAdditionalDetailsState extends State<_ProjectAdditionalDetails> {
           'referenceImageUrl',
           'coverImageUrl',
         ];
-        final imageUrls = <String>{};
-        for (final key in imageKeys) {
-          imageUrls.addAll(_strings(data[key]));
+
+        for (final key in legacyImageKeys) {
+          imageUrls.addAll(_extractImageUrls(data[key]));
         }
 
-        final requirements = _text(data, [
-          'requirements',
-          'projectRequirements',
-          'requiredDetails',
-          'requirement',
-          'scope',
-          'projectScope',
-          'objectives',
-          'projectObjectives',
-        ]);
-        final deliverables = _text(data, [
-          'deliverables',
-          'expectedDeliverables',
-          'projectDeliverables',
-          'outcomes',
-        ]);
-        final additionalNotes = _text(data, [
-          'additionalDetails',
-          'additionalRequirements',
-          'notes',
-          'specialInstructions',
-          'instructions',
-          'projectBrief',
-        ]);
-        final deadline = _text(data, [
-          'deadline',
-          'dueDate',
-          'deliveryDate',
-          'projectDeadline',
-        ]);
-        final experience = _text(data, [
-          'experienceLevel',
-          'experience',
-          'seniority',
-        ]);
-        final category = _text(data, ['category', 'industry', 'domain']);
-        final location = _text(data, ['location', 'projectLocation']);
-        final extra = <MapEntry<String, String>>[
-          if (deadline.isNotEmpty) MapEntry('Deadline', deadline),
-          if (experience.isNotEmpty) MapEntry('Experience level', experience),
-          if (category.isNotEmpty) MapEntry('Category', category),
-          if (location.isNotEmpty) MapEntry('Location', location),
-        ];
+        // ============================================================
+        // 2. ACCEPTED PLAN AND ESTIMATE
+        // ============================================================
 
-        final hasContent = imageUrls.isNotEmpty ||
-            requirements.isNotEmpty ||
-            deliverables.isNotEmpty ||
-            additionalNotes.isNotEmpty ||
-            extra.isNotEmpty;
-        if (!hasContent) return const SizedBox.shrink();
+        final plan = _asMap(data['plan']);
+
+        final estimate = _asMap(data['estimate']).isNotEmpty
+            ? _asMap(data['estimate'])
+            : _asMap(plan['estimate']);
+
+        // The estimate is shown separately, so do not show it twice
+        // inside the complete plan.
+        final planDetails = Map<String, dynamic>.from(plan);
+        planDetails.remove('estimate');
+
+        final planText = data['plan'] is String
+            ? data['plan'].toString().trim()
+            : '';
+
+        // ============================================================
+        // 3. ADDITIONAL ROOT-LEVEL PROJECT INFORMATION
+        // ============================================================
+
+        const excludedKeys = {
+          'projectid',
+          'clientid',
+          'clientuid',
+          'developerid',
+          'assigneddeveloperid',
+          'planid',
+          'createdat',
+          'updatedat',
+          'title',
+          'projecttitle',
+          'clientname',
+          'description',
+          'categories',
+          'category',
+          'requirements',
+          'projectrequirements',
+          'technologies',
+          'suggestedtechnologies',
+          'plan',
+          'estimate',
+          'acceptedscope',
+          'budget',
+          'budgetmin',
+          'budgetmax',
+          'amount',
+          'currency',
+          'duration',
+          'projecttype',
+          'workmode',
+          'skills',
+          'applicationscount',
+        };
+
+        final additionalData = <String, dynamic>{};
+
+        for (final entry in data.entries) {
+          final key = entry.key.toLowerCase();
+
+          if (excludedKeys.contains(key)) continue;
+
+          // Images are displayed in the gallery, not as raw URLs.
+          if (RegExp(
+            r'image|design|reference|attachment',
+            caseSensitive: false,
+          ).hasMatch(key)) {
+            continue;
+          }
+
+          if (!_hasDisplayableValue(entry.value)) continue;
+
+          additionalData[entry.key] = entry.value;
+        }
+
+        final hasAcceptedScope = _hasDisplayableValue(data['acceptedScope']);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ========================================================
+            // 4. CLIENT UPLOADED + AI GENERATED DESIGN IMAGES
+            // ========================================================
+
             if (imageUrls.isNotEmpty) ...[
               _PreviewSection(
-                title: 'Project images & references',
+                title: 'UI Designs & Project References',
                 icon: Icons.photo_library_outlined,
-                child: SizedBox(
-                  height: 170,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: imageUrls.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 12),
-                    itemBuilder: (context, index) {
-                      final url = imageUrls.elementAt(index);
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          width: 230,
-                          color: const Color(0xFFE5E7EB),
-                          child: Image.network(
-                            url,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.broken_image_outlined, size: 32),
-                                  SizedBox(height: 6),
-                                  Text('Image unavailable'),
-                                ],
-                              ),
-                            ),
-                            loadingBuilder: (context, child, progress) {
-                              if (progress == null) return child;
-                              return const Center(
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+                child: _ProjectDesignGallery(imageUrls: imageUrls.toList()),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 22),
             ],
-            if (requirements.isNotEmpty)
-              _PreviewSection(
-                title: 'Requirements & scope',
-                icon: Icons.checklist_rounded,
-                child: _DetailParagraph(text: requirements),
+
+            // ========================================================
+            // 5. COMPLETE CLIENT REQUIREMENTS
+            // ========================================================
+            _textSection(
+              'Project Categories',
+              Icons.category_outlined,
+              data['categories'] ?? data['category'],
+            ),
+
+            _textSection(
+              'Complete Project Requirements',
+              Icons.checklist_rounded,
+              data['requirements'] ?? data['projectRequirements'],
+            ),
+
+            _textSection(
+              'Suggested Technologies',
+              Icons.code_rounded,
+              data['technologies'] ?? data['suggestedTechnologies'],
+            ),
+
+            // ========================================================
+            // 6. ACCEPTED SCOPE
+            // ========================================================
+            if (hasAcceptedScope) ...[
+              _CompleteProjectDataTree(
+                title: 'Client Accepted Scope',
+                icon: Icons.verified_outlined,
+                data: {'Accepted Items': data['acceptedScope']},
               ),
-            if (requirements.isNotEmpty) const SizedBox(height: 16),
-            if (deliverables.isNotEmpty)
-              _PreviewSection(
-                title: 'Expected deliverables',
-                icon: Icons.task_alt_rounded,
-                child: _DetailParagraph(text: deliverables),
+              const SizedBox(height: 18),
+            ],
+
+            // ========================================================
+            // 7. COMPLETE ESTIMATE
+            // ========================================================
+            if (estimate.isNotEmpty) ...[
+              _EstimateHighlights(estimate: estimate),
+              const SizedBox(height: 18),
+
+              _CompleteProjectDataTree(
+                title: 'Complete Project Estimate',
+                icon: Icons.analytics_outlined,
+                data: estimate,
               ),
-            if (deliverables.isNotEmpty) const SizedBox(height: 16),
-            if (additionalNotes.isNotEmpty)
-              _PreviewSection(
-                title: 'Additional information',
-                icon: Icons.notes_rounded,
-                child: _DetailParagraph(text: additionalNotes),
+              const SizedBox(height: 20),
+            ],
+
+            // ========================================================
+            // 8. COMPLETE AI GENERATED PROJECT PLAN
+            // ========================================================
+            if (planDetails.isNotEmpty) ...[
+              _CompleteProjectDataTree(
+                title: 'Complete AI Project Plan',
+                icon: Icons.account_tree_outlined,
+                data: planDetails,
               ),
-            if (additionalNotes.isNotEmpty) const SizedBox(height: 16),
-            if (extra.isNotEmpty)
-              _PreviewSection(
-                title: 'More details',
-                icon: Icons.fact_check_outlined,
-                child: Column(
-                  children: extra
-                      .map(
-                        (entry) => Padding(
-                          padding: const EdgeInsets.only(bottom: 9),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 112,
-                                child: Text(
-                                  entry.key,
-                                  style: const TextStyle(
-                                    color: Color(0xFF6B7280),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  entry.value,
-                                  style: const TextStyle(
-                                    color: Color(0xFF374151),
-                                    fontSize: 13,
-                                    height: 1.45,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
+              const SizedBox(height: 20),
+            ],
+
+            // Also support older records where plan was stored as text.
+            if (planText.isNotEmpty) ...[
+              _textSection(
+                'Complete Project Plan',
+                Icons.description_outlined,
+                planText,
               ),
+            ],
+
+            // ========================================================
+            // 9. OTHER EXISTING PROJECT INFORMATION
+            // ========================================================
+            if (additionalData.isNotEmpty) ...[
+              _CompleteProjectDataTree(
+                title: 'Additional Project Information',
+                icon: Icons.info_outline_rounded,
+                data: additionalData,
+              ),
+              const SizedBox(height: 18),
+            ],
           ],
         );
       },
+    );
+  }
+}
+
+class _EstimateHighlights extends StatelessWidget {
+  const _EstimateHighlights({required this.estimate});
+
+  final Map<String, dynamic> estimate;
+
+  double? _number(dynamic value) {
+    if (value is num) return value.toDouble();
+
+    if (value is String) {
+      return double.tryParse(
+        value.replaceAll(',', '').replaceAll('₹', '').trim(),
+      );
+    }
+
+    return null;
+  }
+
+  String _format(double value) {
+    return value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+  }
+
+  String _range(dynamic minimum, dynamic maximum, String unit) {
+    final min = _number(minimum);
+    final max = _number(maximum);
+
+    if (min != null && max != null) {
+      return '${_format(min)} – ${_format(max)} $unit';
+    }
+
+    if (min != null) return 'From ${_format(min)} $unit';
+    if (max != null) return 'Up to ${_format(max)} $unit';
+
+    return '';
+  }
+
+  String _cost() {
+    final min = _number(estimate['costMinINR']);
+    final max = _number(estimate['costMaxINR']);
+
+    final currency = (estimate['currency'] ?? 'INR').toString();
+    final symbol = currency.toUpperCase() == 'INR' ? '₹' : '$currency ';
+
+    if (min != null && max != null) {
+      return '$symbol${_format(min)} – $symbol${_format(max)}';
+    }
+
+    if (min != null) return 'From $symbol${_format(min)}';
+    if (max != null) return 'Up to $symbol${_format(max)}';
+
+    return (estimate['costRange'] ?? '').toString().trim();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cost = _cost();
+
+    final timeline = _range(
+      estimate['timelineMinWeeks'],
+      estimate['timelineMaxWeeks'],
+      'weeks',
+    );
+
+    final effort = _range(
+      estimate['effortHoursMin'],
+      estimate['effortHoursMax'],
+      'hours',
+    );
+
+    final metrics = <Map<String, dynamic>>[
+      if (cost.isNotEmpty)
+        {
+          'title': 'Estimated Cost',
+          'value': cost,
+          'icon': Icons.payments_outlined,
+        },
+      if (timeline.isNotEmpty)
+        {
+          'title': 'Timeline',
+          'value': timeline,
+          'icon': Icons.calendar_month_outlined,
+        },
+      if (effort.isNotEmpty)
+        {
+          'title': 'Estimated Effort',
+          'value': effort,
+          'icon': Icons.schedule_rounded,
+        },
+    ];
+
+    if (metrics.isEmpty) return const SizedBox.shrink();
+
+    return _PreviewSection(
+      title: 'Estimate at a glance',
+      icon: Icons.analytics_outlined,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const gap = 10.0;
+
+          final columns = constraints.maxWidth >= 600
+              ? 3
+              : constraints.maxWidth >= 350
+              ? 2
+              : 1;
+
+          final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: metrics.map((metric) {
+              return Container(
+                width: width,
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      metric['icon'] as IconData,
+                      color: const Color(0xFF4F46E5),
+                      size: 20,
+                    ),
+                    const SizedBox(height: 9),
+                    Text(
+                      metric['title'] as String,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      metric['value'] as String,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// RECURSIVE PROJECT DATA VIEWER
+//
+// Displays nested maps, lists, strings, numbers, dates and booleans.
+// This also supports new fields added to the AI plan in the future.
+// ===========================================================================
+
+class _CompleteProjectDataTree extends StatelessWidget {
+  const _CompleteProjectDataTree({
+    required this.title,
+    required this.icon,
+    required this.data,
+  });
+
+  final String title;
+  final IconData icon;
+  final Map<String, dynamic> data;
+
+  String _label(String value) {
+    final spaced = value
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (match) => '${match[1]} ${match[2]}',
+        )
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .trim();
+
+    return spaced
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map((word) {
+          if (word.toUpperCase() == 'INR') return 'INR';
+
+          return word[0].toUpperCase() + word.substring(1);
+        })
+        .join(' ');
+  }
+
+  String _value(dynamic value) {
+    if (value == null) return '';
+
+    if (value is Timestamp) {
+      return value.toDate().toLocal().toString().split('.').first;
+    }
+
+    if (value is DateTime) {
+      return value.toLocal().toString().split('.').first;
+    }
+
+    if (value is bool) return value ? 'Yes' : 'No';
+
+    if (value is num) return value.toString();
+
+    return value.toString().trim();
+  }
+
+  bool _hasValue(dynamic value) {
+    if (value == null) return false;
+
+    if (value is String) return value.trim().isNotEmpty;
+
+    if (value is Map) {
+      return value.values.any(_hasValue);
+    }
+
+    if (value is Iterable && value is! String) {
+      return value.any(_hasValue);
+    }
+
+    return true;
+  }
+
+  Widget _renderNode(
+    BuildContext context,
+    String label,
+    dynamic value, {
+    int depth = 0,
+  }) {
+    if (!_hasValue(value)) {
+      return const SizedBox.shrink();
+    }
+
+    // Nested objects: modules, tasks, team roles, risks, phases, etc.
+    if (value is Map) {
+      final entries = value.entries
+          .where((entry) => _hasValue(entry.value))
+          .toList();
+
+      return Container(
+        width: double.infinity,
+        margin: EdgeInsets.only(top: depth == 0 ? 0 : 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: depth == 0 ? const Color(0xFFF8FAFC) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _label(label),
+              style: TextStyle(
+                fontSize: depth == 0 ? 14 : 13,
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF312E81),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...entries.map(
+              (entry) => _renderNode(
+                context,
+                entry.key.toString(),
+                entry.value,
+                depth: depth + 1,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Lists: requirements, tasks, technologies, phases, etc.
+    if (value is Iterable && value is! String) {
+      final items = value.toList();
+
+      if (items.isEmpty) return const SizedBox.shrink();
+
+      return Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _label(label),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF374151),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...items.asMap().entries.map((entry) {
+              final item = entry.value;
+
+              if (item is Map || (item is Iterable && item is! String)) {
+                return _renderNode(
+                  context,
+                  '${_label(label)} ${entry.key + 1}',
+                  item,
+                  depth: depth + 1,
+                );
+              }
+
+              final text = _value(item);
+
+              if (text.isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 7),
+                      child: Icon(
+                        Icons.circle,
+                        size: 7,
+                        color: Color(0xFF6366F1),
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(child: _ProjectMarkdown(data: text)),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      );
+    }
+
+    // Normal values: long descriptions, notes, numbers and booleans.
+    final text = _value(value);
+
+    if (text.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _label(label),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 5),
+          _ProjectMarkdown(data: text),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (data.isEmpty) return const SizedBox.shrink();
+
+    return _PreviewSection(
+      title: title,
+      icon: icon,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: data.entries.map((entry) {
+          return _renderNode(context, entry.key, entry.value);
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// PROJECT DESIGN GALLERY
+//
+// Responsive grid. Displays whole images without cropping.
+// Tap an image to zoom and inspect it.
+// ===========================================================================
+
+class _ProjectDesignGallery extends StatelessWidget {
+  const _ProjectDesignGallery({required this.imageUrls});
+
+  final List<String> imageUrls;
+
+  Future<void> _showFullImage(BuildContext context, String url) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final size = MediaQuery.sizeOf(dialogContext);
+
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(12),
+          child: SizedBox(
+            width: size.width * 0.94,
+            height: size.height * 0.78,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    minScale: 0.7,
+                    maxScale: 5,
+                    child: Image.network(
+                      url,
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) {
+                        return const Center(
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            size: 48,
+                            color: Colors.white,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: 5,
+                  top: 5,
+                  child: IconButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = constraints.maxWidth >= 560
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: imageUrls.asMap().entries.map((entry) {
+            final index = entry.key;
+            final url = entry.value;
+
+            return SizedBox(
+              width: itemWidth,
+              height: 200,
+              child: Material(
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => _showFullImage(context, url),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(
+                        url,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (context, child, progress) {
+                          if (progress == null) return child;
+
+                          return const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF4F46E5),
+                            ),
+                          );
+                        },
+                        errorBuilder: (_, __, ___) {
+                          return const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 34,
+                                  color: Color(0xFF6B7280),
+                                ),
+                                SizedBox(height: 7),
+                                Text(
+                                  'Image unavailable',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      Positioned(
+                        left: 9,
+                        bottom: 9,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.68),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'Design ${index + 1}  •  View',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
+// ===========================================================================
+// MARKDOWN RENDERER
+//
+// Reuses the same Markdown support already used by the Client estimate screen.
+// Preserves headings, lists, bold text, links and code blocks.
+// ===========================================================================
+
+class _ProjectMarkdown extends StatelessWidget {
+  const _ProjectMarkdown({required this.data});
+
+  final String data;
+
+  @override
+  Widget build(BuildContext context) {
+    if (data.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    const baseStyle = TextStyle(
+      color: Color(0xFF4B5563),
+      fontSize: 13,
+      height: 1.65,
+    );
+
+    return MarkdownBody(
+      data: data.trim(),
+      selectable: true,
+      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+        p: baseStyle,
+        h1: const TextStyle(
+          color: Color(0xFF111827),
+          fontSize: 20,
+          height: 1.35,
+          fontWeight: FontWeight.w800,
+        ),
+        h2: const TextStyle(
+          color: Color(0xFF111827),
+          fontSize: 17,
+          height: 1.4,
+          fontWeight: FontWeight.w800,
+        ),
+        h3: const TextStyle(
+          color: Color(0xFF111827),
+          fontSize: 15,
+          height: 1.4,
+          fontWeight: FontWeight.w800,
+        ),
+        strong: const TextStyle(
+          color: Color(0xFF111827),
+          fontWeight: FontWeight.w800,
+        ),
+        listBullet: baseStyle.copyWith(fontWeight: FontWeight.w700),
+        blockquote: baseStyle.copyWith(color: Color(0xFF6B7280)),
+        code: const TextStyle(
+          color: Color(0xFF4F46E5),
+          fontSize: 13,
+          fontFamily: 'monospace',
+          backgroundColor: Color(0xFFF1F5F9),
+        ),
+        blockquoteDecoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(left: BorderSide(color: Color(0xFF4F46E5), width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        listIndent: 22,
+        blockSpacing: 8,
+      ),
     );
   }
 }
@@ -3103,25 +4121,13 @@ class _DetailParagraph extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
-      child: Text(
-        text
-            .replaceAll(RegExp(r'^\s*#{1,6}\s*', multiLine: true), '')
-            .replaceAll('**', '')
-            .replaceAll('__', '')
-            .replaceAll('~~', '')
-            .trim(),
-        style: const TextStyle(
-          fontSize: 13,
-          height: 1.6,
-          color: Color(0xFF4B5563),
-        ),
-      ),
+      child: _ProjectMarkdown(data: text),
     );
   }
 }

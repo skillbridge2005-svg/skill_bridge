@@ -18,7 +18,6 @@ import 'project_details_screen.dart';
 import 'hire_developer_screen.dart';
 import 'client_analytics_screen.dart';
 import 'how_to_use_skillbridge_screen.dart';
-import 'hire_developer_screen.dart';
 
 
 class ClientHome extends StatefulWidget {

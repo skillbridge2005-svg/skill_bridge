@@ -22,6 +22,7 @@ import '../../services/project_service.dart';
 import '../../services/application_service.dart';
 import '../../services/team_invitation_service.dart';
 import '../../services/team_chat_service.dart';
+import '../../screens/client/hire_developer_screen.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -87,6 +88,16 @@ class _DeveloperHomeState extends State<DeveloperHome>
     Navigator.push(
       context,
       MaterialPageRoute<void>(builder: (_) => const TeamInvitationsScreen()),
+    );
+  }
+
+  void _openFindDevelopersForInvitation() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            FindDevelopersScreen(onInviteDeveloper: _inviteDeveloper),
+      ),
     );
   }
 
@@ -184,14 +195,15 @@ class _DeveloperHomeState extends State<DeveloperHome>
       return;
     }
 
-    // Teams
     if (index == 4) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const Teams()));
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(builder: (_) => const Teams()),
+      );
       return;
     }
-
     // My Profile
-    if (index == 6) {
+    if (index == 5) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const DeveloperProfile()),
@@ -2245,7 +2257,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
             title: 'Find your next teammate',
             subtitle: 'Discover developers with skills that complement yours.',
             action: 'Find teammates',
-            onAction: () => _selectNav(4),
+            onAction: _openFindDevelopersForInvitation,
           ),
           const SizedBox(height: 17),
 
@@ -2652,7 +2664,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
         Icons.groups_2_rounded,
         'Find Teammates',
         'Build a stronger team',
-        () => _selectNav(4),
+        _openFindDevelopersForInvitation,
       ),
       _QuickAction(
         Icons.auto_awesome_rounded,
