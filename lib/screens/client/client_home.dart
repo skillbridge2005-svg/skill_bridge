@@ -8,17 +8,16 @@ import '../../localization/language_provider.dart';
 
 import '../../services/payment_service.dart';
 import '../settings/settings_screen.dart';
+import '../developer/developer_messages_hub_screen.dart';
 import '../../widgets/skillbridge_avatar.dart';
 import 'create_project_screen.dart';
 import 'my_projects_screen.dart';
 import 'client_profile_screen.dart';
-import 'client_messages_screen.dart';
 import 'client_notifications_screen.dart';
 import 'project_details_screen.dart';
 import 'hire_developer_screen.dart';
 import 'client_analytics_screen.dart';
 import 'how_to_use_skillbridge_screen.dart';
-
 
 class ClientHome extends StatefulWidget {
   const ClientHome({super.key});
@@ -72,6 +71,20 @@ class _ClientHomeState extends State<ClientHome>
     setState(() {
       _selectedNav = index;
     });
+  }
+
+  void _selectBottomNav(int index) {
+    if (index == 2) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => const DeveloperMessagesHubScreen(),
+        ),
+      );
+      return;
+    }
+
+    _selectNav(index);
   }
 
   @override
@@ -511,7 +524,7 @@ class _ClientHomeState extends State<ClientHome>
           ),
           child: NavigationBar(
             selectedIndex: _selectedNav,
-            onDestinationSelected: _selectNav,
+            onDestinationSelected: _selectBottomNav,
             labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
             destinations: [
               NavigationDestination(
@@ -629,18 +642,16 @@ class _ClientDashboardSection extends StatelessWidget {
   void _openMessages(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const ClientMessagesScreen()),
+      MaterialPageRoute(builder: (_) => const DeveloperMessagesHubScreen()),
     );
   }
 
-void _openHireDeveloper(BuildContext context) {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const FindDevelopersScreen(),
-    ),
-  );
-}
+  void _openHireDeveloper(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const FindDevelopersScreen()),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2269,7 +2280,7 @@ class _ClientMessagesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const ClientMessagesScreen();
+    return const DeveloperMessagesHubScreen();
   }
 }
 

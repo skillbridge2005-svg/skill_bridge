@@ -10,7 +10,9 @@ import 'note_editor_screen.dart';
 enum _SortMode { recent, oldest, title }
 
 class DeveloperNotesScreen extends StatefulWidget {
-  const DeveloperNotesScreen({super.key});
+  final String? projectId;
+
+  const DeveloperNotesScreen({super.key, this.projectId});
 
   @override
   State<DeveloperNotesScreen> createState() => _DeveloperNotesScreenState();
@@ -45,7 +47,11 @@ class _DeveloperNotesScreenState extends State<DeveloperNotesScreen> {
     await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => NoteEditorScreen(note: note, initialCategory: category),
+        builder: (_) => NoteEditorScreen(
+          note: note,
+          initialCategory: category,
+          projectId: widget.projectId,
+        ),
       ),
     );
   }
@@ -1349,7 +1355,12 @@ class _DeveloperNotesScreenState extends State<DeveloperNotesScreen> {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final allNotes = snapshot.data ?? [];
+            final streamedNotes = snapshot.data ?? [];
+            final allNotes = widget.projectId == null
+                ? streamedNotes
+                : streamedNotes
+                      .where((note) => note.projectId == widget.projectId)
+                      .toList();
             final notes = _filterNotes(allNotes);
 
             final pinned = notes.where((n) => n.isPinned).toList();

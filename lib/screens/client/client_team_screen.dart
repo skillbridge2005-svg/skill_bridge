@@ -2,7 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../localization/app_localizations.dart';
+import '../../services/individual_chat_service.dart';
 import '../../widgets/skillbridge_avatar.dart';
+import '../developer/individual_chat_screen.dart' hide IndividualChatService;
 
 class ClientTeamScreen extends StatelessWidget {
   final String projectId;
@@ -206,6 +208,35 @@ class _FirestoreTeamMemberCard extends StatelessWidget {
 
   const _FirestoreTeamMemberCard({super.key, required this.memberId});
 
+  Future<void> _openDeveloperChat(
+    BuildContext context,
+    String developerId,
+    String developerName,
+  ) async {
+    try {
+      final chatId = await IndividualChatService().openDirectChat(
+        otherUid: developerId,
+        otherName: developerName,
+      );
+      if (!context.mounted) return;
+
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => IndividualChatScreen(
+            chatId: chatId,
+            otherUid: developerId,
+            otherName: developerName,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open chat: $error')),
+      );
+    }
+  }
+
   Color _roleColor(String role) {
     switch (role.toLowerCase()) {
       case 'frontend':
@@ -379,6 +410,17 @@ class _FirestoreTeamMemberCard extends StatelessWidget {
                     ],
                   ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Chat with $name',
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFFEAF2FF),
+                  foregroundColor: const Color(0xFF2563EB),
+                  fixedSize: const Size(44, 44),
+                ),
+                onPressed: () => _openDeveloperChat(context, memberId, name),
+                icon: const Icon(Icons.chat_bubble_outline_rounded),
               ),
             ],
           ),
