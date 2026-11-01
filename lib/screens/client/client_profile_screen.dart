@@ -14,7 +14,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../../localization/app_localizations.dart';
 import '../shared/leaderboard_screen.dart';
 import 'client_payments_screen.dart';
-import 'client_analytics_screen.dart';
+import 'client_guide_screen.dart';
 import 'how_to_use_skillbridge_screen.dart';
 
 class ClientProfileScreen extends StatelessWidget {
@@ -727,6 +727,19 @@ class ClientProfileScreen extends StatelessWidget {
                               context,
                               MaterialPageRoute<void>(
                                 builder: (_) => const LeaderboardScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _ProfileLinkCard(
+                          icon: Icons.school_rounded,
+                          title: 'Client Guide',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const ClientGuideScreen(),
                               ),
                             );
                           },
