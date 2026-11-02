@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../models/team_model.dart';
+import '../../services/team_service.dart';
 import 'developer_profile.dart';
 import 'my_applications.dart';
 import 'discover_projects.dart';
@@ -23,6 +25,7 @@ import '../../services/application_service.dart';
 import '../../services/team_invitation_service.dart';
 import '../../services/team_chat_service.dart';
 import '../../screens/client/hire_developer_screen.dart';
+import '../../models/application_model.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -57,6 +60,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
   final NotificationService _notificationService = NotificationService();
   final ProjectService _projectService = ProjectService();
   final ApplicationService _applicationService = ApplicationService();
+  final TeamService _teamService = TeamService();
   final TeamInvitationService _teamInvitationService = TeamInvitationService();
   final TeamChatService _teamChatService = TeamChatService();
 
@@ -136,6 +140,16 @@ class _DeveloperHomeState extends State<DeveloperHome>
     unawaited(_cleanupUnreadStreams());
 
     super.dispose();
+  }
+
+  Future<int> _getActiveProjectCount(Set<String> projectIds) async {
+    if (projectIds.isEmpty) return 0;
+
+    final projects = await Future.wait(
+      projectIds.map((id) => _projectService.getProject(id)),
+    );
+
+    return projects.whereType<ProjectModel>().length;
   }
 
   Future<void> _cleanupUnreadStreams() async {
@@ -1312,107 +1326,158 @@ class _DeveloperHomeState extends State<DeveloperHome>
       return const Center(child: Text('Please log in to view statistics.'));
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('applications')
-          .where('developerId', isEqualTo: uid)
-          .snapshots(),
-      builder: (context, applicationSnapshot) {
-        final applications = applicationSnapshot.data?.docs ?? [];
+    return StreamBuilder<List<TeamModel>>(
+      stream: _teamService.watchMyTeams(),
+      builder: (context, teamSnapshot) {
+        return StreamBuilder<List<ApplicationModel>>(
+          stream: _applicationService.watchMyApplications(),
+          builder: (context, applicationSnapshot) {
+            final teams = teamSnapshot.data ?? <TeamModel>[];
+            final applications =
+                applicationSnapshot.data ?? <ApplicationModel>[];
 
-        final applicationCount = applications.length;
+            final acceptedApplications = applications.where((application) {
+              return application.status.trim().toLowerCase() == 'accepted' &&
+                  application.projectId.trim().isNotEmpty;
+            });
 
-        final shortlistedCount = applications.where((doc) {
-          final status = (doc.data()['status'] ?? 'pending')
-              .toString()
-              .trim()
-              .toLowerCase();
-          return status == 'shortlisted';
-        }).length;
+            final activeTeams = teams.where((team) {
+              return team.status.trim().toLowerCase() == 'active' &&
+                  team.projectId.trim().isNotEmpty;
+            });
 
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('projects')
-              .where('developerId', isEqualTo: uid)
-              .snapshots(),
-          builder: (context, projectSnapshot) {
-            final projects = projectSnapshot.data?.docs ?? [];
+            final Set<String> projectIds = {
+              ...acceptedApplications.map(
+                (application) => application.projectId.trim(),
+              ),
+              ...activeTeams.map((team) => team.projectId.trim()),
+            };
 
-            final activeProjectCount = projects.where((doc) {
-              final status = (doc.data()['status'] ?? '')
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-              return status == 'active';
+            final applicationCount = applications.length;
+
+            final shortlistedCount = applications.where((application) {
+              return application.status.trim().toLowerCase() == 'shortlisted';
             }).length;
 
-            final cards = [
-              _StatData(
-                'Applications',
-                applicationSnapshot.hasError
-                    ? '—'
-                    : applicationSnapshot.connectionState ==
-                          ConnectionState.waiting
-                    ? '...'
-                    : '$applicationCount',
-                'All submitted applications',
-                Icons.assignment_turned_in_rounded,
-                const Color(0xFFEFF6FF),
-              ),
-              _StatData(
-                'Shortlisted',
-                applicationSnapshot.hasError
-                    ? '—'
-                    : applicationSnapshot.connectionState ==
-                          ConnectionState.waiting
-                    ? '...'
-                    : '$shortlistedCount',
-                'Applications shortlisted',
-                Icons.stars_rounded,
-                const Color(0xFFFFF7ED),
-              ),
-              _StatData(
-                'Active Projects',
-                projectSnapshot.hasError
-                    ? '—'
-                    : projectSnapshot.connectionState == ConnectionState.waiting
-                    ? '...'
-                    : '$activeProjectCount',
-                'Currently assigned projects',
-                Icons.rocket_launch_rounded,
-                const Color(0xFFF0FDFA),
-              ),
-              _StatData(
-                'Profile Views',
-                '—',
-                'Tracking not enabled',
-                Icons.visibility_rounded,
-                const Color(0xFFF5F3FF),
-              ),
-            ];
+            final hasApplicationError = applicationSnapshot.hasError;
+            final hasTeamError = teamSnapshot.hasError;
 
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = mobile
-                    ? 2
-                    : constraints.maxWidth < 1000
-                    ? 2
-                    : 4;
+            return FutureBuilder<int>(
+              future: hasTeamError || hasApplicationError
+                  ? Future<int>.value(0)
+                  : _getActiveProjectCount(projectIds),
+              builder: (context, projectCountSnapshot) {
+                final profileViewsStream = FirebaseFirestore.instance
+                    .collection('profileViews')
+                    .where('developerId', isEqualTo: uid)
+                    .snapshots();
 
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: cards.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    mainAxisExtent: mobile ? 128 : 138,
-                  ),
-                  itemBuilder: (_, index) => _AnimatedCard(
-                    delay: 100 + index * 55,
-                    child: _StatCard(data: cards[index]),
-                  ),
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: profileViewsStream,
+                  builder: (context, profileViewsSnapshot) {
+                    final profileViewsCount =
+                        profileViewsSnapshot.data?.docs.length ?? 0;
+
+                    final cards = [
+                      _StatData(
+                        'Applications',
+                        hasApplicationError
+                            ? '—'
+                            : applicationSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$applicationCount',
+                        'All submitted applications',
+                        Icons.assignment_turned_in_rounded,
+                        const Color(0xFFEFF6FF),
+                      ),
+                      _StatData(
+                        'Shortlisted',
+                        hasApplicationError
+                            ? '—'
+                            : applicationSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$shortlistedCount',
+                        'Applications shortlisted',
+                        Icons.stars_rounded,
+                        const Color(0xFFFFF7ED),
+                      ),
+                      _StatData(
+                        'Active Projects',
+                        hasTeamError || hasApplicationError
+                            ? '—'
+                            : projectCountSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : projectCountSnapshot.hasError
+                            ? '—'
+                            : '${projectCountSnapshot.data ?? 0}',
+                        'Currently assigned projects',
+                        Icons.rocket_launch_rounded,
+                        const Color(0xFFF0FDFA),
+                      ),
+                      _StatData(
+                        'Profile Views',
+                        profileViewsSnapshot.hasError
+                            ? '—'
+                            : profileViewsSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$profileViewsCount',
+                        'Total profile views',
+                        Icons.visibility_rounded,
+                        const Color(0xFFF5F3FF),
+                      ),
+                    ];
+
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        final columns = mobile
+                            ? 2
+                            : constraints.maxWidth < 1000
+                            ? 2
+                            : 4;
+
+                        return GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: cards.length,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                mainAxisExtent: mobile ? 128 : 138,
+                              ),
+                          itemBuilder: (_, index) => _AnimatedCard(
+                            delay: 100 + index * 55,
+                            child: _StatCard(
+                              data: cards[index],
+                              onTap: () {
+                                if (cards[index].title == 'Applications') {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const MyApplications(),
+                                    ),
+                                  );
+                                } else if (cards[index].title ==
+                                    'Active Projects') {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ActiveProjects(),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 );
               },
             );
@@ -3821,7 +3886,13 @@ class _AnimatedCardState extends State<_AnimatedCard>
 
 class _StatCard extends StatelessWidget {
   final _StatData data;
-  const _StatCard({required this.data});
+  final VoidCallback? onTap;
+
+  const _StatCard({
+    required this.data,
+    this.onTap,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3829,7 +3900,7 @@ class _StatCard extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
-        onTap: () {},
+        onTap: onTap, // Corrected
         borderRadius: BorderRadius.circular(20),
         child: Container(
           padding: const EdgeInsets.all(17),

@@ -52,6 +52,9 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   Set<String> _savedProjectIds = {};
   Map<String, String> _applicationStatusByProjectId = {};
 
+  // Reuse one Firestore read for each project's saved estimate details.
+  final Map<String, Future<Map<String, dynamic>>> _projectDocumentFutures = {};
+
   List<String> _developerSkills = [];
   List<String> _developerTechnologies = [];
 
@@ -720,6 +723,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                       key: ValueKey(project.id),
                       project: project,
                       index: index,
+                      budgetData: _loadProjectDocument(project.id),
                       isSaved: _savedProjectIds.contains(project.id),
                       matchPercentage: _getMatchPercentage(project),
                       onSave: () => _toggleSave(project),
@@ -745,6 +749,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
                     key: ValueKey(project.id),
                     project: project,
                     index: index,
+                    budgetData: _loadProjectDocument(project.id),
                     isSaved: _savedProjectIds.contains(project.id),
                     matchPercentage: _getMatchPercentage(project),
                     onSave: () => _toggleSave(project),
@@ -1323,6 +1328,7 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
 
                 return _RecommendationCard(
                   recommendation: recommendation,
+                  budgetData: _loadProjectDocument(recommendation.project.id),
                   isSaved: _savedProjectIds.contains(recommendation.project.id),
                   onSave: () => _toggleSave(recommendation.project),
                   onOpen: () => _openProject(recommendation.project),
@@ -1965,6 +1971,425 @@ class _DiscoverProjectsState extends State<DiscoverProjects>
   }
 
   Color get _primaryColor => const Color(0xFF4F46E5);
+
+  Future<Map<String, dynamic>> _loadProjectDocument(String projectId) {
+    return _projectDocumentFutures.putIfAbsent(projectId, () async {
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('projects')
+            .doc(projectId)
+            .get();
+
+        return snapshot.data() ?? <String, dynamic>{};
+      } catch (error, stackTrace) {
+        debugPrint(
+          'Unable to load estimate details for project $projectId: $error',
+        );
+        debugPrintStack(stackTrace: stackTrace);
+        return <String, dynamic>{};
+      }
+    });
+  }
+}
+
+
+Map<String, dynamic> _budgetMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((key, value) => MapEntry(key.toString(), value));
+  }
+  return <String, dynamic>{};
+}
+
+String _normalizedBudgetKey(String key) {
+  return key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+}
+
+dynamic _readBudgetValue(
+  Map<String, dynamic> data,
+  List<String> possibleKeys,
+) {
+  final wanted = possibleKeys.map(_normalizedBudgetKey).toSet();
+
+  for (final entry in data.entries) {
+    if (wanted.contains(_normalizedBudgetKey(entry.key))) {
+      return entry.value;
+    }
+  }
+
+  return null;
+}
+
+double? _parseBudgetAmount(dynamic value) {
+  if (value is num) return value.toDouble();
+
+  if (value is String) {
+    final cleaned = value
+        .replaceAll(',', '')
+        .replaceAll('₹', '')
+        .replaceAll('INR', '')
+        .trim();
+    return double.tryParse(cleaned);
+  }
+
+  return null;
+}
+
+Map<String, dynamic> _findClientEstimate(Map<String, dynamic> projectData) {
+  final plan = _budgetMap(_readBudgetValue(projectData, ['plan']));
+
+  final candidates = <Map<String, dynamic>>[
+    _budgetMap(_readBudgetValue(projectData, ['estimateDetails'])),
+    _budgetMap(_readBudgetValue(projectData, ['estimate_details'])),
+    _budgetMap(_readBudgetValue(projectData, ['estimate'])),
+    _budgetMap(_readBudgetValue(plan, ['estimateDetails'])),
+    _budgetMap(_readBudgetValue(plan, ['estimate_details'])),
+    _budgetMap(_readBudgetValue(plan, ['estimate'])),
+  ];
+
+  for (final candidate in candidates) {
+    final minimum = _readBudgetValue(
+      candidate,
+      ['costMinINR', 'cost_min_inr', 'Cost Min INR'],
+    );
+    final maximum = _readBudgetValue(
+      candidate,
+      ['costMaxINR', 'cost_max_inr', 'Cost Max INR'],
+    );
+
+    if (_parseBudgetAmount(minimum) != null ||
+        _parseBudgetAmount(maximum) != null) {
+      return candidate;
+    }
+  }
+
+  return <String, dynamic>{};
+}
+
+String _formatCompactINR(double amount) {
+  if (amount >= 10000000) {
+    final value = (amount / 10000000 * 10).floor() / 10;
+    final formatted = value == value.truncateToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+    return '${formatted}Cr';
+  }
+
+  if (amount >= 100000) {
+    return '${(amount / 100000).floor()}L';
+  }
+
+  if (amount >= 1000) {
+    return '${(amount / 1000).floor()}K';
+  }
+
+  return amount.toStringAsFixed(0);
+}
+
+String formatProjectBudget(
+  ProjectModel project, [
+  Map<String, dynamic> projectData = const <String, dynamic>{},
+  String fallbackLabel = 'Budget flexible',
+]) {
+  final estimate = _findClientEstimate(projectData);
+
+  // Prefer the Client Estimate Details saved with the project.
+  // Fall back to the project's existing budget fields for older records.
+  final estimateMinimum = _parseBudgetAmount(
+    _readBudgetValue(
+      estimate,
+      ['costMinINR', 'cost_min_inr', 'Cost Min INR'],
+    ),
+  );
+  final estimateMaximum = _parseBudgetAmount(
+    _readBudgetValue(
+      estimate,
+      ['costMaxINR', 'cost_max_inr', 'Cost Max INR'],
+    ),
+  );
+
+  final rootMinimum = _parseBudgetAmount(
+    _readBudgetValue(projectData, ['budgetMin', 'minimumBudget']),
+  );
+  final rootMaximum = _parseBudgetAmount(
+    _readBudgetValue(projectData, ['budgetMax', 'maximumBudget']),
+  );
+  final rootBudget = _parseBudgetAmount(
+    _readBudgetValue(projectData, ['budget', 'amount', 'projectAmount']),
+  );
+
+  final minimum = (estimateMinimum != null && estimateMinimum > 0)
+      ? estimateMinimum
+      : (rootMinimum != null && rootMinimum > 0)
+          ? rootMinimum
+          : project.effectiveBudgetMin;
+
+  final maximum = (estimateMaximum != null && estimateMaximum > 0)
+      ? estimateMaximum
+      : (rootMaximum != null && rootMaximum > 0)
+          ? rootMaximum
+          : (rootBudget != null && rootBudget > 0)
+              ? rootBudget
+              : project.effectiveBudgetMax;
+
+  if (minimum <= 0 && maximum <= 0) {
+    final textualRange = _readBudgetValue(
+      estimate,
+      ['costRange', 'budgetRange'],
+    ) ?? _readBudgetValue(projectData, ['costRange', 'budgetRange']);
+
+    if (textualRange != null && textualRange.toString().trim().isNotEmpty) {
+      return textualRange.toString().trim();
+    }
+
+    return fallbackLabel;
+  }
+
+  if (minimum > 0 && maximum > 0) {
+    if (minimum == maximum) {
+      return '₹${_formatCompactINR(minimum)}';
+    }
+
+    return '₹${_formatCompactINR(minimum)} – '
+        '₹${_formatCompactINR(maximum)}';
+  }
+
+  if (minimum > 0) {
+    return 'From ₹${_formatCompactINR(minimum)}';
+  }
+
+  return 'Up to ₹${_formatCompactINR(maximum)}';
+}
+
+
+
+// Converts the client estimate's saved week range into a concise display.
+// Estimate Details are preferred; the ProjectModel duration is the fallback.
+String _formatProjectDuration(
+  ProjectModel project,
+  Map<String, dynamic> projectData,
+) {
+  final estimate = _findClientEstimate(projectData);
+
+  num? asNumber(dynamic value) {
+    if (value is num) return value;
+    if (value is String) {
+      final match = RegExp(r'-?\d+(?:\.\d+)?').firstMatch(value);
+      if (match != null) return num.tryParse(match.group(0)!);
+    }
+    return null;
+  }
+
+  final minimum = asNumber(estimate['timelineMinWeeks']);
+  final maximum = asNumber(estimate['timelineMaxWeeks']);
+
+  String cleanNumber(num value) =>
+      value == value.roundToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(1);
+
+  if (minimum != null && maximum != null) {
+    return '${cleanNumber(minimum)}–${cleanNumber(maximum)} weeks';
+  }
+  if (minimum != null) return 'From ${cleanNumber(minimum)} weeks';
+  if (maximum != null) return 'Up to ${cleanNumber(maximum)} weeks';
+
+  final fallback = project.duration.trim();
+  if (fallback.isEmpty ||
+      fallback.toLowerCase() == 'flexible' ||
+      fallback.contains('**')) {
+    return 'To be discussed';
+  }
+  return fallback;
+}
+
+// Removes generated Markdown labels and groups the remaining client text
+// under clear, readable headings. It never invents project-specific details.
+List<Map<String, String>> _projectDescriptionSections(
+  String raw,
+  String projectTitle,
+) {
+  final sections = <String, String>{};
+  var currentSection = 'Project Summary';
+
+  String clean(String value) => value
+      .replaceAll('**', '')
+      .replaceAll('`', '')
+      .replaceAll(RegExp(r'^[-•*]\s*'), '')
+      .trim();
+
+  String sectionName(String label) {
+    switch (label.toLowerCase()) {
+      case 'project overview':
+      case 'project description':
+      case 'overview':
+      case 'description':
+        return 'Project Summary';
+      case 'project purpose':
+      case 'purpose':
+      case 'objectives':
+      case 'target users':
+        return 'Project Objectives';
+      case 'main features':
+      case 'key features':
+      case 'key requirements':
+      case 'requirements':
+        return 'Key Requirements';
+      case 'expected outcome':
+      case 'outcome':
+        return 'Expected Outcome';
+      default:
+        return 'Project Summary';
+    }
+  }
+
+  final headingPattern = RegExp(
+    r'^(project overview|project description|overview|description|'
+    r'project purpose|purpose|objectives|target users|main features|'
+    r'key features|key requirements|requirements|expected outcome|outcome)'
+    r'\s*:?\s*(.*)$',
+    caseSensitive: false,
+  );
+
+  for (final rawLine in raw.replaceAll('\r', '').split('\n')) {
+    final line = clean(rawLine);
+    if (line.isEmpty) continue;
+
+    final heading = headingPattern.firstMatch(line);
+    if (heading != null) {
+      currentSection = sectionName(heading.group(1)!);
+      final remainder = clean(heading.group(2) ?? '');
+      if (remainder.isNotEmpty &&
+          remainder.toLowerCase() != projectTitle.trim().toLowerCase()) {
+        sections.update(
+          currentSection,
+          (old) => '$old\n$remainder',
+          ifAbsent: () => remainder,
+        );
+      }
+      continue;
+    }
+
+    // Older generated records sometimes contain "Project Title: ..." lines.
+    if (RegExp(r'^(project title|title)\s*:', caseSensitive: false)
+        .hasMatch(line)) {
+      continue;
+    }
+
+    sections.update(
+      currentSection,
+      (old) => '$old\n$line',
+      ifAbsent: () => line,
+    );
+  }
+
+  return sections.entries
+      .map((entry) => {
+            'title': entry.key,
+            'content': entry.value.trim(),
+          })
+      .where((entry) => entry['content']!.isNotEmpty)
+      .toList();
+}
+
+class _ProjectCardSummary extends StatelessWidget {
+  const _ProjectCardSummary({
+    required this.project,
+    required this.projectData,
+  });
+
+  final ProjectModel project;
+  final Future<Map<String, dynamic>> projectData;
+
+  @override
+  Widget build(BuildContext context) {
+    final sections = _projectDescriptionSections(
+      project.description,
+      project.title,
+    );
+    // Some older client-generated descriptions contain only a heading such
+    // as "Project Overview: <title>" and put the actual summary under
+    // "Project Purpose". Use that real purpose text as the card summary.
+    final summarySection = sections.firstWhere(
+      (section) => section['title'] == 'Project Summary',
+      orElse: () => const <String, String>{'content': ''},
+    );
+    final objectivesSection = sections.firstWhere(
+      (section) => section['title'] == 'Project Objectives',
+      orElse: () => const <String, String>{'content': ''},
+    );
+
+    final summary = (summarySection['content']!.trim().isNotEmpty
+            ? summarySection['content']!
+            : objectivesSection['content']!)
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    final displaySummary = summary.isEmpty
+        ? 'Project scope and deliverables are available in the full details.'
+        : summary;
+
+    return FutureBuilder<Map<String, dynamic>>(
+      future: projectData,
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? const <String, dynamic>{};
+        final duration = _formatProjectDuration(project, data);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Project Summary',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              displaySummary,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF6B7280),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 9),
+            Row(
+              children: [
+                const Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: Color(0xFF6B7280),
+                ),
+                const SizedBox(width: 5),
+                const Text(
+                  'Duration:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  duration,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF111827),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 // =============================================================================
@@ -1976,6 +2401,7 @@ class _AnimatedProjectCard extends StatefulWidget {
     super.key,
     required this.project,
     required this.index,
+    required this.budgetData,
     required this.isSaved,
     required this.matchPercentage,
     required this.onSave,
@@ -1984,6 +2410,7 @@ class _AnimatedProjectCard extends StatefulWidget {
 
   final ProjectModel project;
   final int index;
+  final Future<Map<String, dynamic>> budgetData;
   final bool isSaved;
   final int matchPercentage;
   final VoidCallback onSave;
@@ -2148,15 +2575,9 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
 
               const SizedBox(height: 13),
 
-              Text(
-                project.description,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF6B7280),
-                  height: 1.55,
-                ),
+              _ProjectCardSummary(
+                project: project,
+                projectData: widget.budgetData,
               ),
 
               const SizedBox(height: 14),
@@ -2170,11 +2591,7 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
                       icon: Icons.public_rounded,
                       label: project.workMode,
                     ),
-                  if (project.duration.trim().isNotEmpty)
-                    _SmallTag(
-                      icon: Icons.schedule_rounded,
-                      label: project.duration,
-                    ),
+
                 ],
               ),
 
@@ -2214,13 +2631,23 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          _formatBudget(project),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF111827),
-                          ),
+                        FutureBuilder<Map<String, dynamic>>(
+                          future: widget.budgetData,
+                          builder: (context, snapshot) {
+                            return Text(
+                              formatProjectBudget(
+                                project,
+                                snapshot.data ?? const <String, dynamic>{},
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF111827),
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -2280,36 +2707,7 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
     );
   }
 
-  String _formatBudget(ProjectModel project) {
-    final minimum = project.effectiveBudgetMin;
-    final maximum = project.effectiveBudgetMax;
 
-    if (minimum <= 0 && maximum <= 0) {
-      return 'Budget flexible';
-    }
-
-    if (minimum > 0 && maximum > minimum) {
-      return '₹${_compactNumber(minimum)}'
-          ' - '
-          '₹${_compactNumber(maximum)}';
-    }
-
-    final value = maximum > 0 ? maximum : minimum;
-
-    return '₹${_compactNumber(value)}';
-  }
-
-  String _compactNumber(double value) {
-    if (value >= 100000) {
-      return '${(value / 100000).toStringAsFixed(value % 100000 == 0 ? 0 : 1)}L';
-    }
-
-    if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}K';
-    }
-
-    return value.toStringAsFixed(0);
-  }
 }
 
 // =============================================================================
@@ -2319,12 +2717,14 @@ class _AnimatedProjectCardState extends State<_AnimatedProjectCard>
 class _RecommendationCard extends StatelessWidget {
   const _RecommendationCard({
     required this.recommendation,
+    required this.budgetData,
     required this.isSaved,
     required this.onSave,
     required this.onOpen,
   });
 
   final ProjectRecommendation recommendation;
+  final Future<Map<String, dynamic>> budgetData;
   final bool isSaved;
   final VoidCallback onSave;
   final VoidCallback onOpen;
@@ -2400,15 +2800,9 @@ class _RecommendationCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  project.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    height: 1.45,
-                    color: Color(0xFF6B7280),
-                  ),
+                _ProjectCardSummary(
+                  project: project,
+                  projectData: budgetData,
                 ),
                 const Spacer(),
                 Row(
@@ -2432,12 +2826,23 @@ class _RecommendationCard extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    Text(
-                      _budget(project),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    FutureBuilder<Map<String, dynamic>>(
+                      future: budgetData,
+                      builder: (context, snapshot) {
+                        return Text(
+                          formatProjectBudget(
+                            project,
+                            snapshot.data ?? const <String, dynamic>{},
+                            'Flexible',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -2449,26 +2854,7 @@ class _RecommendationCard extends StatelessWidget {
     );
   }
 
-  String _budget(ProjectModel project) {
-    final min = project.effectiveBudgetMin;
-    final max = project.effectiveBudgetMax;
 
-    if (min <= 0 && max <= 0) {
-      return 'Flexible';
-    }
-
-    final value = max > 0 ? max : min;
-
-    if (value >= 100000) {
-      return '₹${(value / 100000).toStringAsFixed(1)}L';
-    }
-
-    if (value >= 1000) {
-      return '₹${(value / 1000).toStringAsFixed(0)}K';
-    }
-
-    return '₹${value.toStringAsFixed(0)}';
-  }
 }
 
 // =============================================================================
@@ -2753,16 +3139,23 @@ class _ProjectPreviewSheet extends StatelessWidget {
                     children: [
                       _PreviewMatchBanner(percentage: matchPercentage),
                       const SizedBox(height: 16),
-                      _PreviewSection(
-                        title: 'About the project',
-                        icon: Icons.description_outlined,
-                        child: _DetailParagraph(
-                          text: project.description.trim().isEmpty
-                              ? 'No description provided.'
-                              : _cleanProjectText(project.description),
+                      for (final section in _projectDescriptionSections(
+                        project.description,
+                        project.title,
+                      )) ...[
+                        _PreviewSection(
+                          title: section['title']!,
+                          icon: section['title'] == 'Project Summary'
+                              ? Icons.description_outlined
+                              : section['title'] == 'Project Objectives'
+                                  ? Icons.flag_outlined
+                                  : section['title'] == 'Key Requirements'
+                                      ? Icons.checklist_rounded
+                                      : Icons.emoji_events_outlined,
+                          child: _DetailParagraph(text: section['content']!),
                         ),
-                      ),
-                      const SizedBox(height: 18),
+                        const SizedBox(height: 18),
+                      ],
                       if (detailPills.isNotEmpty) ...[
                         _PreviewSection(
                           title: 'Project details',
