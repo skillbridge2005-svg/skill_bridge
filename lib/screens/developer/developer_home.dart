@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../models/team_model.dart';
+import '../../services/team_service.dart';
 import 'developer_profile.dart';
 import 'my_applications.dart';
 import 'discover_projects.dart';
@@ -23,6 +25,7 @@ import '../../services/application_service.dart';
 import '../../services/team_invitation_service.dart';
 import '../../services/team_chat_service.dart';
 import '../../screens/client/hire_developer_screen.dart';
+import '../../models/application_model.dart';
 
 /// SkillBridge Developer Dashboard
 ///
@@ -56,7 +59,9 @@ class _DeveloperHomeState extends State<DeveloperHome>
   bool _messagesOpen = false;
   final NotificationService _notificationService = NotificationService();
   final ProjectService _projectService = ProjectService();
+  final Map<String, Future<Map<String, dynamic>>> _projectDocumentFutures = {};
   final ApplicationService _applicationService = ApplicationService();
+  final TeamService _teamService = TeamService();
   final TeamInvitationService _teamInvitationService = TeamInvitationService();
   final TeamChatService _teamChatService = TeamChatService();
 
@@ -136,6 +141,16 @@ class _DeveloperHomeState extends State<DeveloperHome>
     unawaited(_cleanupUnreadStreams());
 
     super.dispose();
+  }
+
+  Future<int> _getActiveProjectCount(Set<String> projectIds) async {
+    if (projectIds.isEmpty) return 0;
+
+    final projects = await Future.wait(
+      projectIds.map((id) => _projectService.getProject(id)),
+    );
+
+    return projects.whereType<ProjectModel>().length;
   }
 
   Future<void> _cleanupUnreadStreams() async {
@@ -975,7 +990,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 if (value == 'logout') {
                   _logout();
                 } else if (value == 'profile') {
-                  _selectNav(6);
+                  _selectNav(5);
                 } else if (value == 'settings') {
                   Navigator.push(
                     context,
@@ -1292,7 +1307,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
             const SizedBox(width: 14),
             if (!mobile)
               OutlinedButton(
-                onPressed: () => _selectNav(6),
+                onPressed: () => _selectNav(5),
                 child: const Text('Complete Profile'),
               ),
             IconButton(
@@ -1313,107 +1328,158 @@ class _DeveloperHomeState extends State<DeveloperHome>
       return const Center(child: Text('Please log in to view statistics.'));
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('applications')
-          .where('developerId', isEqualTo: uid)
-          .snapshots(),
-      builder: (context, applicationSnapshot) {
-        final applications = applicationSnapshot.data?.docs ?? [];
+    return StreamBuilder<List<TeamModel>>(
+      stream: _teamService.watchMyTeams(),
+      builder: (context, teamSnapshot) {
+        return StreamBuilder<List<ApplicationModel>>(
+          stream: _applicationService.watchMyApplications(),
+          builder: (context, applicationSnapshot) {
+            final teams = teamSnapshot.data ?? <TeamModel>[];
+            final applications =
+                applicationSnapshot.data ?? <ApplicationModel>[];
 
-        final applicationCount = applications.length;
+            final acceptedApplications = applications.where((application) {
+              return application.status.trim().toLowerCase() == 'accepted' &&
+                  application.projectId.trim().isNotEmpty;
+            });
 
-        final shortlistedCount = applications.where((doc) {
-          final status = (doc.data()['status'] ?? 'pending')
-              .toString()
-              .trim()
-              .toLowerCase();
-          return status == 'shortlisted';
-        }).length;
+            final activeTeams = teams.where((team) {
+              return team.status.trim().toLowerCase() == 'active' &&
+                  team.projectId.trim().isNotEmpty;
+            });
 
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('projects')
-              .where('developerId', isEqualTo: uid)
-              .snapshots(),
-          builder: (context, projectSnapshot) {
-            final projects = projectSnapshot.data?.docs ?? [];
+            final Set<String> projectIds = {
+              ...acceptedApplications.map(
+                (application) => application.projectId.trim(),
+              ),
+              ...activeTeams.map((team) => team.projectId.trim()),
+            };
 
-            final activeProjectCount = projects.where((doc) {
-              final status = (doc.data()['status'] ?? '')
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-              return status == 'active';
+            final applicationCount = applications.length;
+
+            final shortlistedCount = applications.where((application) {
+              return application.status.trim().toLowerCase() == 'shortlisted';
             }).length;
 
-            final cards = [
-              _StatData(
-                'Applications',
-                applicationSnapshot.hasError
-                    ? '—'
-                    : applicationSnapshot.connectionState ==
-                          ConnectionState.waiting
-                    ? '...'
-                    : '$applicationCount',
-                'All submitted applications',
-                Icons.assignment_turned_in_rounded,
-                const Color(0xFFEFF6FF),
-              ),
-              _StatData(
-                'Shortlisted',
-                applicationSnapshot.hasError
-                    ? '—'
-                    : applicationSnapshot.connectionState ==
-                          ConnectionState.waiting
-                    ? '...'
-                    : '$shortlistedCount',
-                'Applications shortlisted',
-                Icons.stars_rounded,
-                const Color(0xFFFFF7ED),
-              ),
-              _StatData(
-                'Active Projects',
-                projectSnapshot.hasError
-                    ? '—'
-                    : projectSnapshot.connectionState == ConnectionState.waiting
-                    ? '...'
-                    : '$activeProjectCount',
-                'Currently assigned projects',
-                Icons.rocket_launch_rounded,
-                const Color(0xFFF0FDFA),
-              ),
-              _StatData(
-                'Profile Views',
-                '—',
-                'Tracking not enabled',
-                Icons.visibility_rounded,
-                const Color(0xFFF5F3FF),
-              ),
-            ];
+            final hasApplicationError = applicationSnapshot.hasError;
+            final hasTeamError = teamSnapshot.hasError;
 
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = mobile
-                    ? 2
-                    : constraints.maxWidth < 1000
-                    ? 2
-                    : 4;
+            return FutureBuilder<int>(
+              future: hasTeamError || hasApplicationError
+                  ? Future<int>.value(0)
+                  : _getActiveProjectCount(projectIds),
+              builder: (context, projectCountSnapshot) {
+                final profileViewsStream = FirebaseFirestore.instance
+                    .collection('profileViews')
+                    .where('developerId', isEqualTo: uid)
+                    .snapshots();
 
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: cards.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    mainAxisExtent: mobile ? 128 : 138,
-                  ),
-                  itemBuilder: (_, index) => _AnimatedCard(
-                    delay: 100 + index * 55,
-                    child: _StatCard(data: cards[index]),
-                  ),
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: profileViewsStream,
+                  builder: (context, profileViewsSnapshot) {
+                    final profileViewsCount =
+                        profileViewsSnapshot.data?.docs.length ?? 0;
+
+                    final cards = [
+                      _StatData(
+                        'Applications',
+                        hasApplicationError
+                            ? '—'
+                            : applicationSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$applicationCount',
+                        'All submitted applications',
+                        Icons.assignment_turned_in_rounded,
+                        const Color(0xFFEFF6FF),
+                      ),
+                      _StatData(
+                        'Shortlisted',
+                        hasApplicationError
+                            ? '—'
+                            : applicationSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$shortlistedCount',
+                        'Applications shortlisted',
+                        Icons.stars_rounded,
+                        const Color(0xFFFFF7ED),
+                      ),
+                      _StatData(
+                        'Active Projects',
+                        hasTeamError || hasApplicationError
+                            ? '—'
+                            : projectCountSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : projectCountSnapshot.hasError
+                            ? '—'
+                            : '${projectCountSnapshot.data ?? 0}',
+                        'Currently assigned projects',
+                        Icons.rocket_launch_rounded,
+                        const Color(0xFFF0FDFA),
+                      ),
+                      _StatData(
+                        'Profile Views',
+                        profileViewsSnapshot.hasError
+                            ? '—'
+                            : profileViewsSnapshot.connectionState ==
+                                  ConnectionState.waiting
+                            ? '...'
+                            : '$profileViewsCount',
+                        'Total profile views',
+                        Icons.visibility_rounded,
+                        const Color(0xFFF5F3FF),
+                      ),
+                    ];
+
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        final columns = mobile
+                            ? 2
+                            : constraints.maxWidth < 1000
+                            ? 2
+                            : 4;
+
+                        return GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: cards.length,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                mainAxisExtent: mobile ? 128 : 138,
+                              ),
+                          itemBuilder: (_, index) => _AnimatedCard(
+                            delay: 100 + index * 55,
+                            child: _StatCard(
+                              data: cards[index],
+                              onTap: () {
+                                if (cards[index].title == 'Applications') {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const MyApplications(),
+                                    ),
+                                  );
+                                } else if (cards[index].title ==
+                                    'Active Projects') {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ActiveProjects(),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 );
               },
             );
@@ -1440,10 +1506,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
         SizedBox(
           // Keep enough vertical room for the project card on narrow screens.
           height: mobile
-              ? 330
+              ? 380
               : tablet
-              ? 330
-              : 310,
+              ? 370
+              : 360,
           child: uid == null
               ? const Center(child: Text('Please log in to view projects.'))
               : StreamBuilder<List<ProjectModel>>(
@@ -1595,6 +1661,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                           }.toList();
 
                           return _ProjectData(
+                            sourceProject: project,
                             id: project.id,
                             clientId: project.clientId,
                             duration: project.duration.isNotEmpty
@@ -1631,8 +1698,9 @@ class _DeveloperHomeState extends State<DeveloperHome>
                               delay: 180 + index * 80,
                               child: _ProjectCard(
                                 project: projects[index],
-                                onApply: () =>
-                                    _showApplyDialog(projects[index]),
+                                budgetData: _loadDashboardProjectDocument(
+                                  projects[index].id,
+                                ),
                                 onView: () =>
                                     _showProjectDialog(projects[index]),
                               ),
@@ -1646,6 +1714,24 @@ class _DeveloperHomeState extends State<DeveloperHome>
         ),
       ],
     );
+  }
+
+  Future<Map<String, dynamic>> _loadDashboardProjectDocument(
+    String projectId,
+  ) {
+    return _projectDocumentFutures.putIfAbsent(projectId, () async {
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('projects')
+            .doc(projectId)
+            .get();
+        return snapshot.data() ?? <String, dynamic>{};
+      } catch (error, stackTrace) {
+        debugPrint('Unable to load project details for $projectId: $error');
+        debugPrintStack(stackTrace: stackTrace);
+        return <String, dynamic>{};
+      }
+    });
   }
 
   Widget _buildApplicationPipeline() {
@@ -2804,7 +2890,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                   ),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    _selectNav(6);
+                    _selectNav(5);
                   },
                 ),
 
@@ -3015,19 +3101,28 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
-  void _showProjectDialog(_ProjectData project) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
+
+void _showProjectDialog(_ProjectData project) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 24,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 650),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(dialogContext).height * 0.80,
           child: Padding(
-            padding: const EdgeInsets.all(26),
+            padding: const EdgeInsets.all(20),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Project header
                 Row(
                   children: [
                     _ProjectIcon(icon: project.icon),
@@ -3038,76 +3133,135 @@ class _DeveloperHomeState extends State<DeveloperHome>
                         children: [
                           Text(
                             project.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 21,
+                              fontSize: 19,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             project.client,
-                            style: const TextStyle(color: _AppColors.muted),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _AppColors.muted,
+                            ),
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(width: 5),
                     _MatchBadge(score: project.match),
                   ],
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  project.description,
-                  style: const TextStyle(color: _AppColors.muted, height: 1.5),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Why you match',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: project.skills
-                      .map((skill) => _SkillChip(skill, checked: true))
-                      .toList(),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.payments_outlined,
-                      size: 18,
-                      color: _AppColors.muted,
+
+                const SizedBox(height: 16),
+                const Divider(),
+
+                // Scrollable project information
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          project.description,
+                          style: const TextStyle(
+                            color: _AppColors.muted,
+                            height: 1.5,
+                          ),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        const Text(
+                          'Why you match',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        Wrap(
+                          spacing: 7,
+                          runSpacing: 7,
+                          children: project.skills
+                              .map(
+                                (skill) => _SkillChip(
+                                  skill,
+                                  checked: true,
+                                ),
+                              )
+                              .toList(),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        Wrap(
+                          spacing: 18,
+                          runSpacing: 10,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.payments_outlined,
+                                  size: 18,
+                                  color: _AppColors.muted,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(project.budget),
+                              ],
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.public_rounded,
+                                  size: 18,
+                                  color: _AppColors.muted,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(project.mode),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    Text(project.budget),
-                    const SizedBox(width: 18),
-                    const Icon(
-                      Icons.public_rounded,
-                      size: 18,
-                      color: _AppColors.muted,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(project.mode),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 22),
+
+                const SizedBox(height: 12),
+                const Divider(),
+
+                // Fixed action buttons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                      },
                       child: const Text('Close'),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _showApplyDialog(project);
-                      },
-                      icon: const Icon(Icons.send_rounded, size: 17),
-                      label: const Text('Apply now'),
+                    Flexible(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.pop(dialogContext);
+                          _showApplyDialog(project);
+                        },
+                        icon: const Icon(
+                          Icons.send_rounded,
+                          size: 17,
+                        ),
+                        label: const Text('Apply now'),
+                      ),
                     ),
                   ],
                 ),
@@ -3116,8 +3270,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   Future<void> _showApplyDialog(_ProjectData project) async {
     final formKey = GlobalKey<FormState>();
@@ -3438,6 +3594,7 @@ class _StatData {
 }
 
 class _ProjectData {
+  final ProjectModel sourceProject;
   final String id;
   final String clientId;
   final String duration;
@@ -3451,6 +3608,7 @@ class _ProjectData {
   final IconData icon;
 
   const _ProjectData({
+    required this.sourceProject,
     required this.id,
     required this.clientId,
     required this.duration,
@@ -3822,7 +3980,13 @@ class _AnimatedCardState extends State<_AnimatedCard>
 
 class _StatCard extends StatelessWidget {
   final _StatData data;
-  const _StatCard({required this.data});
+  final VoidCallback? onTap;
+
+  const _StatCard({
+    required this.data,
+    this.onTap,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3830,7 +3994,7 @@ class _StatCard extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
-        onTap: () {},
+        onTap: onTap, // Corrected
         borderRadius: BorderRadius.circular(20),
         child: Container(
           padding: const EdgeInsets.all(17),
@@ -3976,11 +4140,12 @@ class _SectionHeading extends StatelessWidget {
 
 class _ProjectCard extends StatefulWidget {
   final _ProjectData project;
-  final VoidCallback onApply;
+  final Future<Map<String, dynamic>> budgetData;
   final VoidCallback onView;
+
   const _ProjectCard({
     required this.project,
-    required this.onApply,
+    required this.budgetData,
     required this.onView,
   });
 
@@ -3992,9 +4157,51 @@ class _ProjectCardState extends State<_ProjectCard> {
   bool _hovered = false;
   bool _saved = false;
 
+  String _summary(String description, String title) {
+    var value = description
+        .replaceAll(RegExp(r'```[\s\S]*?```'), ' ')
+        .replaceAll(RegExp(r'\*{1,2}'), '')
+        .replaceAll(RegExp(r'#{1,6}\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    // Prefer a meaningful summary/purpose section when the description is
+    // structured; otherwise use the cleaned description itself.
+    final match = RegExp(
+      r'(?:project summary|project purpose|project overview)\s*:?\s*(.*?)(?=\s*(?:project objectives|key features|requirements|technologies|suggested technologies)\s*:?|$)',
+      caseSensitive: false,
+    ).firstMatch(value);
+    if (match != null && (match.group(1) ?? '').trim().isNotEmpty) {
+      value = match.group(1)!.trim();
+    } else {
+      value = value
+          .replaceFirst(RegExp('^${RegExp.escape(title)}\\s*', caseSensitive: false), '')
+          .trim();
+    }
+
+    return value.isEmpty
+        ? 'Project scope and deliverables are available in the full details.'
+        : value;
+  }
+
+  String _duration(Map<String, dynamic> data) {
+    final candidates = [
+      widget.project.sourceProject.duration,
+      data['duration'],
+      data['projectDuration'],
+      data['estimatedDuration'],
+    ];
+    for (final candidate in candidates) {
+      final value = candidate?.toString().trim() ?? '';
+      if (value.isNotEmpty) return value;
+    }
+    return 'To be discussed';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final skills = widget.project.skills
+    final project = widget.project;
+    final skills = project.skills
         .map((skill) => skill.trim())
         .where((skill) => skill.isNotEmpty)
         .toList();
@@ -4025,14 +4232,14 @@ class _ProjectCardState extends State<_ProjectCard> {
           children: [
             Row(
               children: [
-                _ProjectIcon(icon: widget.project.icon),
+                _ProjectIcon(icon: project.icon),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.project.client,
+                        project.client,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -4043,12 +4250,13 @@ class _ProjectCardState extends State<_ProjectCard> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        widget.project.title,
-                        maxLines: 1,
+                        project.title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 14.5,
+                          color: Color(0xFF111827),
                         ),
                       ),
                     ],
@@ -4056,11 +4264,9 @@ class _ProjectCardState extends State<_ProjectCard> {
                 ),
                 IconButton(
                   onPressed: () => setState(() => _saved = !_saved),
-                  tooltip: 'Save project',
+                  tooltip: _saved ? 'Remove bookmark' : 'Save project',
                   icon: Icon(
-                    _saved
-                        ? Icons.bookmark_rounded
-                        : Icons.bookmark_border_rounded,
+                    _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
                     size: 19,
                     color: _saved ? _AppColors.primary : _AppColors.muted,
                   ),
@@ -4068,86 +4274,115 @@ class _ProjectCardState extends State<_ProjectCard> {
               ],
             ),
             const SizedBox(height: 13),
+            const Text(
+              'Project Summary',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(height: 4),
             Text(
-              widget.project.description,
+              _summary(project.description, project.title),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              softWrap: true,
               style: const TextStyle(
-                color: _AppColors.muted,
+                color: Color(0xFF6B7280),
                 fontSize: 11.5,
                 height: 1.45,
               ),
             ),
+            const SizedBox(height: 9),
+            FutureBuilder<Map<String, dynamic>>(
+              future: widget.budgetData,
+              builder: (context, snapshot) {
+                final data = snapshot.data ?? const <String, dynamic>{};
+                return Row(
+                  children: [
+                    const Icon(Icons.schedule_rounded, size: 14, color: Color(0xFF6B7280)),
+                    const SizedBox(width: 5),
+                    const Text(
+                      'Duration:',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        _duration(data),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF111827), fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
             const SizedBox(height: 12),
-            // Keep skill chips on one horizontally scrollable row. A Wrap can
-            // create several rows for long project skill lists and push the
-            // View/Apply buttons outside the fixed-height recommendation card.
+            if (project.mode.trim().isNotEmpty && project.mode != 'Not specified')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 9),
+                child: _SkillChip(project.mode),
+              ),
             SizedBox(
-              height: 34,
+              height: 30,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    ...skills
-                        .take(3)
-                        .map(
-                          (skill) => Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: _SkillChip(skill),
-                          ),
-                        ),
-                    if (skills.length > 3)
-                      _SkillChip('+${skills.length - 3} more'),
+                    ...skills.take(3).map((skill) => Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: _SkillChip(skill),
+                    )),
+                    if (skills.length > 3) _SkillChip('+${skills.length - 3} more'),
                   ],
                 ),
               ),
             ),
             const Spacer(),
-            Row(
-              children: [
-                _MatchBadge(score: widget.project.match),
-                const Spacer(),
-                Text(
-                  widget.project.budget,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ],
+            FutureBuilder<Map<String, dynamic>>(
+              future: widget.budgetData,
+              builder: (context, snapshot) {
+                final budget = formatProjectBudget(
+                  project.sourceProject,
+                  snapshot.data ?? const <String, dynamic>{},
+                  'Budget not specified',
+                );
+                return Row(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Budget', style: TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+                        const SizedBox(height: 2),
+                        Text(
+                          budget,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5, color: Color(0xFF111827)),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    _MatchBadge(score: project.match),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 11),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: widget.onView,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('View'),
-                  ),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: widget.onView,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  backgroundColor: const Color(0xFF4F46E5),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: widget.onApply,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      backgroundColor: _AppColors.ink,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Apply'),
-                  ),
-                ),
-              ],
+                child: const Text('View Project'),
+              ),
             ),
           ],
         ),

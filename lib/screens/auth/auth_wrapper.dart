@@ -56,10 +56,29 @@ class _SupabaseRoleGate extends StatefulWidget {
 class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
   late Future<void> _roleSetup;
 
+  bool _roleWaitExpired = false;
+  Timer? _roleWaitTimer;
+
   @override
   void initState() {
     super.initState();
+
     _roleSetup = _configureSupabaseRole();
+
+    // Wait for Firestore role to become available.
+    _roleWaitTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) {
+        setState(() {
+          _roleWaitExpired = true;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _roleWaitTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _configureSupabaseRole() async {
@@ -86,9 +105,7 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
 
         if (snapshot.hasError) {
           return _ErrorScreen(
-            message:
-                'Supabase authentication setup failed.\n'
-                '${snapshot.error}',
+            message: 'Supabase authentication setup failed.\n${snapshot.error}',
           );
         }
 
@@ -108,26 +125,19 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
               );
             }
 
-            if (!userSnapshot.hasData) {
+            if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
               return const _LoadingScreen();
             }
 
-            final document = userSnapshot.data!;
-
-            if (!document.exists) {
-              return const _LoadingScreen();
-            }
-
-            final data = document.data();
+            final data = userSnapshot.data!.data();
 
             if (data == null) {
-              return const _ErrorScreen(message: 'User profile is empty.');
+              return const _LoadingScreen();
             }
 
             final role = data['role']?.toString().trim().toLowerCase();
 
             debugPrint('AUTH DEBUG: UID = ${widget.user.uid}');
-            debugPrint('AUTH DEBUG: Firestore profile = $data');
             debugPrint('AUTH DEBUG: Role = "$role"');
 
             if (role == 'client') {
@@ -138,7 +148,12 @@ class _SupabaseRoleGateState extends State<_SupabaseRoleGate> {
               return const DeveloperHome();
             }
 
-            debugPrint('AUTH DEBUG: Invalid or missing role: "$role"');
+            // Give Firestore time to provide the role.
+            if (role == null || role.isEmpty || role == 'null') {
+              if (!_roleWaitExpired) {
+                return const _LoadingScreen();
+              }
+            }
 
             return _ErrorScreen(message: 'Invalid user role: "$role"');
           },
