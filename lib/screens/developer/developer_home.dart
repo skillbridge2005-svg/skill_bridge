@@ -59,6 +59,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
   bool _messagesOpen = false;
   final NotificationService _notificationService = NotificationService();
   final ProjectService _projectService = ProjectService();
+  final Map<String, Future<Map<String, dynamic>>> _projectDocumentFutures = {};
   final ApplicationService _applicationService = ApplicationService();
   final TeamService _teamService = TeamService();
   final TeamInvitationService _teamInvitationService = TeamInvitationService();
@@ -1504,10 +1505,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
         SizedBox(
           // Keep enough vertical room for the project card on narrow screens.
           height: mobile
-              ? 330
+              ? 380
               : tablet
-              ? 330
-              : 310,
+              ? 370
+              : 360,
           child: uid == null
               ? const Center(child: Text('Please log in to view projects.'))
               : StreamBuilder<List<ProjectModel>>(
@@ -1659,6 +1660,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                           }.toList();
 
                           return _ProjectData(
+                            sourceProject: project,
                             id: project.id,
                             clientId: project.clientId,
                             duration: project.duration.isNotEmpty
@@ -1695,8 +1697,9 @@ class _DeveloperHomeState extends State<DeveloperHome>
                               delay: 180 + index * 80,
                               child: _ProjectCard(
                                 project: projects[index],
-                                onApply: () =>
-                                    _showApplyDialog(projects[index]),
+                                budgetData: _loadDashboardProjectDocument(
+                                  projects[index].id,
+                                ),
                                 onView: () =>
                                     _showProjectDialog(projects[index]),
                               ),
@@ -1710,6 +1713,24 @@ class _DeveloperHomeState extends State<DeveloperHome>
         ),
       ],
     );
+  }
+
+  Future<Map<String, dynamic>> _loadDashboardProjectDocument(
+    String projectId,
+  ) {
+    return _projectDocumentFutures.putIfAbsent(projectId, () async {
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('projects')
+            .doc(projectId)
+            .get();
+        return snapshot.data() ?? <String, dynamic>{};
+      } catch (error, stackTrace) {
+        debugPrint('Unable to load project details for $projectId: $error');
+        debugPrintStack(stackTrace: stackTrace);
+        return <String, dynamic>{};
+      }
+    });
   }
 
   Widget _buildApplicationPipeline() {
@@ -3572,6 +3593,7 @@ class _StatData {
 }
 
 class _ProjectData {
+  final ProjectModel sourceProject;
   final String id;
   final String clientId;
   final String duration;
@@ -3585,6 +3607,7 @@ class _ProjectData {
   final IconData icon;
 
   const _ProjectData({
+    required this.sourceProject,
     required this.id,
     required this.clientId,
     required this.duration,
@@ -4116,11 +4139,12 @@ class _SectionHeading extends StatelessWidget {
 
 class _ProjectCard extends StatefulWidget {
   final _ProjectData project;
-  final VoidCallback onApply;
+  final Future<Map<String, dynamic>> budgetData;
   final VoidCallback onView;
+
   const _ProjectCard({
     required this.project,
-    required this.onApply,
+    required this.budgetData,
     required this.onView,
   });
 
@@ -4132,9 +4156,51 @@ class _ProjectCardState extends State<_ProjectCard> {
   bool _hovered = false;
   bool _saved = false;
 
+  String _summary(String description, String title) {
+    var value = description
+        .replaceAll(RegExp(r'```[\s\S]*?```'), ' ')
+        .replaceAll(RegExp(r'\*{1,2}'), '')
+        .replaceAll(RegExp(r'#{1,6}\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    // Prefer a meaningful summary/purpose section when the description is
+    // structured; otherwise use the cleaned description itself.
+    final match = RegExp(
+      r'(?:project summary|project purpose|project overview)\s*:?\s*(.*?)(?=\s*(?:project objectives|key features|requirements|technologies|suggested technologies)\s*:?|$)',
+      caseSensitive: false,
+    ).firstMatch(value);
+    if (match != null && (match.group(1) ?? '').trim().isNotEmpty) {
+      value = match.group(1)!.trim();
+    } else {
+      value = value
+          .replaceFirst(RegExp('^${RegExp.escape(title)}\\s*', caseSensitive: false), '')
+          .trim();
+    }
+
+    return value.isEmpty
+        ? 'Project scope and deliverables are available in the full details.'
+        : value;
+  }
+
+  String _duration(Map<String, dynamic> data) {
+    final candidates = [
+      widget.project.sourceProject.duration,
+      data['duration'],
+      data['projectDuration'],
+      data['estimatedDuration'],
+    ];
+    for (final candidate in candidates) {
+      final value = candidate?.toString().trim() ?? '';
+      if (value.isNotEmpty) return value;
+    }
+    return 'To be discussed';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final skills = widget.project.skills
+    final project = widget.project;
+    final skills = project.skills
         .map((skill) => skill.trim())
         .where((skill) => skill.isNotEmpty)
         .toList();
@@ -4165,14 +4231,14 @@ class _ProjectCardState extends State<_ProjectCard> {
           children: [
             Row(
               children: [
-                _ProjectIcon(icon: widget.project.icon),
+                _ProjectIcon(icon: project.icon),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.project.client,
+                        project.client,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -4183,12 +4249,13 @@ class _ProjectCardState extends State<_ProjectCard> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        widget.project.title,
-                        maxLines: 1,
+                        project.title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 14.5,
+                          color: Color(0xFF111827),
                         ),
                       ),
                     ],
@@ -4196,11 +4263,9 @@ class _ProjectCardState extends State<_ProjectCard> {
                 ),
                 IconButton(
                   onPressed: () => setState(() => _saved = !_saved),
-                  tooltip: 'Save project',
+                  tooltip: _saved ? 'Remove bookmark' : 'Save project',
                   icon: Icon(
-                    _saved
-                        ? Icons.bookmark_rounded
-                        : Icons.bookmark_border_rounded,
+                    _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
                     size: 19,
                     color: _saved ? _AppColors.primary : _AppColors.muted,
                   ),
@@ -4208,86 +4273,115 @@ class _ProjectCardState extends State<_ProjectCard> {
               ],
             ),
             const SizedBox(height: 13),
+            const Text(
+              'Project Summary',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(height: 4),
             Text(
-              widget.project.description,
+              _summary(project.description, project.title),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              softWrap: true,
               style: const TextStyle(
-                color: _AppColors.muted,
+                color: Color(0xFF6B7280),
                 fontSize: 11.5,
                 height: 1.45,
               ),
             ),
+            const SizedBox(height: 9),
+            FutureBuilder<Map<String, dynamic>>(
+              future: widget.budgetData,
+              builder: (context, snapshot) {
+                final data = snapshot.data ?? const <String, dynamic>{};
+                return Row(
+                  children: [
+                    const Icon(Icons.schedule_rounded, size: 14, color: Color(0xFF6B7280)),
+                    const SizedBox(width: 5),
+                    const Text(
+                      'Duration:',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        _duration(data),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF111827), fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
             const SizedBox(height: 12),
-            // Keep skill chips on one horizontally scrollable row. A Wrap can
-            // create several rows for long project skill lists and push the
-            // View/Apply buttons outside the fixed-height recommendation card.
+            if (project.mode.trim().isNotEmpty && project.mode != 'Not specified')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 9),
+                child: _SkillChip(project.mode),
+              ),
             SizedBox(
-              height: 34,
+              height: 30,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    ...skills
-                        .take(3)
-                        .map(
-                          (skill) => Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: _SkillChip(skill),
-                          ),
-                        ),
-                    if (skills.length > 3)
-                      _SkillChip('+${skills.length - 3} more'),
+                    ...skills.take(3).map((skill) => Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: _SkillChip(skill),
+                    )),
+                    if (skills.length > 3) _SkillChip('+${skills.length - 3} more'),
                   ],
                 ),
               ),
             ),
             const Spacer(),
-            Row(
-              children: [
-                _MatchBadge(score: widget.project.match),
-                const Spacer(),
-                Text(
-                  widget.project.budget,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ],
+            FutureBuilder<Map<String, dynamic>>(
+              future: widget.budgetData,
+              builder: (context, snapshot) {
+                final budget = formatProjectBudget(
+                  project.sourceProject,
+                  snapshot.data ?? const <String, dynamic>{},
+                  'Budget not specified',
+                );
+                return Row(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Budget', style: TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+                        const SizedBox(height: 2),
+                        Text(
+                          budget,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5, color: Color(0xFF111827)),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    _MatchBadge(score: project.match),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 11),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: widget.onView,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('View'),
-                  ),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: widget.onView,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  backgroundColor: const Color(0xFF4F46E5),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: widget.onApply,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      backgroundColor: _AppColors.ink,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Apply'),
-                  ),
-                ),
-              ],
+                child: const Text('View Project'),
+              ),
             ),
           ],
         ),
