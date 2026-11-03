@@ -11,6 +11,8 @@ import '../client/project_meeting_screen.dart';
 import 'developer_repositories_screen.dart';
 import 'note_editor_screen.dart';
 import '../client/client_team_screen.dart';
+import 'project_workspace_screen.dart';
+import 'developer_my_tasks_screen.dart';
 
 class DeveloperProjectDetailsScreen extends StatelessWidget {
   final String projectId;
@@ -212,6 +214,70 @@ class DeveloperProjectDetailsScreen extends StatelessWidget {
                               MaterialPageRoute(
                                 builder: (_) =>
                                     ClientTeamScreen(projectId: projectId),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // 2. Project Workspace
+                  _section(
+                    title: 'Project Workspace',
+                    subtitle:
+                        'Assign tasks and collaborate with your project team.',
+                    icon: Icons.dashboard_customize_rounded,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Manage project tasks, assign work to team members, '
+                          'and track development progress in one place.',
+                          style: TextStyle(color: muted, height: 1.6),
+                        ),
+                        const SizedBox(height: 16),
+                        _actionButton(
+                          icon: Icons.workspaces_rounded,
+                          label: 'Open Project Workspace',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ProjectWorkspaceScreen(
+                                  projectId: projectId,
+                                  projectTitle: title,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // My Tasks
+                  _section(
+                    title: 'My Tasks',
+                    subtitle: 'View and manage your assigned project tasks.',
+                    icon: Icons.assignment_rounded,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Check your assigned tasks, update task progress, '
+                          'and track your development work.',
+                          style: TextStyle(color: muted, height: 1.6),
+                        ),
+                        const SizedBox(height: 16),
+                        _actionButton(
+                          icon: Icons.task_alt_rounded,
+                          label: 'Open My Tasks',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DeveloperMyTasksScreen(),
                               ),
                             );
                           },
