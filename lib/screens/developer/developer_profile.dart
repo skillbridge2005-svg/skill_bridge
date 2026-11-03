@@ -596,11 +596,17 @@ class _ProfileBody extends StatelessWidget {
                       icon: Icons.rate_review_rounded,
                       title: 'My Reviews',
                       onTap: () {
-                        Navigator.push(
-                          context,
+                        final currentUser = FirebaseAuth.instance.currentUser;
+                        if (currentUser == null) {
+                          _snack(context, 'Please log in again.');
+                          return;
+                        }
+
+                        Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) =>
-                                DeveloperReviewsScreen(developerId: uid),
+                            builder: (_) => DeveloperReviewsScreen(
+                              developerId: currentUser.uid,
+                            ),
                           ),
                         );
                       },
