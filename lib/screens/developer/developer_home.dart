@@ -960,9 +960,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
                     stream: _teamUnreadCountStream(uid),
                     builder: (context, teamSnapshot) {
                       if (teamSnapshot.hasError) {
-                        debugPrint(
-                          'Team unread count error: ${teamSnapshot.error}',
-                        );
+                        final error = '${teamSnapshot.error}';
+                        if (!error.contains('permission-denied')) {
+                          debugPrint('Team unread count error: $error');
+                        }
                       }
 
                       final teamUnread = teamSnapshot.data ?? 0;
