@@ -56,3 +56,5 @@ firebase-admin-key.json
 
 # Flutter app configuration
 .env
+# Firebase local cache
+.firebase/
