@@ -47,12 +47,20 @@ class DeveloperReviewsScreen extends StatelessWidget {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return const Center(
-              child: Text('Something went wrong while loading reviews.'),
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Error loading reviews:\n${snapshot.error}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.red, fontSize: 16),
+                ),
+              ),
             );
           }
 
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -175,7 +183,9 @@ class DeveloperReviewsScreen extends StatelessWidget {
                       final data = review.data();
                       final rating = (data['rating'] as num?)?.toDouble() ?? 0;
                       final comment = (data['comment'] ?? '').toString();
-                      final clientId = (data['clientId'] ?? '').toString();
+                      final clientId =
+                          (data['clientId'] ?? data['reviewerId'] ?? '')
+                              .toString();
                       final projectTitle =
                           (data['projectTitle'] ?? 'Project Review').toString();
                       final rawCreatedAt = data['createdAt'];
@@ -199,62 +209,61 @@ class DeveloperReviewsScreen extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  FutureBuilder<Map<String, String>>(
-                                    future: _getClientProfile(clientId),
-                                    builder: (context, snapshot) {
-                                      final client =
-                                          snapshot.data ??
-                                          const <String, String>{};
-                                      final clientName =
-                                          client['name'] ?? 'Client';
-                                      return Row(
-                                        children: [
-                                          SkillBridgeAvatar(
-                                            profileImageUrl:
-                                                client['profileImageUrl'],
-                                            name: clientName,
-                                            size: 40,
-                                            backgroundColor: const Color(
-                                              0xFFE0E7FF,
+                              FutureBuilder<Map<String, String>>(
+                                future: _getClientProfile(clientId),
+                                builder: (context, snapshot) {
+                                  final client =
+                                      snapshot.data ?? const <String, String>{};
+                                  final clientName =
+                                      client['name'] ?? 'Loading client...';
+
+                                  return Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      SkillBridgeAvatar(
+                                        profileImageUrl:
+                                            client['profileImageUrl'],
+                                        name: clientName,
+                                        size: 40,
+                                        backgroundColor: const Color(
+                                          0xFFE0E7FF,
+                                        ),
+                                        foregroundColor: const Color(
+                                          0xFF2563EB,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              snapshot.hasError
+                                                  ? 'Unable to load client'
+                                                  : clientName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
-                                            foregroundColor: const Color(
-                                              0xFF2563EB,
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              formattedDate,
+                                              style: const TextStyle(
+                                                color: Colors.grey,
+                                                fontSize: 13,
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  snapshot.hasError
-                                                      ? 'Unable to load client'
-                                                      : snapshot.data?['name'] ??
-                                                            'Loading client...',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  formattedDate,
-                                                  style: const TextStyle(
-                                                    color: Colors.grey,
-                                                    fontSize: 13,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ],
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                               const SizedBox(height: 16),
                               Text(

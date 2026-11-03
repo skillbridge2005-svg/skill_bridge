@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../models/project_model.dart';
 import '../../services/application_service.dart';
+import 'nda_agreement_screen.dart';
 
 class ApplyProject extends StatefulWidget {
   final String projectId;
@@ -30,6 +31,7 @@ class _ApplyProjectState extends State<ApplyProject> {
   bool _isLoading = true;
   bool _isSubmitting = false;
   bool _alreadyApplied = false;
+  bool _ndaAccepted = false;
 
   String? _errorMessage;
   ProjectModel? _project;
@@ -83,6 +85,20 @@ class _ApplyProjectState extends State<ApplyProject> {
         _errorMessage = e.toString();
       });
     }
+  }
+
+  Future<bool> _showNdaAgreement() async {
+    final accepted = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NdaAgreementScreen(
+          projectId: widget.projectId,
+          projectTitle: _project?.title ?? 'Project',
+        ),
+      ),
+    );
+
+    return accepted == true;
   }
 
   // ===========================================================================
@@ -196,6 +212,14 @@ class _ApplyProjectState extends State<ApplyProject> {
 
     if (budget == null || budget <= 0) {
       _showMessage('Enter a valid proposed budget.', isError: true);
+      return;
+    }
+
+    if (!_ndaAccepted) {
+      _showMessage(
+        'Please review and accept the NDA before submitting.',
+        isError: true,
+      );
       return;
     }
 
@@ -648,6 +672,40 @@ class _ApplyProjectState extends State<ApplyProject> {
           ),
 
           const SizedBox(height: 28),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final accepted = await _showNdaAgreement();
+                if (!accepted || !mounted) return;
+
+                setState(() => _ndaAccepted = true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('NDA accepted successfully!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+              icon: Icon(
+                _ndaAccepted
+                    ? Icons.check_circle_outline
+                    : Icons.verified_user_outlined,
+              ),
+              label: Text(
+                _ndaAccepted ? 'NDA Accepted' : 'View & Accept NDA Agreement',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2563EB),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: const BorderSide(color: Color(0xFF2563EB)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
 
           Container(
             padding: const EdgeInsets.all(15),
