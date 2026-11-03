@@ -732,15 +732,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               // ----------------------------------------
                               // REGISTER
                               // ----------------------------------------
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 4,
+                                runSpacing: 0,
                                 children: [
                                   const Text(
                                     "Don't have an account?",
                                     style: TextStyle(color: grey, fontSize: 14),
                                   ),
-
                                   TextButton(
                                     onPressed: _isLoading
                                         ? null
@@ -754,7 +755,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                               ),
                                             );
                                           },
-
                                     child: const Text(
                                       'Create Account',
                                       style: TextStyle(

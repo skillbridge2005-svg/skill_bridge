@@ -642,35 +642,37 @@ class _TeamsState extends State<Teams> {
                           ),
                         )
                       else
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedProjectId,
-                          decoration: InputDecoration(
-                            labelText: 'Project',
-                            prefixIcon: const Icon(Icons.work_outline_rounded),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          items: activeProjects.map((project) {
-                            return DropdownMenuItem<String>(
-                              value: project.id,
-                              child: SizedBox(
-                                width: 330,
-                                child: Text(
-                                  project.title,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: isCreating
-                              ? null
-                              : (value) {
-                                  setDialogState(() {
-                                    selectedProjectId = value;
-                                  });
-                                },
-                        ),
+                      
+DropdownButtonFormField<String>(
+  initialValue: selectedProjectId,
+  isExpanded: true,
+  menuMaxHeight: 300,
+  decoration: InputDecoration(
+    labelText: 'Project',
+    prefixIcon: const Icon(Icons.work_outline_rounded),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+    ),
+  ),
+  items: activeProjects.map((project) {
+    return DropdownMenuItem<String>(
+      value: project.id,
+      child: Text(
+        project.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }).toList(),
+  onChanged: isCreating
+      ? null
+      : (value) {
+          setDialogState(() {
+            selectedProjectId = value;
+          });
+        },
+),
+
                       const SizedBox(height: 16),
                       TextField(
                         controller: descriptionController,
@@ -728,8 +730,11 @@ class _TeamsState extends State<Teams> {
       },
     );
 
-    nameController.dispose();
-    descriptionController.dispose();
+WidgetsBinding.instance.addPostFrameCallback((_) {
+  nameController.dispose();
+  descriptionController.dispose();
+});
+
   }
 
   Future<void> _showInviteMemberDialog(TeamModel team) async {

@@ -113,13 +113,31 @@ class _ActiveProjectsState extends State<ActiveProjects> {
         '${date.year}';
   }
 
-  Future<ProjectModel?> _getProject(String projectId) async {
-    try {
-      return await _projectService.getProject(projectId);
-    } catch (_) {
-      return null;
-    }
+Future<int> _getActiveProjectCount(Set<String> projectIds) async {
+  if (projectIds.isEmpty) return 0;
+
+  final projects = await Future.wait(
+    projectIds.map((id) async {
+      try {
+        return await _projectService.getProject(id);
+      } catch (error) {
+        debugPrint('Active project fetch failed for $id: $error');
+        return null;
+      }
+    }),
+  );
+
+  return projects.whereType<ProjectModel>().length;
+}
+
+Future<ProjectModel?> _getProject(String projectId) async {
+  try {
+    return await _projectService.getProject(projectId);
+  } catch (error) {
+    debugPrint('Failed to fetch project $projectId: $error');
+    return null;
   }
+}
 
   void _openProject(ProjectModel project) {
     Navigator.of(context).push(

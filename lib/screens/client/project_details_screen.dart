@@ -12,11 +12,42 @@ import 'developer_review_widget.dart';
 import 'project_meeting_screen.dart';
 import 'widgets/project_payment_card.dart';
 
-class ProjectDetailsScreen extends StatelessWidget {
+class ProjectDetailsScreen extends StatefulWidget {
   final String projectId;
 
   const ProjectDetailsScreen({super.key, required this.projectId});
 
+  @override
+  State<ProjectDetailsScreen> createState() => _ProjectDetailsScreenState();
+}
+
+class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _projectStream;
+
+  // Existing code मधील projectId references साठी getter
+  String get projectId => widget.projectId;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _projectStream = FirebaseFirestore.instance
+        .collection('projects')
+        .doc(widget.projectId)
+        .snapshots();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProjectDetailsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.projectId != widget.projectId) {
+      _projectStream = FirebaseFirestore.instance
+          .collection('projects')
+          .doc(widget.projectId)
+          .snapshots();
+    }
+  }
   // ------------------------------------------------------------
   // STATUS HELPERS
   // ------------------------------------------------------------
@@ -911,10 +942,7 @@ class ProjectDetailsScreen extends StatelessWidget {
           ),
 
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance
-                .collection('projects')
-                .doc(projectId)
-                .snapshots(),
+            stream: _projectStream,
 
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {

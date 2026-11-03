@@ -722,36 +722,52 @@ class _ApplicationCard extends StatelessWidget {
               const SizedBox(height: 18),
               const Divider(height: 1, color: Color(0xFFE5E7EB)),
               const SizedBox(height: 14),
-              Row(
+              Wrap(
+                alignment: WrapAlignment.start,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 18,
+                runSpacing: 10,
                 children: [
-                  const Icon(
-                    Icons.payments_outlined,
-                    size: 18,
-                    color: Color(0xFF6B7280),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    'Proposed: ₹${application.proposedBudget.toStringAsFixed(0)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF374151),
-                    ),
-                  ),
-                  const SizedBox(width: 18),
-                  const Icon(
-                    Icons.timelapse_rounded,
-                    size: 18,
-                    color: Color(0xFF6B7280),
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      application.estimatedDuration,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.payments_outlined,
+                        size: 18,
+                        color: Color(0xFF6B7280),
                       ),
-                    ),
+                      const SizedBox(width: 7),
+                      Text(
+                        'Proposed: ₹${application.proposedBudget.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF374151),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.timelapse_rounded,
+                        size: 18,
+                        color: Color(0xFF6B7280),
+                      ),
+                      const SizedBox(width: 7),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 110),
+                        child: Text(
+                          application.estimatedDuration,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (onWithdraw != null)
                     TextButton(

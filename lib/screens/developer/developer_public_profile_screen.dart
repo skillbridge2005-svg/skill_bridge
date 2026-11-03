@@ -1,18 +1,29 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../../widgets/developer_rating_summary.dart';
 import '../../widgets/developer_reviews_list.dart';
 import '../../widgets/skillbridge_avatar.dart';
 
 /// Read-only profile view for a developer other than the signed-in user.
 /// The profile is loaded using the selected developer's UID.
-class DeveloperPublicProfileScreen extends StatelessWidget {
-  const DeveloperPublicProfileScreen({super.key, required this.developerId});
+class DeveloperPublicProfileScreen extends StatefulWidget {
+  const DeveloperPublicProfileScreen({
+    super.key,
+    required this.developerId,
+  });
 
   final String developerId;
 
+  @override
+  State<DeveloperPublicProfileScreen> createState() =>
+      _DeveloperPublicProfileScreenState();
+}
+
+class _DeveloperPublicProfileScreenState
+    extends State<DeveloperPublicProfileScreen> {
   List<String> _strings(dynamic value) {
     if (value is! List) return const [];
     return value
@@ -25,6 +36,38 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
     final value = data[key]?.toString().trim() ?? '';
     return value.isEmpty ? fallback : value;
   }
+@override
+void initState() {
+  super.initState();
+
+  // Record one view when the public profile is opened.
+  unawaited(_recordProfileView());
+}
+
+Future<void> _recordProfileView() async {
+  try {
+    final viewer = FirebaseAuth.instance.currentUser;
+
+    // Do not count unauthenticated visitors.
+    if (viewer == null) return;
+
+    // Do not count the developer viewing their own profile.
+    if (viewer.uid == widget.developerId) return;
+
+    // Avoid invalid profile-view records.
+    if (widget.developerId.trim().isEmpty) return;
+
+    await FirebaseFirestore.instance
+        .collection('profileViews')
+        .add({
+      'developerId': widget.developerId,
+      'viewerId': viewer.uid,
+      'viewedAt': FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    debugPrint('Profile view tracking failed: $e');
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -38,11 +81,15 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
       ),
       body: FutureBuilder<List<DocumentSnapshot<Map<String, dynamic>>>>(
         future: Future.wait([
-          FirebaseFirestore.instance.collection('users').doc(developerId).get(),
-          FirebaseFirestore.instance
-              .collection('developerProfiles')
-              .doc(developerId)
-              .get(),
+    FirebaseFirestore.instance
+    .collection('users')
+    .doc(widget.developerId)
+    .get(),
+
+FirebaseFirestore.instance
+    .collection('developerProfiles')
+    .doc(widget.developerId)
+    .get(),
         ]),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -195,9 +242,9 @@ class DeveloperPublicProfileScreen extends StatelessWidget {
               ),
               _linkSection(context, 'Resume', _value(profile, 'resumeUrl', '')),
               const SizedBox(height: 24),
-              DeveloperRatingSummary(developerId: developerId),
+              DeveloperRatingSummary(developerId: widget.developerId),
               const SizedBox(height: 24),
-              DeveloperReviewsList(developerId: developerId),
+              DeveloperReviewsList(developerId: widget.developerId),
             ],
           );
         },
