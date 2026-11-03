@@ -30,6 +30,23 @@ class _DeveloperReviewWidgetState extends State<DeveloperReviewWidget> {
 
   static const Color _primary = Color(0xFF4F46E5);
   static const Color _green = Color(0xFF16A34A);
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _reviewStream;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _reviewStream = _reviewRef.snapshots();
+  }
+
+  @override
+  void didUpdateWidget(covariant DeveloperReviewWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.projectId != widget.projectId) {
+      _reviewStream = _reviewRef.snapshots();
+    }
+  }
 
   bool get _isCompleted =>
       widget.projectStatus.trim().toLowerCase() == 'completed' ||
@@ -213,7 +230,7 @@ class _DeveloperReviewWidgetState extends State<DeveloperReviewWidget> {
     }
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _reviewRef.snapshots(),
+      stream: _reviewStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
