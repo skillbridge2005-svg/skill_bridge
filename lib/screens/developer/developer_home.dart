@@ -988,7 +988,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                 if (value == 'logout') {
                   _logout();
                 } else if (value == 'profile') {
-                  _selectNav(6);
+                  _selectNav(5);
                 } else if (value == 'settings') {
                   Navigator.push(
                     context,
@@ -1305,7 +1305,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
             const SizedBox(width: 14),
             if (!mobile)
               OutlinedButton(
-                onPressed: () => _selectNav(6),
+                onPressed: () => _selectNav(5),
                 child: const Text('Complete Profile'),
               ),
             IconButton(
@@ -2868,7 +2868,7 @@ class _DeveloperHomeState extends State<DeveloperHome>
                   ),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    _selectNav(6);
+                    _selectNav(5);
                   },
                 ),
 
@@ -3079,19 +3079,28 @@ class _DeveloperHomeState extends State<DeveloperHome>
     );
   }
 
-  void _showProjectDialog(_ProjectData project) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
+
+void _showProjectDialog(_ProjectData project) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 24,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 650),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(dialogContext).height * 0.80,
           child: Padding(
-            padding: const EdgeInsets.all(26),
+            padding: const EdgeInsets.all(20),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Project header
                 Row(
                   children: [
                     _ProjectIcon(icon: project.icon),
@@ -3102,76 +3111,135 @@ class _DeveloperHomeState extends State<DeveloperHome>
                         children: [
                           Text(
                             project.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 21,
+                              fontSize: 19,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             project.client,
-                            style: const TextStyle(color: _AppColors.muted),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _AppColors.muted,
+                            ),
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(width: 5),
                     _MatchBadge(score: project.match),
                   ],
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  project.description,
-                  style: const TextStyle(color: _AppColors.muted, height: 1.5),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Why you match',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: project.skills
-                      .map((skill) => _SkillChip(skill, checked: true))
-                      .toList(),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.payments_outlined,
-                      size: 18,
-                      color: _AppColors.muted,
+
+                const SizedBox(height: 16),
+                const Divider(),
+
+                // Scrollable project information
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          project.description,
+                          style: const TextStyle(
+                            color: _AppColors.muted,
+                            height: 1.5,
+                          ),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        const Text(
+                          'Why you match',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        Wrap(
+                          spacing: 7,
+                          runSpacing: 7,
+                          children: project.skills
+                              .map(
+                                (skill) => _SkillChip(
+                                  skill,
+                                  checked: true,
+                                ),
+                              )
+                              .toList(),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        Wrap(
+                          spacing: 18,
+                          runSpacing: 10,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.payments_outlined,
+                                  size: 18,
+                                  color: _AppColors.muted,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(project.budget),
+                              ],
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.public_rounded,
+                                  size: 18,
+                                  color: _AppColors.muted,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(project.mode),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    Text(project.budget),
-                    const SizedBox(width: 18),
-                    const Icon(
-                      Icons.public_rounded,
-                      size: 18,
-                      color: _AppColors.muted,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(project.mode),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 22),
+
+                const SizedBox(height: 12),
+                const Divider(),
+
+                // Fixed action buttons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                      },
                       child: const Text('Close'),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _showApplyDialog(project);
-                      },
-                      icon: const Icon(Icons.send_rounded, size: 17),
-                      label: const Text('Apply now'),
+                    Flexible(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.pop(dialogContext);
+                          _showApplyDialog(project);
+                        },
+                        icon: const Icon(
+                          Icons.send_rounded,
+                          size: 17,
+                        ),
+                        label: const Text('Apply now'),
+                      ),
                     ),
                   ],
                 ),
@@ -3180,8 +3248,10 @@ class _DeveloperHomeState extends State<DeveloperHome>
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   Future<void> _showApplyDialog(_ProjectData project) async {
     final formKey = GlobalKey<FormState>();
