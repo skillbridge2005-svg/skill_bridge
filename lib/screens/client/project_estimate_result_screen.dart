@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdf/pdf.dart';
@@ -1164,7 +1165,22 @@ class _ProjectEstimateResultScreenState
         .replaceAll('\u201D', '"')
         .replaceAll('\u2026', '...')
         .replaceAll('\u2022', '-')
-        .replaceAll('\u20B9', 'INR');
+        .replaceAll('\u20B9', 'INR')
+        .replaceAll('\u0000', '')
+        .runes
+        .map((codeUnit) {
+          if (codeUnit == 9 || codeUnit == 10 || codeUnit == 13) {
+            return String.fromCharCode(codeUnit);
+          }
+          if (codeUnit >= 32 && codeUnit <= 126) {
+            return String.fromCharCode(codeUnit);
+          }
+          if (codeUnit >= 160 && codeUnit <= 255) {
+            return String.fromCharCode(codeUnit);
+          }
+          return '?';
+        })
+        .join();
   }
 
   String _pdfPrettyLabel(String value) {
@@ -1313,9 +1329,23 @@ class _ProjectEstimateResultScreenState
           filename: _requirementsPdfFileName,
         );
       } else {
-        await Printing.layoutPdf(
-          name: _requirementsPdfFileName,
-          onLayout: (_) async => bytes,
+        await FileSaver.instance.saveFile(
+          name: _requirementsPdfFileName.replaceAll(
+            RegExp(r'\.pdf$', caseSensitive: false),
+            '',
+          ),
+          bytes: bytes,
+          fileExtension: 'pdf',
+          mimeType: MimeType.pdf,
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('PDF saved successfully.'),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } catch (error, stackTrace) {
@@ -1364,7 +1394,7 @@ class _ProjectEstimateResultScreenState
                 ),
                 title: const Text('Download PDF'),
                 subtitle: const Text(
-                  'Open the print dialog to save the document as PDF.',
+                  'Choose where to save the generated PDF on your device.',
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);

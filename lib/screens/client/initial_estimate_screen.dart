@@ -1,6 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class InitialEstimateScreen extends StatefulWidget {
   final String title;
@@ -36,6 +42,7 @@ class _InitialEstimateScreenState extends State<InitialEstimateScreen> {
   };
 
   bool _loading = false;
+  bool _pdfLoading = false;
   String? _errorMessage;
   _ProjectEstimate? _estimate;
 
@@ -179,6 +186,169 @@ class _InitialEstimateScreenState extends State<InitialEstimateScreen> {
       (match) => ',',
     );
     return '₹$formatted';
+  }
+
+  String _pdfSafeText(dynamic value) {
+    final text = value?.toString() ?? '';
+    return text.replaceAll('\u20b9', 'INR').replaceAll('\u0000', '').runes.map((
+      codeUnit,
+    ) {
+      if (codeUnit == 9 || codeUnit == 10 || codeUnit == 13) {
+        return String.fromCharCode(codeUnit);
+      }
+      if (codeUnit >= 32 && codeUnit <= 126) {
+        return String.fromCharCode(codeUnit);
+      }
+      if (codeUnit >= 160 && codeUnit <= 255) {
+        return String.fromCharCode(codeUnit);
+      }
+      return '?';
+    }).join();
+  }
+
+  Future<Uint8List> _generateEstimatePdf() async {
+    final estimate = _estimate!;
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(36),
+        build: (context) => [
+          pw.Text(
+            'SkillBridge Project Estimate',
+            style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            _pdfSafeText(widget.title),
+            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text('Complexity: ${estimate.complexity}'),
+          pw.Text('Summary: ${_pdfSafeText(estimate.summary)}'),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            'Development effort and cost',
+            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          for (final item in [
+            (
+              'Frontend Development',
+              estimate.frontendHours,
+              _hourlyRates['frontend']!,
+            ),
+            (
+              'Backend Development',
+              estimate.backendHours,
+              _hourlyRates['backend']!,
+            ),
+            (
+              'Database Integration',
+              estimate.databaseHours,
+              _hourlyRates['database']!,
+            ),
+            (
+              'Testing and Debugging',
+              estimate.testingHours,
+              _hourlyRates['testing']!,
+            ),
+            (
+              'Deployment',
+              estimate.deploymentHours,
+              _hourlyRates['deployment']!,
+            ),
+          ])
+            pw.Text('${item.$1}: ${item.$2.toStringAsFixed(0)} hrs'),
+          pw.SizedBox(height: 8),
+          pw.Text('Base development cost: ${_formatCost(_baseCost)}'),
+          pw.Text('Contingency: ${_formatCost(_contingencyAmount)}'),
+          pw.Text(
+            'Adjusted estimate: ${_formatCost(_contingencyAdjustedCost)}',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 16),
+          pw.Text('Estimated duration: ${estimate.durationWeeks} weeks'),
+          pw.Text('Suggested team size: ${estimate.teamSize} people'),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            'Assumptions',
+            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+          ),
+          for (final assumption in estimate.assumptions)
+            pw.Text('- ${_pdfSafeText(assumption)}'),
+          pw.SizedBox(height: 16),
+          pw.Text('Technologies: ${_pdfSafeText(widget.technologies)}'),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            'This is an initial planning estimate, not a final quotation. '
+            'Actual cost and delivery time may change after developers review the scope.',
+            style: const pw.TextStyle(fontSize: 9),
+          ),
+        ],
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  Future<void> _downloadPdf() async {
+    if (_estimate == null || _pdfLoading) return;
+    setState(() => _pdfLoading = true);
+
+    try {
+      final bytes = await _generateEstimatePdf();
+      final safeTitle = widget.title
+          .replaceAll(RegExp(r'[^\w\s-]'), '')
+          .trim()
+          .replaceAll(RegExp(r'\s+'), '_');
+      final fileName = safeTitle.isEmpty
+          ? 'SkillBridge_Project_Estimate.pdf'
+          : 'SkillBridge_${safeTitle}_Estimate.pdf';
+
+      await FileSaver.instance.saveFile(
+        name: fileName.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''),
+        bytes: bytes,
+        fileExtension: 'pdf',
+        mimeType: MimeType.pdf,
+      );
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF downloaded successfully')),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('PDF download error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unable to download PDF: $error')));
+    } finally {
+      if (mounted) setState(() => _pdfLoading = false);
+    }
+  }
+
+  Future<void> _sharePdf() async {
+    if (_estimate == null || _pdfLoading) return;
+    setState(() => _pdfLoading = true);
+
+    try {
+      final bytes = await _generateEstimatePdf();
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'SkillBridge_Project_Estimate.pdf',
+      );
+    } catch (error, stackTrace) {
+      debugPrint('PDF share error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Unable to share PDF: $error')));
+    } finally {
+      if (mounted) setState(() => _pdfLoading = false);
+    }
   }
 
   String _taskLabel(String field) {
@@ -400,6 +570,26 @@ class _InitialEstimateScreenState extends State<InitialEstimateScreen> {
             'the scope. Hosting fees, paid API usage, taxes, and other external '
             'expenses are not included.',
           ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _pdfLoading ? null : _downloadPdf,
+                icon: const Icon(Icons.download_rounded),
+                label: Text(_pdfLoading ? 'Preparing...' : 'Download PDF'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _pdfLoading ? null : _sharePdf,
+                icon: const Icon(Icons.share_rounded),
+                label: const Text('Share PDF'),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         OutlinedButton.icon(
