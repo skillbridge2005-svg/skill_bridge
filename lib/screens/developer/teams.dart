@@ -1284,20 +1284,25 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
 
 
 Future<void> _renameTeam(TeamModel team) async {
-  final controller = TextEditingController(text: team.name);
+  // Keep the edited value as local state instead of owning a controller.
+  // This avoids using a TextEditingController while the dialog is disposing.
+  String editedName = team.name;
 
   final newName = await showDialog<String>(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: const Text('Rename Team'),
-      content: TextField(
-        controller: controller,
+      content: TextFormField(
+        initialValue: team.name,
         autofocus: true,
         maxLength: 60,
         decoration: const InputDecoration(
           labelText: 'Team name',
           border: OutlineInputBorder(),
         ),
+        onChanged: (value) {
+          editedName = value;
+        },
       ),
       actions: [
         TextButton(
@@ -1306,7 +1311,7 @@ Future<void> _renameTeam(TeamModel team) async {
         ),
         FilledButton(
           onPressed: () {
-            final value = controller.text.trim();
+            final value = editedName.trim();
             if (value.isNotEmpty) {
               Navigator.pop(dialogContext, value);
             }
@@ -1316,8 +1321,6 @@ Future<void> _renameTeam(TeamModel team) async {
       ],
     ),
   );
-
-  controller.dispose();
 
   if (newName == null ||
       newName.trim().isEmpty ||
@@ -1570,9 +1573,12 @@ Future<void> _renameTeam(TeamModel team) async {
               ),
               if (isOwner)
   TextButton.icon(
-    onPressed: () {
+    onPressed: () async {
       Navigator.of(dialogContext).pop();
-      _renameTeam(team);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      if (!mounted) return;
+      await _renameTeam(team);
     },
     icon: const Icon(Icons.edit_outlined),
     label: const Text('Rename Team'),
