@@ -1020,6 +1020,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
               // Support manually entered and AI-generated budgets.
               final budget = _firstValidValue([
+                data['finalBudget'],
                 data['budget'],
                 data['amount'],
                 estimate['totalCost'],
@@ -1336,6 +1337,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                               projectId: projectId,
                               projectTotal: _parseProjectAmount(
                                 _firstValidValue([
+                                  data['finalBudget'],
                                   data['budget'],
                                   data['amount'],
                                   data['projectAmount'],
@@ -1359,6 +1361,7 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
                                   projectTitle: title,
                                   projectTotal: _parseProjectAmount(
                                     _firstValidValue([
+                                      data['finalBudget'],
                                       data['budget'],
                                       data['amount'],
                                       data['projectAmount'],

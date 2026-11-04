@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:skill_bridge/models/project_model.dart';
 
 import '../../widgets/skillbridge_avatar.dart';
+import '../../services/application_service.dart';
 import '../developer/developer_public_profile_screen.dart';
 
 class _RecommendedApplicant {
@@ -35,6 +36,7 @@ class ClientApplicationsScreen extends StatelessWidget {
   });
 
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final ApplicationService _applicationService = ApplicationService();
 
   Color _statusColor(String status, ColorScheme colors) {
     switch (status.toLowerCase()) {
@@ -87,6 +89,21 @@ class ClientApplicationsScreen extends StatelessWidget {
     }
 
     try {
+      if (newStatus == 'accepted') {
+        await _applicationService.acceptApplication(
+          applicationId: applicationId,
+          projectId: projectId,
+        );
+
+        if (context.mounted) {
+          _showMessage(
+            context,
+            'Application accepted and the proposed budget is now final.',
+          );
+        }
+        return;
+      }
+
       final projectRef = _firestore.collection('projects').doc(projectId);
       final applicationRef = _firestore
           .collection('applications')
@@ -133,53 +150,10 @@ class ClientApplicationsScreen extends StatelessWidget {
 
         final now = FieldValue.serverTimestamp();
 
-        if (newStatus == 'accepted') {
-          final existingDeveloperId = (projectData['developerId'] ?? '')
-              .toString()
-              .trim();
-          final projectStatus = (projectData['status'] ?? '')
-              .toString()
-              .trim()
-              .toLowerCase();
-
-          if (existingDeveloperId.isNotEmpty || projectStatus == 'active') {
-            throw Exception('PROJECT_ALREADY_ASSIGNED');
-          }
-
-          final applicantDeveloperId = (applicationData['developerId'] ?? '')
-              .toString()
-              .trim();
-
-          if (applicantDeveloperId.isEmpty) {
-            throw Exception('INVALID_DEVELOPER');
-          }
-
-          transaction.update(applicationRef, {
-            'status': 'accepted',
-            'updatedAt': now,
-          });
-
-          final agreedDuration = (applicationData['estimatedDuration'] ?? '')
-              .toString()
-              .trim();
-
-          if (agreedDuration.isEmpty) {
-            throw Exception('MISSING_PROJECT_DURATION');
-          }
-
-          transaction.update(projectRef, {
-            'developerId': applicantDeveloperId,
-            'status': 'active',
-            'startedAt': now,
-            'duration': agreedDuration,
-            'updatedAt': now,
-          });
-        } else {
-          transaction.update(applicationRef, {
-            'status': newStatus,
-            'updatedAt': now,
-          });
-        }
+        transaction.update(applicationRef, {
+          'status': newStatus,
+          'updatedAt': now,
+        });
       });
 
       if (context.mounted) {
@@ -190,6 +164,9 @@ class ClientApplicationsScreen extends StatelessWidget {
               : 'Application ${_statusLabel(newStatus).toLowerCase()} successfully.',
         );
       }
+    } on ApplicationServiceException catch (e) {
+      if (!context.mounted) return;
+      _showMessage(context, e.message);
     } catch (e) {
       if (!context.mounted) return;
 

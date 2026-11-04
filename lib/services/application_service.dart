@@ -375,6 +375,118 @@ class ApplicationService {
     });
   }
 
+  Future<void> acceptApplication({
+    required String applicationId,
+    required String projectId,
+  }) async {
+    if (applicationId.trim().isEmpty || projectId.trim().isEmpty) {
+      throw const ApplicationServiceException(
+        'Application and project IDs are required.',
+      );
+    }
+
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      throw const ApplicationServiceException(
+        'Please log in to accept this application.',
+      );
+    }
+
+    final applicationRef = _applicationsCollection.doc(applicationId);
+    final projectRef = _firestore.collection('projects').doc(projectId);
+    final now = FieldValue.serverTimestamp();
+
+    await _firestore.runTransaction((transaction) async {
+      final applicationSnapshot = await transaction.get(applicationRef);
+      final projectSnapshot = await transaction.get(projectRef);
+
+      if (!applicationSnapshot.exists) {
+        throw const ApplicationServiceException('Application not found.');
+      }
+      if (!projectSnapshot.exists) {
+        throw const ApplicationServiceException('Project not found.');
+      }
+
+      final applicationData = applicationSnapshot.data();
+      final projectData = projectSnapshot.data();
+      if (applicationData == null || projectData == null) {
+        throw const ApplicationServiceException(
+          'Application or project data is invalid.',
+        );
+      }
+      if (applicationData['clientId'] != currentUser.uid ||
+          applicationData['projectId'] != projectId ||
+          projectData['clientId'] != currentUser.uid) {
+        throw const ApplicationServiceException(
+          'You are not authorized to accept this application.',
+        );
+      }
+
+      final proposedBudgetValue = applicationData['proposedBudget'];
+      final proposedBudget = proposedBudgetValue is num
+          ? proposedBudgetValue.toDouble()
+          : double.tryParse(proposedBudgetValue?.toString() ?? '');
+      if (proposedBudget == null || proposedBudget <= 0) {
+        throw const ApplicationServiceException(
+          'The application has an invalid proposed budget.',
+        );
+      }
+
+      final developerId = applicationData['developerId']?.toString().trim() ?? '';
+      if (developerId.isEmpty) {
+        throw const ApplicationServiceException(
+          'The application has an invalid developer ID.',
+        );
+      }
+
+      final agreedDuration = applicationData['estimatedDuration']
+              ?.toString()
+              .trim() ??
+          '';
+      if (agreedDuration.isEmpty) {
+        throw const ApplicationServiceException(
+          'The application does not contain an estimated duration.',
+        );
+      }
+
+      final status = applicationData['status']?.toString().toLowerCase() ?? '';
+      if (status != 'pending' && status != 'shortlisted') {
+        throw const ApplicationServiceException(
+          'This application has already been processed.',
+        );
+      }
+
+      final existingDeveloperId =
+          projectData['developerId']?.toString().trim() ??
+          projectData['selectedDeveloperId']?.toString().trim() ??
+          '';
+      if (existingDeveloperId.isNotEmpty ||
+          projectData['status']?.toString().toLowerCase() == 'active') {
+        throw const ApplicationServiceException(
+          'A developer has already been assigned to this project.',
+        );
+      }
+
+      transaction.update(applicationRef, {
+        'status': 'accepted',
+        'acceptedAt': now,
+        'updatedAt': now,
+      });
+      transaction.update(projectRef, {
+        'developerId': developerId,
+        'selectedDeveloperId': developerId,
+        'status': 'active',
+        'projectStatus': 'in_progress',
+        'budget': proposedBudget,
+        'finalBudget': proposedBudget,
+        'duration': agreedDuration,
+        'startedAt': now,
+        'budgetAgreedAt': now,
+        'updatedAt': now,
+      });
+    });
+  }
+
   // ===========================================================================
   // COUNTS
   // ===========================================================================
